@@ -10,7 +10,7 @@ import { Footer } from '@/components/Footer';
 import { WaitlistForm } from '@/components/WaitlistForm';
 import { LifecycleLoop } from '@/components/LifecycleLoop';
 
-export default function Home() {
+export default async function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       <Masthead
