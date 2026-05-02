@@ -4,23 +4,34 @@
 // Once authed, redirects sent to /studio (the Writer surface, in time).
 
 import Link from 'next/link';
+import { auth } from '@clerk/nextjs/server';
 import { Masthead } from '@/components/Masthead';
 import { Footer } from '@/components/Footer';
 import { WaitlistForm } from '@/components/WaitlistForm';
 import { LifecycleLoop } from '@/components/LifecycleLoop';
 
-export default function Home() {
+export default async function Home() {
+  const { userId } = await auth();
   return (
     <div className="min-h-screen flex flex-col">
       <Masthead
         rightSlot={
           <div className="flex items-center gap-5">
-            <Link
-              href="/sign-in"
-              className="text-ink-soft hover:text-accent transition-colors"
-            >
-              Sign in
-            </Link>
+            {userId ? (
+              <Link
+                href="/studio"
+                className="text-ink-soft hover:text-accent transition-colors"
+              >
+                Open studio →
+              </Link>
+            ) : (
+              <Link
+                href="/sign-in"
+                className="text-ink-soft hover:text-accent transition-colors"
+              >
+                Sign in
+              </Link>
+            )}
             <span className="text-tag/60 hidden sm:inline">·</span>
             <span className="text-tag hidden sm:inline">opening soon</span>
           </div>
@@ -44,7 +55,7 @@ export default function Home() {
               partner — a place where your thinking is captured, evolved, and
               turned into writing.{' '}
               <span className="text-accent">
-                The studio’s not open yet. Leave your address and we’ll write
+                The studio's not open yet. Leave your address and we'll write
                 when it is.
               </span>
             </p>
@@ -69,7 +80,7 @@ export default function Home() {
               <em className="italic font-normal text-accent">from</em> you.
             </h2>
             <p className="font-serif text-[19px] leading-[1.65] text-ink-soft mb-6">
-              Most “second brain” tools are passive. They store; they do not
+              Most "second brain" tools are passive. They store; they do not
               produce. Most AI writing tools are productive. They generate; they
               do not think with you. Folio sits in the seam — the place where
               thinking matures into writing, slowly, with care, in a way you can
@@ -158,8 +169,8 @@ export default function Home() {
               </div>
               <p className="font-sans text-[15px] leading-[1.6] text-ink-soft">
                 The AI in the right rail when you draft. Sources from your bank.
-                Suggests angles from adjacent ideas. Surfaces tensions you’ve
-                already held. Holds your voice. Spars when you’re stuck.{' '}
+                Suggests angles from adjacent ideas. Surfaces tensions you've
+                already held. Holds your voice. Spars when you're stuck.{' '}
                 <em className="italic text-ink">Never writes for you.</em>
               </p>
             </div>
@@ -188,7 +199,7 @@ export default function Home() {
 
           <div className="max-w-[900px] mx-auto bg-paper border border-rule px-8 md:px-14 py-14 text-center">
             <div className="font-sans text-[11px] tracking-[0.22em] uppercase text-accent font-bold mb-7">
-              ☘ The closed loop
+              ▸ The closed loop
             </div>
             <LifecycleLoop />
           </div>
@@ -199,11 +210,11 @@ export default function Home() {
       <section>
         <div className="max-w-[1200px] mx-auto px-[7%] py-32 text-center">
           <div className="font-mono text-[12px] tracking-[0.22em] uppercase text-accent font-bold mb-8">
-            ☘ When the studio opens
+            ▸ When the studio opens
           </div>
           <h2 className="font-serif font-normal text-[clamp(36px,5vw,64px)] leading-[1.05] tracking-tightest text-ink mb-6 max-w-[22ch] mx-auto">
-            We’ll write{' '}
-            <em className="italic font-light text-accent">when it’s open.</em>
+            We'll write{' '}
+            <em className="italic font-light text-accent">when it's open.</em>
           </h2>
           <p className="font-serif font-light text-[19px] leading-[1.55] text-ink-soft max-w-[50ch] mx-auto mb-10">
             One email. Probably in a few weeks. Nothing in between.
