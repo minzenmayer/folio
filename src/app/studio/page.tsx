@@ -7,9 +7,16 @@ import Link from 'next/link';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { db, captures, ideas } from '@/db';
 import { requireUser } from '@/lib/auth';
-import { currentUser } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
 
 export default async function StudioHome() {
+  // Auth check at top so redirect() fires before any RSC streaming begins.
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
+    redirect('/sign-in');
+  }
+
   const user = await requireUser();
   const clerk = await currentUser();
   const firstName = clerk?.firstName || user.name?.split(' ')[0] || 'friend';
