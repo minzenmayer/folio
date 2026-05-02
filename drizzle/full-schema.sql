@@ -129,4 +129,18 @@ CREATE TABLE IF NOT EXISTS assistant_offers (
   created_at timestamptz DEFAULT now()
 );
 
--- Done. You should now have 8 tables visible in Neon's Tables panel.
+-- ─── DRAFTS ───  (Sprint 5: The Page)
+CREATE TABLE IF NOT EXISTS drafts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title text,
+  content_json jsonb NOT NULL,
+  idea_id uuid REFERENCES ideas(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_user_updated
+  ON drafts(user_id, updated_at);
+
+-- Done. You should now have 9 tables visible in Neon's Tables panel.

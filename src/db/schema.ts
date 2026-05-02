@@ -29,7 +29,7 @@ export const users = pgTable('users', {
 
 // ─────────────────────────────────────────────
 // IDEAS — the foundational primitive
-// ─────────────────────────────────────────────
+// ────────────────────────────────────────────
 export const ideas = pgTable(
   'ideas',
   {
@@ -227,6 +227,46 @@ export const assistantOffers = pgTable('assistant_offers', {
 });
 
 // ─────────────────────────────────────────────
+// DRAFTS — Sprint 5: The Page
+// In-progress writing surfaces. Tiptap doc serialized as ProseMirror JSON.
+// May mature into an idea + artifact later; nullable ideaId reflects that.
+// ─────────────────────────────────────────────
+export const drafts = pgTable(
+  'drafts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // Implicit title — derived from the first H1 in contentJson on each save.
+    // Nullable so empty drafts read as "Untitled" in the rail.
+    title: text('title'),
+
+    // Tiptap doc as ProseMirror JSON (default empty doc on insert).
+    contentJson: jsonb('content_json').notNull(),
+
+    // Drafts can mature into ideas. Until then, no parent.
+    ideaId: uuid('idea_id').references(() => ideas.id, {
+      onDelete: 'set null',
+    }),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userUpdatedIdx: index('idx_drafts_user_updated').on(
+      table.userId,
+      table.updatedAt
+    ),
+  })
+);
+
+// ─────────────────────────────────────────────
 // Type exports for inference
 // ─────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
@@ -237,8 +277,10 @@ export type Thread = typeof threads.$inferSelect;
 export type ThreadEntry = typeof threadEntries.$inferSelect;
 export type IdeaEdge = typeof ideaEdges.$inferSelect;
 export type AssistantOffer = typeof assistantOffers.$inferSelect;
+export type Draft = typeof drafts.$inferSelect;
 
 export type NewUser = typeof users.$inferInsert;
 export type NewIdea = typeof ideas.$inferInsert;
 export type NewCapture = typeof captures.$inferInsert;
 export type NewArtifact = typeof artifacts.$inferInsert;
+export type NewDraft = typeof drafts.$inferInsert;
