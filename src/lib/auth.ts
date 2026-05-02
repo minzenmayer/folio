@@ -3,13 +3,14 @@
 // Handles the race where the webhook hasn't fired yet by creating the row inline.
 
 import { auth, currentUser } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
 import { db, users, type User } from '@/db';
 import { eq } from 'drizzle-orm';
 
 export async function requireUser(): Promise<User> {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
-    throw new Error('Not authenticated');
+    redirect('/sign-in');
   }
 
   const [existing] = await db
@@ -22,7 +23,9 @@ export async function requireUser(): Promise<User> {
 
   // Webhook hasn't fired yet — mirror inline.
   const clerk = await currentUser();
-  if (!clerk) throw new Error('Clerk user not resolvable');
+  if (!clerk) {
+    redirect('/sign-in');
+  }
 
   const email = clerk.emailAddresses[0]?.emailAddress || '';
   const name =
