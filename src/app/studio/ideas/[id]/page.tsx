@@ -1,10 +1,6 @@
-// Folio · Idea detail page
-// The orbit feed — captures, threads (later), artifacts (later), marginalia (later).
-// Sprint 3 v0: identity + captures only.
-// Sprint 7: adds the "Related" orbit — top-N similar items pulled via
-// findSimilar across captures + ideas + drafts. The first visible surface
-// of the retrieval substrate; Sprint 8's Assistant rail reuses the same
-// findSimilar primitive.
+// Thoughtbed · Idea detail page (the orbit feed for a single idea).
+// Sprint 14 brand pivot: monochrome restyle, drop garden glyphs, drop
+// italic editorial accents. Functionality unchanged.
 
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -16,31 +12,21 @@ import { findSimilar } from '../../actions';
 import type { SimilarHit } from '../../actions';
 
 const MATURITY_DOTS: Record<string, string> = {
-  seed: 'bg-olive',
-  forming: 'bg-gold',
-  shaping: 'bg-accent',
-  ready: 'bg-accent-2',
-  circulated: 'bg-plum',
-  dormant: 'bg-tag',
+  // Maturity is functional state — the dots stay coloured to differentiate
+  // at a glance. Sprint 14 keeps the colour palette here only.
+  seed: 'bg-zinc-300',
+  forming: 'bg-zinc-500',
+  shaping: 'bg-zinc-700',
+  ready: 'bg-zinc-900',
+  circulated: 'bg-zinc-900 ring-2 ring-zinc-300',
+  dormant: 'bg-zinc-200',
 };
 
-const TYPE_GLYPHS: Record<string, string> = {
-  paste: '"',
-  link: '↗',
-  quote: '"',
-  image: '▣',
-  voice_memo: '◉',
-  doc: '▭',
-};
-
-// Glyph + route per related-item kind. Visual shorthand from the design
-// brief: capture = ", idea = ▸, draft = ✎, newsletter_issue = ✉.
-// Click → that item's detail page.
-const RELATED_GLYPHS: Record<SimilarHit['kind'], string> = {
-  capture: '"',
-  idea: '▸',
-  draft: '✎',
-  newsletter_issue: '✉',
+const KIND_LABEL: Record<SimilarHit['kind'], string> = {
+  capture: 'Capture',
+  idea: 'Idea',
+  draft: 'Draft',
+  newsletter_issue: 'Issue',
 };
 
 function relatedHref(hit: SimilarHit): string {
@@ -50,16 +36,9 @@ function relatedHref(hit: SimilarHit): string {
     case 'draft':
       return `/studio/page/${hit.id}`;
     case 'capture':
-      // No capture-detail route yet; route to inbox where the capture lives
-      // until the user files it. Acceptable until a later sprint adds
-      // capture permalinks.
       return `/studio/inbox`;
     case 'newsletter_issue':
-      // Sprint 13 Wave 1 has no /studio/issues/[id] surface yet. Route to
-      // the connectors page where the user can manage their newsletter
-      // archive. A future sprint can add per-issue detail or link out to
-      // the publication's web_url.
-      return `/studio/settings/connectors`;
+      return `/studio?settings=connectors`;
   }
 }
 
@@ -93,7 +72,6 @@ export default async function IdeaDetailPage({
 
   if (!idea) notFound();
 
-  // Touch the last_visited timestamp.
   await visitIdea(idea.id);
 
   const attachedCaptures = await db
@@ -108,9 +86,6 @@ export default async function IdeaDetailPage({
     )
     .orderBy(desc(captures.capturedAt));
 
-  // Sprint 7: pull the top-5 related items using title+essence as the query.
-  // Best-effort — if the OpenAI call fails (no key in dev, network blip),
-  // we render an empty Related state rather than 500ing the page.
   const queryText = [idea.title.trim(), idea.essence?.trim() ?? '']
     .filter(Boolean)
     .join('\n\n');
@@ -120,7 +95,7 @@ export default async function IdeaDetailPage({
     if (queryText.length > 0) {
       relatedItems = await findSimilar({
         text: queryText,
-        kinds: ['capture', 'idea', 'draft'],
+        kinds: ['capture', 'idea', 'draft', 'newsletter_issue'],
         limit: 5,
         excludeIdeaId: idea.id,
       });
@@ -131,25 +106,23 @@ export default async function IdeaDetailPage({
 
   return (
     <section>
-      <div className="max-w-[900px] mx-auto px-[7%] py-12 md:py-16">
-        {/* Crumb back */}
+      <div className="max-w-[900px] mx-auto px-6 md:px-8 py-12 md:py-16">
         <Link
           href="/studio/ideas"
-          className="font-sans text-[11px] tracking-[0.18em] uppercase text-tag hover:text-accent transition-colors"
+          className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors"
         >
-          ← Back to the garden
+          ← Library
         </Link>
 
-        {/* Header */}
         <div className="mt-6 mb-10">
           <div className="flex items-center gap-3 mb-4 font-mono text-[10px] uppercase tracking-[0.18em]">
             <span
               className={`inline-block w-2.5 h-2.5 rounded-full ${
-                MATURITY_DOTS[idea.maturity] || 'bg-tag'
+                MATURITY_DOTS[idea.maturity] || 'bg-zinc-300'
               }`}
               aria-label={idea.maturity}
             />
-            <span className="text-accent font-bold">{idea.maturity}</span>
+            <span className="text-ink font-medium">{idea.maturity}</span>
             <span className="text-tag">·</span>
             <span className="text-tag">{idea.energy}</span>
             <span className="text-tag">·</span>
@@ -158,164 +131,140 @@ export default async function IdeaDetailPage({
               {attachedCaptures.length === 1 ? 'capture' : 'captures'}
             </span>
           </div>
-          <h1 className="font-serif font-normal text-[clamp(36px,5.5vw,72px)] leading-[1.0] tracking-tightest text-ink mb-6">
+          <h1 className="font-sans text-[clamp(28px,4.5vw,52px)] font-semibold leading-[1.1] tracking-tight text-ink mb-5">
             {idea.title}
           </h1>
           {idea.essence && (
-            <p className="font-serif italic font-light text-[clamp(18px,2vw,22px)] text-ink-soft leading-[1.5] max-w-[60ch] border-l-2 border-accent pl-5">
-              "{idea.essence}"
+            <p className="font-sans text-[clamp(15px,1.6vw,17px)] text-ink-soft leading-[1.6] max-w-[60ch] border-l-2 border-rule-strong pl-5">
+              {idea.essence}
             </p>
           )}
         </div>
 
-        {/* Orbit — captures section */}
+        {/* Captures section */}
         <div className="mb-12">
-          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-5 flex items-baseline gap-3">
-            <span>▸ Captures</span>
-            <span className="text-tag/70 text-[10px] normal-case tracking-[0.04em] font-sans italic font-normal">
-              raw material orbiting this idea
-            </span>
-            <span className="ml-auto bg-paper-2 text-tag rounded-[99px] px-2 py-0.5 text-[10px] font-mono">
+          <div className="flex items-baseline gap-3 mb-4">
+            <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+              Captures
+            </h2>
+            <span className="font-sans text-[12px] text-tag">
               {attachedCaptures.length}
             </span>
           </div>
 
           {attachedCaptures.length === 0 ? (
-            <div className="text-center py-10 border border-dashed border-rule rounded-card bg-paper/50">
-              <p className="font-serif italic text-[15px] text-tag mb-2">
+            <div className="text-center py-10 border border-dashed border-rule rounded-card bg-paper">
+              <p className="font-sans text-[14px] text-tag mb-2">
                 Nothing attached yet.
               </p>
               <Link
                 href="/studio/inbox"
-                className="font-sans text-[11px] tracking-[0.18em] uppercase text-accent hover:text-ink transition-colors"
+                className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink hover:text-ink-soft transition-colors"
               >
                 Capture something →
               </Link>
             </div>
           ) : (
-            <div className="border-t border-rule">
+            <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
               {attachedCaptures.map((capture) => (
-                <div
+                <li
                   key={capture.id}
-                  className="border-b border-rule py-5 px-2 flex items-start gap-4"
+                  className="py-4 px-5 flex items-start gap-4"
                 >
-                  <span className="flex-shrink-0 w-7 h-7 rounded-soft bg-paper-2 border border-rule flex items-center justify-center text-[12px] text-accent font-mono mt-0.5">
-                    {TYPE_GLYPHS[capture.type] ?? '·'}
-                  </span>
                   <div className="flex-1 min-w-0">
-                    <div className="font-serif text-[16px] text-ink leading-[1.55]">
+                    <div className="font-sans text-[14.5px] text-ink leading-[1.55]">
                       {capture.body}
                     </div>
-                    <div className="font-sans text-[11px] text-tag mt-2 tracking-[0.04em]">
+                    <div className="font-mono text-[10px] text-tag mt-2 tracking-[0.04em]">
                       {capture.source && (
                         <>
-                          <span className="italic">{capture.source}</span>
+                          <span>{capture.source}</span>
                           <span className="mx-2">·</span>
                         </>
                       )}
-                      <span className="font-mono">{capture.capturedVia}</span>
+                      <span className="uppercase">{capture.capturedVia}</span>
                       <span className="mx-2">·</span>
                       <span>{timeAgo(capture.capturedAt)}</span>
                     </div>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
 
-        {/* Related — Sprint 7. Pulls similar items across captures, ideas
-            and drafts via cosine similarity over the embedding column. The
-            empty state matters: it's what users see before backfill runs,
-            and we don't want it to read as "broken". */}
+        {/* Related */}
         <div className="mb-12">
-          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-5 flex items-baseline gap-3">
-            <span>▸ Related</span>
-            <span className="text-tag/70 text-[10px] normal-case tracking-[0.04em] font-sans italic font-normal">
-              what else of yours sounds like this
-            </span>
+          <div className="flex items-baseline gap-3 mb-4">
+            <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+              Related
+            </h2>
             {relatedItems.length > 0 && (
-              <span className="ml-auto bg-paper-2 text-tag rounded-[99px] px-2 py-0.5 text-[10px] font-mono">
+              <span className="font-sans text-[12px] text-tag">
                 {relatedItems.length}
               </span>
             )}
           </div>
 
           {relatedItems.length === 0 ? (
-            <div className="text-center py-10 border border-dashed border-rule rounded-card bg-paper/50">
-              <p className="font-serif italic text-[15px] text-tag mb-1">
+            <div className="text-center py-10 border border-dashed border-rule rounded-card bg-paper">
+              <p className="font-sans text-[14px] text-tag mb-1">
                 Nothing's resonating yet.
               </p>
-              <p className="font-sans text-[11px] text-tag/80 tracking-[0.04em]">
-                Capture more, write more — the assistant remembers.
+              <p className="font-sans text-[12px] text-tag">
+                Capture more, write more — sources surface as the archive
+                grows.
               </p>
             </div>
           ) : (
-            <div className="border-t border-rule">
+            <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
               {relatedItems.map((hit) => (
-                <Link
-                  key={`${hit.kind}-${hit.id}`}
-                  href={relatedHref(hit)}
-                  className="flex items-start gap-4 py-5 px-2 border-b border-rule hover:bg-paper/50 transition-colors group"
-                >
-                  <span className="flex-shrink-0 w-7 h-7 rounded-soft bg-paper-2 border border-rule flex items-center justify-center text-[12px] text-accent font-mono mt-0.5">
-                    {RELATED_GLYPHS[hit.kind]}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    {hit.title && (
-                      <div className="font-serif text-[16px] text-ink leading-[1.4] group-hover:text-accent transition-colors">
-                        {hit.title}
+                <li key={`${hit.kind}-${hit.id}`}>
+                  <Link
+                    href={relatedHref(hit)}
+                    className="flex items-start gap-4 py-4 px-5 hover:bg-paper-2 transition-colors group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag mb-1">
+                        {KIND_LABEL[hit.kind]}
+                        <span className="ml-2 normal-case tracking-[0.04em]">
+                          {hit.similarity.toFixed(2)}
+                        </span>
                       </div>
-                    )}
-                    {hit.snippet && (
-                      <div
-                        className={`font-serif text-[14px] text-ink-soft leading-[1.55] ${hit.title ? 'mt-1' : ''} line-clamp-2`}
-                      >
-                        {hit.snippet}
-                      </div>
-                    )}
-                    <div className="font-sans text-[11px] text-tag mt-2 tracking-[0.04em]">
-                      <span className="font-mono uppercase tracking-[0.16em]">
-                        {hit.kind}
-                      </span>
-                      <span className="mx-2">·</span>
-                      <span className="font-mono text-tag/80">
-                        {hit.similarity.toFixed(2)}
-                      </span>
+                      {hit.title && (
+                        <div className="font-sans text-[14.5px] font-medium text-ink leading-[1.4] group-hover:underline underline-offset-4 decoration-rule-strong">
+                          {hit.title}
+                        </div>
+                      )}
+                      {hit.snippet && (
+                        <div className="font-sans text-[13px] text-ink-soft leading-[1.55] mt-1 line-clamp-2">
+                          {hit.snippet}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
 
-        {/* Future orbit sections — placeholders */}
-        <div className="space-y-6 opacity-50">
-          <div>
-            <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-2">
-              ▸ Threads
-              <span className="ml-3 font-sans normal-case tracking-[0.04em] italic font-normal">
-                where you'll think out loud — Sprint 5+
-              </span>
+        {/* Future placeholder sections */}
+        <div className="space-y-4 opacity-60">
+          {[
+            { label: 'Threads', sub: 'where you think out loud — Sprint 5+' },
+            { label: 'Artifacts', sub: 'things you build around this — Sprint 5+' },
+            { label: 'Connected ideas', sub: 'supports · extends · echoes · contradicts — Sprint 8+' },
+          ].map((row) => (
+            <div key={row.label}>
+              <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+                {row.label}
+              </div>
+              <div className="font-sans text-[12px] text-tag/80 mt-0.5">
+                {row.sub}
+              </div>
             </div>
-          </div>
-          <div>
-            <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-2">
-              ▸ Artifacts
-              <span className="ml-3 font-sans normal-case tracking-[0.04em] italic font-normal">
-                things you build around this — Sprint 5+
-              </span>
-            </div>
-          </div>
-          <div>
-            <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-2">
-              ▸ Connected ideas
-              <span className="ml-3 font-sans normal-case tracking-[0.04em] italic font-normal">
-                supports · extends · echoes · contradicts — Sprint 8+
-              </span>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
     </section>

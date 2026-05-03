@@ -1,7 +1,6 @@
-// Thoughtbed · The Garden — ideas list
-// Chronological list of all the user's ideas with attachment counts.
-// The garden is where seeds grow into ideas; the orbit view (/studio/ideas/[id])
-// is where each one matures alongside its captures and Related neighbours.
+// Thoughtbed · Library — ideas list (was "The Garden" before Sprint 14).
+// The route stays /studio/ideas (matches DB tables + server actions);
+// the surface label is now "Library" to match Ghostbase.
 
 import Link from 'next/link';
 import { eq, sql, desc } from 'drizzle-orm';
@@ -10,18 +9,17 @@ import { requireUser } from '@/lib/auth';
 import { NewIdeaForm } from './NewIdeaForm';
 
 const MATURITY_DOTS: Record<string, string> = {
-  seed: 'bg-olive',
-  forming: 'bg-gold',
-  shaping: 'bg-accent',
-  ready: 'bg-accent-2',
-  circulated: 'bg-plum',
-  dormant: 'bg-tag',
+  seed: 'bg-zinc-300',
+  forming: 'bg-zinc-500',
+  shaping: 'bg-zinc-700',
+  ready: 'bg-zinc-900',
+  circulated: 'bg-zinc-900 ring-2 ring-zinc-300',
+  dormant: 'bg-zinc-200',
 };
 
 export default async function IdeasPage() {
   const user = await requireUser();
 
-  // Ideas with attachment counts.
   const rows = await db
     .select({
       id: ideas.id,
@@ -43,69 +41,65 @@ export default async function IdeasPage() {
 
   return (
     <section>
-      <div className="max-w-[1000px] mx-auto px-[7%] py-12 md:py-16">
-        <div className="mb-10">
-          <div className="font-mono text-[12px] tracking-[0.22em] uppercase text-accent font-bold mb-4">
-            ☘ The Garden
-          </div>
-          <h1 className="font-serif font-normal text-[clamp(36px,5vw,56px)] leading-[1.05] tracking-tightest text-ink mb-3">
-            Your{' '}
-            <em className="italic font-light text-accent">ideas.</em>
+      <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
+        <div className="mb-8">
+          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
+            Library
           </h1>
-          <p className="font-serif font-light text-[18px] leading-[1.5] text-ink-soft max-w-[56ch]">
+          <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {rows.length === 0
-              ? 'Nothing yet. Plant a seed in the Inbox first, or start an idea below.'
-              : `${rows.length} ${rows.length === 1 ? 'idea' : 'ideas'} in the garden. Tap one to walk its orbit — captures attached, related items, the bed humming around it.`}
+              ? 'Nothing yet. Capture something in the Inbox, or start an idea below.'
+              : `${rows.length} ${rows.length === 1 ? 'idea' : 'ideas'}. Tap one to see captures attached, related items, and what else of yours sounds like it.`}
           </p>
         </div>
 
         <NewIdeaForm />
 
-        <div className="mt-12">
+        <div className="mt-10">
           {rows.length === 0 ? (
-            <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper/50">
-              <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-3">
-                ▸ Empty
+            <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper">
+              <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-2">
+                Empty
               </div>
-              <p className="font-serif italic text-[16px] text-tag">
-                No ideas yet. The bed fills as you plant.
+              <p className="font-sans text-[14px] text-tag">
+                No ideas yet.
               </p>
             </div>
           ) : (
-            <div className="border-t border-rule">
+            <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
               {rows.map((idea) => (
-                <Link
-                  key={idea.id}
-                  href={`/studio/ideas/${idea.id}`}
-                  className="block border-b border-rule py-6 px-2 hover:bg-paper/50 transition-colors group"
-                >
-                  <div className="flex items-baseline gap-3 mb-1.5">
-                    <span
-                      className={`flex-shrink-0 inline-block w-2.5 h-2.5 rounded-full ${
-                        MATURITY_DOTS[idea.maturity] || 'bg-tag'
-                      } translate-y-[-2px]`}
-                      aria-label={idea.maturity}
-                    />
-                    <h2 className="font-serif font-normal text-[24px] leading-[1.2] tracking-editorial text-ink group-hover:text-accent transition-colors">
-                      {idea.title}
-                    </h2>
-                    <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.16em] text-tag whitespace-nowrap">
-                      {idea.maturity}
-                    </span>
-                  </div>
-                  {idea.essence && (
-                    <p className="font-serif italic text-[15px] text-ink-soft leading-[1.5] mb-2 max-w-[60ch]">
-                      "{idea.essence}"
-                    </p>
-                  )}
-                  <div className="font-sans text-[11px] text-tag tracking-[0.04em]">
-                    <span>
-                      {idea.attached} {idea.attached === 1 ? 'capture' : 'captures'} attached
-                    </span>
-                  </div>
-                </Link>
+                <li key={idea.id}>
+                  <Link
+                    href={`/studio/ideas/${idea.id}`}
+                    className="block py-5 px-5 hover:bg-paper-2 transition-colors group"
+                  >
+                    <div className="flex items-baseline gap-3 mb-1">
+                      <span
+                        className={`flex-shrink-0 inline-block w-2.5 h-2.5 rounded-full ${
+                          MATURITY_DOTS[idea.maturity] || 'bg-zinc-300'
+                        } translate-y-[-1px]`}
+                        aria-label={idea.maturity}
+                      />
+                      <h2 className="font-sans font-semibold text-[18px] leading-[1.3] tracking-tight text-ink group-hover:underline underline-offset-4 decoration-rule-strong">
+                        {idea.title}
+                      </h2>
+                      <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.16em] text-tag whitespace-nowrap">
+                        {idea.maturity}
+                      </span>
+                    </div>
+                    {idea.essence && (
+                      <p className="font-sans text-[14px] text-ink-soft leading-[1.55] mb-2 max-w-[64ch]">
+                        {idea.essence}
+                      </p>
+                    )}
+                    <div className="font-mono text-[10px] text-tag tracking-[0.04em]">
+                      {idea.attached}{' '}
+                      {idea.attached === 1 ? 'capture' : 'captures'} attached
+                    </div>
+                  </Link>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
       </div>

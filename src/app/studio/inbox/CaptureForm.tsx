@@ -1,6 +1,6 @@
-// Folio · CaptureForm
-// Paste-based capture surface. Sprint 3 v0 — minimal, fast, the cheapest action
-// in the product.
+// Thoughtbed · CaptureForm
+// Paste-based capture surface. Sprint 14 brand pivot: monochrome restyle,
+// drop "Plant a seed" copy.
 
 'use client';
 
@@ -30,29 +30,29 @@ export function CaptureForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-paper border border-rule rounded-card shadow-soft"
+      className="bg-paper border border-rule rounded-card"
     >
-      <div className="px-6 pt-5 pb-3">
-        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold mb-3">
-          ☘ Plant a seed
+      <div className="px-5 pt-4 pb-2">
+        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+          New capture
         </div>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Paste a thought, a quote, an excerpt. Anything you don't want to lose."
           rows={4}
-          className="w-full resize-none bg-transparent font-serif text-[17px] text-ink placeholder:text-tag placeholder:italic placeholder:font-light leading-[1.55] focus:outline-none"
-          aria-label="Seed body"
+          className="w-full resize-none bg-transparent font-sans text-[15.5px] leading-[1.55] text-ink placeholder:text-tag focus:outline-none"
+          aria-label="Capture body"
         />
       </div>
 
       {showSourceField && (
-        <div className="px-6 pb-2">
+        <div className="px-5 pb-2">
           <input
             value={source}
             onChange={(e) => setSource(e.target.value)}
             placeholder="Source (optional) — URL, person, book, anywhere"
-            className="w-full bg-paper-2 border border-rule rounded-soft px-3 py-2 font-sans text-[13px] text-ink-soft placeholder:text-tag placeholder:italic focus:outline-none focus:border-accent"
+            className="w-full bg-paper-2 border border-rule rounded-soft px-3 py-2 font-sans text-[13px] text-ink-soft placeholder:text-tag focus:outline-none focus:border-ink"
           />
         </div>
       )}
@@ -61,20 +61,20 @@ export function CaptureForm() {
         <button
           type="button"
           onClick={() => setShowSourceField((s) => !s)}
-          className="font-sans text-[12px] text-tag hover:text-accent transition-colors"
+          className="font-sans text-[12.5px] text-tag hover:text-ink transition-colors"
         >
-          {showSourceField ? '— hide source' : '+ add source'}
+          {showSourceField ? '— Hide source' : '+ Add source'}
         </button>
         <div className="flex items-center gap-3">
-          <span className="font-sans text-[11px] text-tag">
+          <span className="font-mono text-[10px] text-tag tracking-[0.04em]">
             {body.length > 0 && `${body.length} chars`}
           </span>
           <button
             type="submit"
             disabled={pending || !body.trim()}
-            className="px-4 py-2 bg-ink text-bg font-sans text-[12px] font-medium rounded-soft hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors"
           >
-            {pending ? 'Planting…' : '⏎ Plant'}
+            {pending ? 'Saving…' : 'Capture'}
           </button>
         </div>
       </div>

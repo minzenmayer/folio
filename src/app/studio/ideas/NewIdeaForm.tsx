@@ -1,5 +1,5 @@
-// Folio · NewIdeaForm
-// Quick path to spawn an idea from the Library, no capture required.
+// Thoughtbed · NewIdeaForm
+// Sprint 14 brand pivot: monochrome restyle.
 
 'use client';
 
@@ -23,29 +23,29 @@ export function NewIdeaForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-paper border border-rule rounded-card shadow-soft"
+      className="bg-paper border border-rule rounded-card"
     >
-      <div className="px-6 pt-5 pb-3">
-        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold mb-3">
-          ▸ New idea
+      <div className="px-5 pt-4 pb-3">
+        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+          New idea
         </div>
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title — your shorthand for this idea"
-          className="w-full bg-transparent font-serif text-[20px] text-ink placeholder:text-tag placeholder:italic placeholder:font-light focus:outline-none"
+          className="w-full bg-transparent font-sans text-[18px] font-medium text-ink placeholder:text-tag focus:outline-none"
           aria-label="Idea title"
         />
       </div>
 
       {showEssence && (
-        <div className="px-6 pb-3">
+        <div className="px-5 pb-3">
           <textarea
             value={essence}
             onChange={(e) => setEssence(e.target.value)}
             placeholder="Essence — one or two sentences. What is this, in your own words?"
             rows={3}
-            className="w-full resize-none bg-paper-2 border border-rule rounded-soft px-3 py-2 font-serif italic text-[15px] text-ink-soft placeholder:text-tag placeholder:italic focus:outline-none focus:border-accent leading-[1.5]"
+            className="w-full resize-none bg-paper-2 border border-rule rounded-soft px-3 py-2 font-sans text-[14px] text-ink-soft placeholder:text-tag focus:outline-none focus:border-ink leading-[1.5]"
           />
         </div>
       )}
@@ -54,16 +54,16 @@ export function NewIdeaForm() {
         <button
           type="button"
           onClick={() => setShowEssence((s) => !s)}
-          className="font-sans text-[12px] text-tag hover:text-accent transition-colors"
+          className="font-sans text-[12.5px] text-tag hover:text-ink transition-colors"
         >
-          {showEssence ? '— hide essence' : '+ add essence'}
+          {showEssence ? '— Hide essence' : '+ Add essence'}
         </button>
         <button
           type="submit"
           disabled={pending || !title.trim()}
-          className="px-4 py-2 bg-accent text-bg font-sans text-[12px] font-medium rounded-soft hover:bg-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors"
         >
-          {pending ? 'Creating…' : '⏎ Create idea'}
+          {pending ? 'Creating…' : 'Create idea'}
         </button>
       </div>
     </form>
