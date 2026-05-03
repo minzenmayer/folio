@@ -21,6 +21,8 @@
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateText } from 'ai';
 
+import type { SimilarKind } from '@/lib/retrieval-kinds';
+
 if (!process.env.ANTHROPIC_API_KEY) {
   console.warn(
     '[thoughtbed/llm] ANTHROPIC_API_KEY is not set. Reflection will fail until added.'
@@ -33,10 +35,19 @@ const REFLECTION_MODEL =
 export type ReflectionHit = {
   index: number; // 1-based, used for [1], [2] citations in the output
   // Sprint 13 added 'newsletter_issue' so Reflect can label the source as
-  // "from your own newsletter" rather than a generic capture.
-  kind: 'capture' | 'idea' | 'draft' | 'newsletter_issue';
+  // "from your own newsletter" rather than a generic capture. Sprint 15
+  // Wave 3 added 'obsidian_note' (vault notes) and 'extracted_idea' (the
+  // curated Idea layer pulled by extractIdeas() during sync). The union
+  // is now sourced from src/lib/retrieval-kinds.ts.
+  kind: SimilarKind;
   title: string | null;
   snippet: string | null;
+  // Sprint 15 Wave 3: when the source has an extracted Idea attached, the
+  // synthesis layer prefers the Idea's claim over a raw body excerpt. This
+  // optional field carries that. Only populated for kinds that are
+  // backed by extracted_ideas rows.
+  ideaTitle?: string | null;
+  ideaClaim?: string | null;
 };
 
 // Mode signal that adapts the prompt's voice. 'newsletter' biases toward
@@ -103,6 +114,9 @@ export async function generateReflection({
           .map((h) => {
             // Label by kind, with the title for ideas/drafts/issues so the
             // source is self-evident in the reflection.
+            // Sprint 15 Wave 3: vault notes and extracted ideas get their
+            // own label shapes so the LLM can refer to "your vault note on X"
+            // or "the idea you call X" instead of generic source language.
             const label =
               h.kind === 'idea' && h.title
                 ? `idea: ${h.title}`
@@ -110,7 +124,11 @@ export async function generateReflection({
                   ? `earlier draft: ${h.title}`
                   : h.kind === 'newsletter_issue' && h.title
                     ? `your own newsletter: ${h.title}`
-                    : h.kind;
+                    : h.kind === 'obsidian_note' && h.title
+                      ? `vault note: ${h.title}`
+                      : h.kind === 'extracted_idea' && h.title
+                        ? `extracted idea: ${h.title}`
+                        : h.kind;
             const body = (h.snippet?.trim() || h.title?.trim() || '').slice(
               0,
               MAX_HIT_CHARS

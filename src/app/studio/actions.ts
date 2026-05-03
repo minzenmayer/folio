@@ -63,11 +63,19 @@ import {
   ideas,
   drafts,
   newsletterIssues,
+  // Sprint 15 Wave 3: vault notes + curated idea layer in the retrieval pool.
+  obsidianNotes,
+  extractedIdeas,
 } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
 import { generateReflection, type ReflectionVoiceMode } from '@/lib/llm';
+import {
+  SIMILAR_KINDS,
+  SIMILAR_KINDS_FOR_ZOD,
+  type SimilarKind,
+} from '@/lib/retrieval-kinds';
 // Sprint 15 Wave 2: extractIdeas backfill across already-ingested sources
 // (newsletter issues now; obsidian notes after the user connects). Surfaced
 // as a button on /studio/knowledge so it's a manual one-shot rather than
@@ -282,11 +290,16 @@ export async function backfillExtractedIdeas(): Promise<BackfillIdeasResult> {
 
 // ─── findSimilar ──────────────────────────────────────
 
-// Sprint 13 adds `newsletter_issue` as a retrieval kind. Issues live in
-// their own table (newsletter_issues) with their own embedding column;
-// the kind discriminates so the rail can render the right glyph (✉) and
-// Reflect can label the source as "from your own newsletter".
-export type SimilarKind = 'capture' | 'idea' | 'draft' | 'newsletter_issue';
+// Sprint 13 added 'newsletter_issue' as a retrieval kind. Sprint 15 Wave 3
+// added 'obsidian_note' (vault notes) and 'extracted_idea' (the curated
+// Idea layer extractIdeas() pulls out of any source). The kind discriminates
+// so the rail can render the right glyph and Reflect can label the source
+// in voice ("your own newsletter", "vault note", "extracted idea").
+//
+// SimilarKind / SIMILAR_KINDS now live in src/lib/retrieval-kinds.ts so this
+// module and src/lib/llm.ts share one source of truth — adding a kind no
+// longer requires touching three files.
+export { type SimilarKind } from '@/lib/retrieval-kinds';
 
 export type SimilarHit = {
   kind: SimilarKind;
@@ -294,14 +307,20 @@ export type SimilarHit = {
   title: string | null;
   snippet: string | null;
   similarity: number; // 0..1, 1 = identical
+  // Sprint 15 Wave 3: when the source has extracted_ideas attached, carry
+  // the highest-signal Idea's title + claim so the synthesis layer prefers
+  // the Idea's framing over a raw body excerpt. Only populated for kinds
+  // backed by extracted_ideas rows (today: newsletter_issue, obsidian_note).
+  ideaTitle?: string | null;
+  ideaClaim?: string | null;
 };
 
 const findSimilarSchema = z.object({
   text: z.string().min(1).max(8000),
   kinds: z
-    .array(z.enum(['capture', 'idea', 'draft', 'newsletter_issue']))
+    .array(z.enum(SIMILAR_KINDS_FOR_ZOD))
     .min(1)
-    .default(['capture', 'idea', 'draft', 'newsletter_issue']),
+    .default([...SIMILAR_KINDS]),
   limit: z.number().int().min(1).max(50).default(10),
   // Caller passes when retrieval is "things related to X" and X itself
   // shouldn't show up in its own related list.
@@ -309,6 +328,8 @@ const findSimilarSchema = z.object({
   excludeDraftId: z.string().uuid().optional(),
   excludeCaptureId: z.string().uuid().optional(),
   excludeNewsletterIssueId: z.string().uuid().optional(),
+  excludeObsidianNoteId: z.string().uuid().optional(),
+  excludeExtractedIdeaId: z.string().uuid().optional(),
 });
 
 export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
@@ -479,6 +500,98 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
     );
   }
 
+  if (wanted.has('obsidian_note')) {
+    const noteWhere = data.excludeObsidianNoteId
+      ? sql`${obsidianNotes.userId} = ${user.id}
+            AND ${obsidianNotes.embedding} IS NOT NULL
+            AND ${obsidianNotes.id} != ${data.excludeObsidianNoteId}`
+      : sql`${obsidianNotes.userId} = ${user.id}
+            AND ${obsidianNotes.embedding} IS NOT NULL`;
+
+    promises.push(
+      db
+        .select({
+          id: obsidianNotes.id,
+          title: obsidianNotes.title,
+          path: obsidianNotes.path,
+          bodyText: obsidianNotes.bodyText,
+          distance: sql<number>`${obsidianNotes.embedding} <=> ${lit}::vector`,
+        })
+        .from(obsidianNotes)
+        .where(noteWhere)
+        .orderBy(sql`${obsidianNotes.embedding} <=> ${lit}::vector`)
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map((r): SimilarHit => {
+            const body = (r.bodyText ?? '').trim();
+            const snippet =
+              body.length > 0
+                ? body.slice(0, 200) + (body.length > 200 ? '…' : '')
+                : null;
+            return {
+              kind: 'obsidian_note',
+              id: r.id,
+              // Title is always present in the column (resolveTitle's
+              // frontmatter / H1 / filename fallback), so we surface it
+              // straight rather than the path.
+              title: r.title,
+              snippet,
+              similarity: 1 - Number(r.distance),
+            };
+          })
+        )
+    );
+  }
+
+  if (wanted.has('extracted_idea')) {
+    const ideaWhere = data.excludeExtractedIdeaId
+      ? sql`${extractedIdeas.userId} = ${user.id}
+            AND ${extractedIdeas.embedding} IS NOT NULL
+            AND ${extractedIdeas.id} != ${data.excludeExtractedIdeaId}`
+      : sql`${extractedIdeas.userId} = ${user.id}
+            AND ${extractedIdeas.embedding} IS NOT NULL`;
+
+    promises.push(
+      db
+        .select({
+          id: extractedIdeas.id,
+          title: extractedIdeas.title,
+          claim: extractedIdeas.claim,
+          evidence: extractedIdeas.evidence,
+          distance: sql<number>`${extractedIdeas.embedding} <=> ${lit}::vector`,
+        })
+        .from(extractedIdeas)
+        .where(ideaWhere)
+        .orderBy(sql`${extractedIdeas.embedding} <=> ${lit}::vector`)
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map((r): SimilarHit => {
+            // Snippet is the curated 'claim' (with a fallback to evidence
+            // if claim is unusually short). The synthesis layer prefers
+            // ideaTitle + ideaClaim over snippet for these — we still
+            // populate snippet for backward-compatible consumers.
+            const claim = (r.claim ?? '').trim();
+            const evidence = (r.evidence ?? '').trim();
+            const snippet =
+              claim.length > 0
+                ? claim.slice(0, 280) + (claim.length > 280 ? '…' : '')
+                : evidence.length > 0
+                  ? evidence.slice(0, 280) + (evidence.length > 280 ? '…' : '')
+                  : null;
+            return {
+              kind: 'extracted_idea',
+              id: r.id,
+              title: r.title,
+              snippet,
+              similarity: 1 - Number(r.distance),
+              ideaTitle: r.title,
+              ideaClaim: claim || null,
+            };
+          })
+        )
+    );
+  }
+
   const buckets = await Promise.all(promises);
   const all = buckets.flat();
   all.sort((a, b) => b.similarity - a.similarity);
@@ -575,10 +688,10 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
   try {
     sources = await findSimilar({
       text: draftText.slice(0, 4000),
-      // Sprint 15 Wave 3 prep: include newsletter_issue. The type union
-      // and generateReflection have supported it since Sprint 13, but
-      // this call site was missed when that landed.
-      kinds: ['capture', 'idea', 'draft', 'newsletter_issue'],
+      // Sprint 15 Wave 3: pull from every retrieval kind. SIMILAR_KINDS is
+      // exported from src/lib/retrieval-kinds.ts so this stays correct as
+      // we add provider surfaces in future waves.
+      kinds: [...SIMILAR_KINDS],
       limit: REFLECT_HIT_LIMIT,
       excludeDraftId: draftId,
     });
@@ -603,6 +716,10 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
         kind: s.kind,
         title: s.title,
         snippet: s.snippet,
+        // Sprint 15 Wave 3: surface the curated Idea fields when present so
+        // the synthesis layer can refer to ideas by name.
+        ideaTitle: s.ideaTitle ?? null,
+        ideaClaim: s.ideaClaim ?? null,
       })),
       mode: voice,
     });
