@@ -14,19 +14,37 @@
 //
 // Sprint 9 added the generative half:
 //
-//   • reflect({ draftId }) — loads the draft, runs findSimilar on its text,
-//     hands draft + grounding hits to Claude (via @ai-sdk/anthropic), and
-//     returns a 2-3 sentence reflection in the user's own voice. Failures
-//     return as a typed { ok: false } variant rather than throwing, so the
-//     garden rail can render a graceful error state.
+//   • reflect({ draftId, mode? }) — loads the draft, runs findSimilar on
+//     its text, hands draft + grounding hits to Claude (via
+//     @ai-sdk/anthropic), and returns a 2-3 sentence reflection in the
+//     user's own voice. Sprint 12 added the `mode` parameter so the
+//     reflection's voice can match the draft's intent (newsletter vs.
+//     LinkedIn vs. self-pilot). Failures return as a typed { ok: false }
+//     variant rather than throwing, so the garden rail can render a
+//     graceful error state.
 //
-// Sprint 10 (Thoughtbed pivot) adds the writing-first dispatcher:
+// Sprint 10 (Thoughtbed pivot) added the writing-first dispatcher.
+// Sprint 12 reshapes it for intent-driven composer modes:
 //
-//   • composeNew({ text, mode }) — the home composer's submit handler. By
-//     mode, creates a Draft (Tiptap doc starting with the text), an Idea
-//     (first line = title, rest = essence), or plants a Capture (paste in
-//     the Inbox). Best-effort embeds inline so the new row participates in
-//     retrieval immediately.
+//   • composeNew({ text, mode }) — the home composer's submit handler.
+//     Modes:
+//       · 'newsletter' (default) — first line as topic; create a draft
+//         seeded with the topic as the H1 and an empty paragraph below.
+//       · 'linkedin' — body-only draft (no H1), the typed text becomes
+//         the first paragraph. LinkedIn posts are bodies, not titled essays.
+//       · 'self-pilot' — empty draft. Honours "sometimes I just want to
+//         write." The garden rail starts dormant on the editor route.
+//     The redirect carries `?mode=` into the editor so the rail can
+//     boot in mode-aware retrieval/voice.
+//
+//   • exploreIdeas({ intent, query? }) — Sprint 12 query interface for
+//     Ideas mode. Three intents:
+//       · 'untouched' — ideas with low/no overlap with existing drafts
+//         (contrastive retrieval over the user's draft embeddings).
+//       · 'mature' — ideas with maturity ≥ 'forming' ranked by signal
+//         (heat + pull + weight) — what's ripe to write on.
+//       · 'search' — semantic search over ideas via findSimilar.
+//     Returns ranked items; navigation lives in the Composer client.
 //
 // All actions are strictly user-scoped. The vector queries use pgvector's
 // <=> cosine-distance operator with HNSW indexes (idx_*_embedding);
@@ -35,7 +53,7 @@
 
 'use server';
 
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, desc, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -43,9 +61,9 @@ import { db, captures, ideas, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
-import { generateReflection } from '@/lib/llm';
+import { generateReflection, type ReflectionVoiceMode } from '@/lib/llm';
 
-// ─── shared helpers ───────────────────────────────
+// ─── shared helpers ────────────────────────────────
 
 // Mirror of ideaEmbedSource from /studio/ideas/actions.ts — kept here so the
 // backfill computes embeddings the same way the save path does. If the save
@@ -99,7 +117,7 @@ function vectorLiteral(vec: number[]): string {
   return `[${vec.join(',')}]`;
 }
 
-// ─── backfillEmbeddings ──────────────────────────────────────────────
+// ─── backfillEmbeddings ───────────────────────────────────────────
 
 export type BackfillKind = 'captures' | 'ideas' | 'drafts' | 'all';
 
@@ -225,7 +243,7 @@ export async function backfillEmbeddings(
   return result;
 }
 
-// ─── findSimilar ────────────────────────────────────────────────
+// ─── findSimilar ──────────────────────────────────────
 
 export type SimilarKind = 'capture' | 'idea' | 'draft';
 
@@ -386,7 +404,7 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
   return all.slice(0, data.limit);
 }
 
-// ─── reflect — Sprint 9 generative Assistant ──────────────────────────────────
+// ─── reflect — Sprint 9 generative reflection (Sprint 12 mode-aware) ─────
 
 // Below this length the reflection isn't worth running — Claude needs at
 // least a sentence or two to anchor on. Mirrors the MIN_QUERY_CHARS in
@@ -401,6 +419,10 @@ const REFLECT_HIT_LIMIT = 5;
 
 const reflectSchema = z.object({
   draftId: z.string().uuid(),
+  // Sprint 12: composer mode tags the draft's voice. The reflection prompt
+  // adapts: newsletter → "what would land in your next issue"; linkedin →
+  // shorter, punchier; self-pilot / undefined → original neutral voice.
+  mode: z.enum(['newsletter', 'linkedin', 'self-pilot']).optional(),
 });
 
 export type ReflectResult =
@@ -429,7 +451,7 @@ export type ReflectResult =
  */
 export async function reflect(input: unknown): Promise<ReflectResult> {
   const user = await requireUser();
-  const { draftId } = reflectSchema.parse(input);
+  const { draftId, mode } = reflectSchema.parse(input);
 
   // Confirm ownership and grab the doc + title.
   const [draft] = await db
@@ -481,6 +503,15 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
   }
 
   try {
+    // Map the composer mode to a voice variant. self-pilot keeps the
+    // original neutral voice — "the user wants to write, not be coached".
+    const voice: ReflectionVoiceMode | undefined =
+      mode === 'newsletter'
+        ? 'newsletter'
+        : mode === 'linkedin'
+          ? 'linkedin'
+          : undefined;
+
     const reflection = await generateReflection({
       draftText,
       hits: sources.map((s, i) => ({
@@ -489,6 +520,7 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
         title: s.title,
         snippet: s.snippet,
       })),
+      mode: voice,
     });
     return {
       ok: true,
@@ -503,39 +535,85 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
   }
 }
 
-// ─── composeNew — Sprint 10 writing-first dispatcher ─────────────────────
+// ─── composeNew — Sprint 10/12 writing-first dispatcher ─────────────────
 
 const composeSchema = z.object({
-  text: z.string().min(1).max(20000),
-  mode: z.enum(['draft', 'idea', 'plant']).default('draft'),
+  // Self-pilot is the only mode that accepts an empty string — "open a
+  // blank page". The schema uses min(0) to permit that; client checks the
+  // non-self-pilot modes for non-empty before submit.
+  text: z.string().max(20000).default(''),
+  mode: z
+    .enum(['newsletter', 'linkedin', 'self-pilot'])
+    .default('newsletter'),
 });
 
 /**
- * Single submit handler for the /studio home composer. Branches on mode
- * into the right create path:
+ * Submit handler for the /studio home composer. Branches on mode into the
+ * right draft create path:
  *
- *   draft → new Tiptap doc with the text as a paragraph; redirect into
- *           /studio/page/[id] to keep writing.
- *   idea  → first line as title, rest as essence; redirect into
- *           /studio/ideas/[id] for the orbit view.
- *   plant → quick capture into the Inbox; redirect to /studio/inbox so
- *           the user sees the seed land alongside others.
+ *   newsletter → seed an H1 with the user's typed topic + an empty
+ *                paragraph below; redirect into the editor with
+ *                ?mode=newsletter so the rail boots in newsletter voice.
+ *   linkedin   → body-only paragraph (no H1); redirect with ?mode=linkedin.
+ *                LinkedIn posts are bodies, not titled essays.
+ *   self-pilot → empty draft; redirect with ?mode=self-pilot. The rail
+ *                starts dormant on the editor route.
  *
  * Each branch best-effort embeds the row inline (same pattern as the
  * individual create actions) so the new content participates in
  * findSimilar / reflect immediately. Failures log but never block.
+ *
+ * Note: Ideas mode never reaches this action — it's a query interface
+ * served by exploreIdeas().
  */
 export async function composeNew(input: unknown) {
   const user = await requireUser();
   const { text, mode } = composeSchema.parse(input);
   const trimmed = text.trim();
-  if (trimmed.length === 0) {
-    redirect('/studio');
+
+  // newsletter ── topic line as H1, empty paragraph below.
+  if (mode === 'newsletter') {
+    if (trimmed.length === 0) redirect('/studio');
+    const topic = trimmed.split('\n')[0].slice(0, 280);
+    const initialDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'heading',
+          attrs: { level: 1 },
+          content: [{ type: 'text', text: topic }],
+        },
+        { type: 'paragraph' },
+      ],
+    };
+
+    const [draft] = await db
+      .insert(drafts)
+      .values({
+        userId: user.id,
+        title: topic,
+        contentJson: initialDoc,
+      })
+      .returning();
+
+    try {
+      const embedding = await embedText(topic);
+      await db
+        .update(drafts)
+        .set({ embedding })
+        .where(and(eq(drafts.id, draft.id), eq(drafts.userId, user.id)));
+    } catch (err) {
+      console.warn('[composeNew] newsletter embed failed', err);
+    }
+
+    revalidatePath('/studio');
+    revalidatePath('/studio/page');
+    redirect(`/studio/page/${draft.id}?mode=newsletter`);
   }
 
-  if (mode === 'draft') {
-    // Build a minimal Tiptap doc with one paragraph holding the text.
-    // The user keeps typing in the editor from here.
+  // linkedin ── body-only, the typed text becomes the first paragraph.
+  if (mode === 'linkedin') {
+    if (trimmed.length === 0) redirect('/studio');
     const initialDoc = {
       type: 'doc',
       content: [
@@ -550,7 +628,7 @@ export async function composeNew(input: unknown) {
       .insert(drafts)
       .values({
         userId: user.id,
-        title: null,
+        title: null, // LinkedIn posts have no title
         contentJson: initialDoc,
       })
       .returning();
@@ -562,71 +640,246 @@ export async function composeNew(input: unknown) {
         .set({ embedding })
         .where(and(eq(drafts.id, draft.id), eq(drafts.userId, user.id)));
     } catch (err) {
-      console.warn('[composeNew] draft embed failed', err);
+      console.warn('[composeNew] linkedin embed failed', err);
     }
 
     revalidatePath('/studio');
     revalidatePath('/studio/page');
-    redirect(`/studio/page/${draft.id}`);
+    redirect(`/studio/page/${draft.id}?mode=linkedin`);
   }
 
-  if (mode === 'idea') {
-    // First line becomes the title. Anything after the first newline
-    // becomes the essence. Both are bounded by the existing column
-    // limits (title 280, essence 2000).
-    const lines = trimmed.split('\n');
-    const title = (lines[0] ?? trimmed).trim().slice(0, 280);
-    const restText = lines.slice(1).join('\n').trim();
-    const essence = restText.length > 0 ? restText.slice(0, 2000) : null;
+  // self-pilot ── empty draft; the rail starts dormant on the editor.
+  // Optional one-liner from the textarea seeds a single paragraph, but
+  // an empty input is the canonical case.
+  const initialDoc =
+    trimmed.length > 0
+      ? {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: trimmed }],
+            },
+          ],
+        }
+      : { type: 'doc', content: [{ type: 'paragraph' }] };
 
-    const [idea] = await db
-      .insert(ideas)
-      .values({
-        userId: user.id,
-        title,
-        essence,
-        origin: 'noticed',
-        maturity: 'seed',
-        energy: 'active',
-        lastVisitedAt: new Date(),
-        lastEvolvedAt: new Date(),
-      })
-      .returning();
+  const [draft] = await db
+    .insert(drafts)
+    .values({
+      userId: user.id,
+      title: null,
+      contentJson: initialDoc,
+    })
+    .returning();
 
+  if (trimmed.length > 0) {
     try {
-      const sourceText = essence ? `${title}\n\n${essence}` : title;
-      const embedding = await embedText(sourceText);
+      const embedding = await embedText(trimmed);
       await db
-        .update(ideas)
+        .update(drafts)
         .set({ embedding })
-        .where(and(eq(ideas.id, idea.id), eq(ideas.userId, user.id)));
+        .where(and(eq(drafts.id, draft.id), eq(drafts.userId, user.id)));
     } catch (err) {
-      console.warn('[composeNew] idea embed failed', err);
+      console.warn('[composeNew] self-pilot embed failed', err);
     }
-
-    revalidatePath('/studio');
-    revalidatePath('/studio/ideas');
-    redirect(`/studio/ideas/${idea.id}`);
   }
-
-  // mode === 'plant' — quick paste into the Inbox.
-  let captureEmbedding: number[] | undefined;
-  try {
-    captureEmbedding = await embedText(trimmed);
-  } catch (err) {
-    console.warn('[composeNew] capture embed failed', err);
-  }
-
-  await db.insert(captures).values({
-    userId: user.id,
-    type: 'paste',
-    body: trimmed,
-    capturedVia: 'paste',
-    status: 'inbox',
-    embedding: captureEmbedding,
-  });
 
   revalidatePath('/studio');
-  revalidatePath('/studio/inbox');
-  redirect('/studio/inbox');
+  revalidatePath('/studio/page');
+  redirect(`/studio/page/${draft.id}?mode=self-pilot`);
+}
+
+// ─── exploreIdeas — Sprint 12 query interface ───────────────────────
+
+const exploreIdeasSchema = z.object({
+  intent: z.enum(['untouched', 'mature', 'search']),
+  query: z.string().min(1).max(2000).optional(),
+});
+
+export type ExploredIdea = {
+  id: string;
+  title: string;
+  essence: string | null;
+  // 'unknown' is used for the search variant where we don't fetch maturity
+  // (findSimilar's hit shape doesn't carry it).
+  maturity: string;
+  signalScore?: number;
+  similarity?: number;
+};
+
+export type ExploreIdeasResult =
+  | {
+      ok: true;
+      intent: 'untouched' | 'mature' | 'search';
+      ideas: ExploredIdea[];
+    }
+  | {
+      ok: false;
+      reason: 'needs_query' | 'error';
+      message: string;
+    };
+
+const EXPLORE_LIMIT = 8;
+
+// Maturity values (per /db/schema.ts):
+//   'seed' | 'forming' | 'shaping' | 'ready' | 'circulated' | 'dormant'
+// "Mature enough to write" === forming / shaping / ready / circulated.
+const MATURE_ENOUGH = ['forming', 'shaping', 'ready', 'circulated'] as const;
+
+/**
+ * Composer's Ideas mode dispatcher. Three intents:
+ *   · 'untouched' — ideas with low/no overlap to existing drafts. We
+ *     compute, for each user-owned idea with an embedding, the MIN cosine
+ *     distance to any of the user's draft embeddings (defaulting to 2.0
+ *     when no drafts exist). Order DESC by that min distance to surface
+ *     ideas farthest from anything written.
+ *   · 'mature' — maturity ≥ 'forming', ranked by (heat + pull + weight).
+ *   · 'search' — semantic search over ideas via findSimilar.
+ *
+ * No state changes; this is read-only retrieval. The Composer client
+ * navigates to /studio/ideas/[id] when the user picks a result.
+ */
+export async function exploreIdeas(
+  input: unknown
+): Promise<ExploreIdeasResult> {
+  const user = await requireUser();
+  const data = exploreIdeasSchema.parse(input);
+
+  if (data.intent === 'mature') {
+    const rows = await db
+      .select({
+        id: ideas.id,
+        title: ideas.title,
+        essence: ideas.essence,
+        maturity: ideas.maturity,
+        weight: ideas.weight,
+        pull: ideas.pull,
+        heat: ideas.heat,
+      })
+      .from(ideas)
+      .where(
+        and(
+          eq(ideas.userId, user.id),
+          inArray(ideas.maturity, [...MATURE_ENOUGH])
+        )
+      )
+      .orderBy(
+        desc(sql<number>`(
+          COALESCE(${ideas.heat}, 0)
+          + COALESCE(${ideas.pull}, 0)
+          + COALESCE(${ideas.weight}, 0)
+        )`),
+        desc(ideas.lastVisitedAt)
+      )
+      .limit(EXPLORE_LIMIT);
+
+    return {
+      ok: true,
+      intent: 'mature',
+      ideas: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        essence: r.essence,
+        maturity: r.maturity,
+        signalScore:
+          (r.heat ?? 0) + (r.pull ?? 0) + (r.weight ?? 0),
+      })),
+    };
+  }
+
+  if (data.intent === 'untouched') {
+    // Contrastive retrieval: for each idea (with an embedding), find the
+    // closest draft (by cosine distance) and surface the ideas whose
+    // closest draft is farthest. Defaulting to 2.0 (max distance) when
+    // the user has no drafts means every idea reads as "untouched".
+    const result = await db.execute<{
+      id: string;
+      title: string;
+      essence: string | null;
+      maturity: string;
+      min_distance: number;
+    }>(sql`
+      SELECT
+        i.id::text AS id,
+        i.title AS title,
+        i.essence AS essence,
+        i.maturity AS maturity,
+        COALESCE(
+          (SELECT MIN(i.embedding <=> d.embedding)
+           FROM drafts d
+           WHERE d.user_id = ${user.id}
+             AND d.embedding IS NOT NULL),
+          2.0
+        ) AS min_distance
+      FROM ideas i
+      WHERE i.user_id = ${user.id}
+        AND i.embedding IS NOT NULL
+      ORDER BY min_distance DESC
+      LIMIT ${EXPLORE_LIMIT}
+    `);
+
+    // db.execute on the Neon HTTP driver returns either a `.rows` array or
+    // an array directly depending on driver version — be defensive.
+    const rows = Array.isArray(result)
+      ? (result as unknown as Array<{
+          id: string;
+          title: string;
+          essence: string | null;
+          maturity: string;
+          min_distance: number | string;
+        }>)
+      : (result as { rows?: Array<{
+          id: string;
+          title: string;
+          essence: string | null;
+          maturity: string;
+          min_distance: number | string;
+        }> }).rows ?? [];
+
+    return {
+      ok: true,
+      intent: 'untouched',
+      ideas: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        essence: r.essence,
+        maturity: r.maturity,
+        signalScore: Number(r.min_distance),
+      })),
+    };
+  }
+
+  // intent === 'search'
+  if (!data.query || data.query.trim().length === 0) {
+    return {
+      ok: false,
+      reason: 'needs_query',
+      message: 'Type a few words to search your ideas.',
+    };
+  }
+
+  try {
+    const hits = await findSimilar({
+      text: data.query,
+      kinds: ['idea'],
+      limit: EXPLORE_LIMIT,
+    });
+
+    return {
+      ok: true,
+      intent: 'search',
+      ideas: hits.map((h) => ({
+        id: h.id,
+        title: h.title ?? '(untitled)',
+        essence: h.snippet,
+        maturity: 'unknown',
+        similarity: h.similarity,
+      })),
+    };
+  } catch (err) {
+    console.error('[exploreIdeas.search] failed', err);
+    const message = err instanceof Error ? err.message : 'search failed';
+    return { ok: false, reason: 'error', message };
+  }
 }
