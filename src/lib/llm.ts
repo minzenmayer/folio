@@ -32,7 +32,9 @@ const REFLECTION_MODEL =
 
 export type ReflectionHit = {
   index: number; // 1-based, used for [1], [2] citations in the output
-  kind: 'capture' | 'idea' | 'draft';
+  // Sprint 13 added 'newsletter_issue' so Reflect can label the source as
+  // "from your own newsletter" rather than a generic capture.
+  kind: 'capture' | 'idea' | 'draft' | 'newsletter_issue';
   title: string | null;
   snippet: string | null;
 };
@@ -99,14 +101,16 @@ export async function generateReflection({
       ? '(nothing in the bank resembles this draft yet)'
       : hits
           .map((h) => {
-            // Label by kind, with the title for ideas/drafts so the source is
-            // self-evident in the reflection.
+            // Label by kind, with the title for ideas/drafts/issues so the
+            // source is self-evident in the reflection.
             const label =
               h.kind === 'idea' && h.title
                 ? `idea: ${h.title}`
                 : h.kind === 'draft' && h.title
                   ? `earlier draft: ${h.title}`
-                  : h.kind;
+                  : h.kind === 'newsletter_issue' && h.title
+                    ? `your own newsletter: ${h.title}`
+                    : h.kind;
             const body = (h.snippet?.trim() || h.title?.trim() || '').slice(
               0,
               MAX_HIT_CHARS
