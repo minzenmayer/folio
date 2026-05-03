@@ -1,6 +1,6 @@
 // Folio · Shared studio server actions
 //
-// Sprint 7 ships two pieces of plumbing that belong to no single room:
+// Sprint 7 shipped two pieces of plumbing that belong to no single room:
 //
 //   • backfillEmbeddings({ kind })  — sweeps rows where embedding IS NULL,
 //     computes them in batches of 10, sleeps 200ms between batches. Needed
@@ -9,12 +9,21 @@
 //
 //   • findSimilar({ text, kinds, limit }) — top-N rows across captures /
 //     ideas / drafts ordered by cosine distance to the query embedding.
-//     The single retrieval primitive that the "Related" panel consumes
-//     today and that Sprint 8's Assistant rail will consume tomorrow.
+//     The retrieval primitive that the Related panel and Sprint 8's
+//     AssistantRailLive both consume.
 //
-// Both are strictly user-scoped — every query carries a userId match — and
-// both rely on pgvector's <=> cosine-distance operator with HNSW indexes
-// (idx_*_embedding) for shaping the result.
+// Sprint 9 adds the generative half:
+//
+//   • reflect({ draftId }) — loads the draft, runs findSimilar on its text,
+//     hands draft + grounding hits to Claude (via @ai-sdk/anthropic), and
+//     returns a 2-3 sentence reflection in the user's own voice. Failures
+//     return as a typed { ok: false } variant rather than throwing, so the
+//     Assistant rail can render a graceful error state.
+//
+// All three actions are strictly user-scoped. The vector queries use
+// pgvector's <=> cosine-distance operator with HNSW indexes
+// (idx_*_embedding); reflect() pays for one extra embedding round-trip
+// (via findSimilar) which is cheap enough at Haiku-tier costs to ignore.
 
 'use server';
 
@@ -24,8 +33,9 @@ import { db, captures, ideas, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
+import { generateReflection } from '@/lib/llm';
 
-// ─── shared helpers ────────────────────────────────────────
+// ─── shared helpers ───────────────────────────────────
 
 // Mirror of ideaEmbedSource from /studio/ideas/actions.ts — kept here so the
 // backfill computes embeddings the same way the save path does. If the save
@@ -79,7 +89,7 @@ function vectorLiteral(vec: number[]): string {
   return `[${vec.join(',')}]`;
 }
 
-// ─── backfillEmbeddings ───────────────────────────────────────
+// ─── backfillEmbeddings ─────────────────────────────────
 
 export type BackfillKind = 'captures' | 'ideas' | 'drafts' | 'all';
 
@@ -205,7 +215,7 @@ export async function backfillEmbeddings(
   return result;
 }
 
-// ─── findSimilar ───────────────────────────────────
+// ─── findSimilar ─────────────────────────────────
 
 export type SimilarKind = 'capture' | 'idea' | 'draft';
 
@@ -364,4 +374,121 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
   const all = buckets.flat();
   all.sort((a, b) => b.similarity - a.similarity);
   return all.slice(0, data.limit);
+}
+
+// ─── reflect — Sprint 9 generative Assistant ─────────────────────────
+
+// Below this length the reflection isn't worth running — Claude needs at
+// least a sentence or two to anchor on. Mirrors the MIN_QUERY_CHARS in
+// AssistantRailLive's debounced retrieval; both feel like the same
+// "got something to chew on" threshold to the user.
+const MIN_REFLECT_CHARS = 50;
+
+// Cap on grounding hits passed to Claude. Five is enough to shape the
+// reflection without inflating prompt cost or letting the bracket
+// citations sprawl past visual scanability.
+const REFLECT_HIT_LIMIT = 5;
+
+const reflectSchema = z.object({
+  draftId: z.string().uuid(),
+});
+
+export type ReflectResult =
+  | {
+      ok: true;
+      reflection: string;
+      sources: SimilarHit[];
+      basedOnChars: number;
+    }
+  | {
+      ok: false;
+      reason: 'too_short' | 'no_text' | 'error';
+      message: string;
+    };
+
+/**
+ * Generate a reflection on a draft, grounded in the user's own bank.
+ *
+ * Returns a discriminated union so the Assistant rail can branch cleanly:
+ *   · too_short / no_text → friendly nudge in the UI ("write a bit more").
+ *   · error → render a quiet failure note; Claude downtime shouldn't 500.
+ *   · ok → reflection text + sources for the "drawn from" list.
+ *
+ * Generation failure is a soft failure (returns ok: false). Auth + ownership
+ * mismatches still throw — those are bugs, not user-facing states.
+ */
+export async function reflect(input: unknown): Promise<ReflectResult> {
+  const user = await requireUser();
+  const { draftId } = reflectSchema.parse(input);
+
+  // Confirm ownership and grab the doc + title.
+  const [draft] = await db
+    .select({
+      id: drafts.id,
+      contentJson: drafts.contentJson,
+      title: drafts.title,
+    })
+    .from(drafts)
+    .where(and(eq(drafts.id, draftId), eq(drafts.userId, user.id)))
+    .limit(1);
+  if (!draft) throw new Error('Draft not found');
+
+  // Flatten the Tiptap doc to plain text for both retrieval and the prompt.
+  // Title (when present) is prefixed so the H1 informs grounding even if the
+  // body doesn't mention it.
+  const draftBody = tiptapJsonToText(draft.contentJson).trim();
+  const draftHead = draft.title?.trim();
+  const draftText = draftHead ? `${draftHead}\n\n${draftBody}` : draftBody;
+
+  if (draftText.length === 0) {
+    return {
+      ok: false,
+      reason: 'no_text',
+      message: 'Nothing to reflect on yet — start writing.',
+    };
+  }
+  if (draftText.length < MIN_REFLECT_CHARS) {
+    return {
+      ok: false,
+      reason: 'too_short',
+      message: 'Write a bit more, then try again.',
+    };
+  }
+
+  // Best-effort retrieval. If the embedding call fails (no key, network
+  // blip), Claude still gets the draft alone — the reflection just won't
+  // cite the bank. Better than failing the whole feature on retrieval.
+  let sources: SimilarHit[] = [];
+  try {
+    sources = await findSimilar({
+      text: draftText.slice(0, 4000),
+      kinds: ['capture', 'idea', 'draft'],
+      limit: REFLECT_HIT_LIMIT,
+      excludeDraftId: draftId,
+    });
+  } catch (err) {
+    console.warn('[reflect] findSimilar failed; continuing ungrounded', err);
+  }
+
+  try {
+    const reflection = await generateReflection({
+      draftText,
+      hits: sources.map((s, i) => ({
+        index: i + 1,
+        kind: s.kind,
+        title: s.title,
+        snippet: s.snippet,
+      })),
+    });
+    return {
+      ok: true,
+      reflection,
+      sources,
+      basedOnChars: draftText.length,
+    };
+  } catch (err) {
+    console.error('[reflect] generation failed', err);
+    const message = err instanceof Error ? err.message : 'reflection failed';
+    return { ok: false, reason: 'error', message };
+  }
 }

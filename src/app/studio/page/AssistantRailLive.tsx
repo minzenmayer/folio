@@ -5,9 +5,15 @@
 // debounce the editor's text, call findSimilar against captures + ideas +
 // drafts, and surface the top hits as pull-able rows.
 //
+// Sprint 9: adds the generative half. A "▸ Reflect on this draft" button
+// below the live list runs the reflect() server action, which grounds
+// Claude in findSimilar hits and returns a 2-3 sentence reflection in
+// the user's own voice. Result renders as a card at the top of the rail
+// with a "drawn from" sources list and a close affordance.
+//
 // Design tenets carried over from the rest of the studio:
-//   · "from you, not for you" — retrieval is remembering, not search.
-//     Empty/sparse states should feel calm, not broken.
+//   · "from you, not for you" — retrieval is remembering, generation is
+//     reflecting. Empty/sparse states should feel calm, not broken.
 //   · Editorial restraint — Fraunces for content, JetBrains Mono for
 //     system labels, single-character glyphs as decoration.
 //   · Sacred saves — the rail is observational. It never blocks the
@@ -23,7 +29,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
-import { findSimilar, type SimilarHit } from '../actions';
+import { findSimilar, reflect, type SimilarHit } from '../actions';
 
 const DEBOUNCE_MS = 1500;
 const MIN_QUERY_CHARS = 12;
@@ -49,9 +55,19 @@ type Status =
   | { kind: 'empty'; basedOnChars: number }
   | { kind: 'error'; message: string };
 
+type ReflectionState =
+  | { kind: 'idle' }
+  | { kind: 'thinking' }
+  | { kind: 'ok'; reflection: string; sources: SimilarHit[]; basedOnChars: number }
+  | { kind: 'soft'; message: string } // too_short / no_text — friendly nudge
+  | { kind: 'error'; message: string };
+
 export function AssistantRailLive({ draftId }: { draftId: string }) {
   const { editor } = useEditorContext();
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  const [reflection, setReflection] = useState<ReflectionState>({
+    kind: 'idle',
+  });
 
   // Refs for debounced retrieval. We don't store the timer ID in state to
   // avoid re-renders on every keystroke; we only set state when retrieval
@@ -61,6 +77,9 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
   // one finishes, the older one's setStatus is ignored — same idea as
   // the editor's coalesced saves.
   const queryStampRef = useRef(0);
+  // Same pattern for reflection so a stale request doesn't overwrite a
+  // newer one's result if the user double-clicks Reflect.
+  const reflectStampRef = useRef(0);
 
   const runRetrieval = useCallback(
     async (text: string) => {
@@ -164,6 +183,45 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
     [editor]
   );
 
+  // Sprint 9: trigger a reflection. The server action loads the most
+  // recently saved draft state — autosave's 1s debounce means in the
+  // common case (clicking Reflect after a typing pause) the saved state
+  // already reflects what the user sees.
+  const onReflect = useCallback(async () => {
+    const stamp = ++reflectStampRef.current;
+    setReflection({ kind: 'thinking' });
+    try {
+      const result = await reflect({ draftId });
+      if (stamp !== reflectStampRef.current) return;
+      if (!result.ok) {
+        // Discriminated single-test narrowing — see the S6 wave 1 gotcha:
+        // checking !ok alone is enough; TS narrows to the failure variant.
+        if (result.reason === 'error') {
+          setReflection({ kind: 'error', message: result.message });
+        } else {
+          setReflection({ kind: 'soft', message: result.message });
+        }
+        return;
+      }
+      setReflection({
+        kind: 'ok',
+        reflection: result.reflection,
+        sources: result.sources,
+        basedOnChars: result.basedOnChars,
+      });
+    } catch (err) {
+      if (stamp !== reflectStampRef.current) return;
+      const message =
+        err instanceof Error ? err.message : 'reflection failed';
+      setReflection({ kind: 'error', message });
+    }
+  }, [draftId]);
+
+  const closeReflection = useCallback(() => {
+    reflectStampRef.current++; // cancel any inflight result
+    setReflection({ kind: 'idle' });
+  }, []);
+
   return (
     <aside
       className="border-l border-rule bg-paper/40 flex flex-col"
@@ -179,8 +237,22 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
         </p>
       </div>
 
-      <div className="flex-1 px-5 py-6 overflow-y-auto">
+      <div className="flex-1 px-5 py-6 overflow-y-auto flex flex-col gap-6">
+        {reflection.kind !== 'idle' && (
+          <ReflectionPanel
+            state={reflection}
+            onClose={closeReflection}
+            onRetry={onReflect}
+          />
+        )}
+
         <BodyForStatus status={status} onPull={onPull} />
+
+        <ReflectButton
+          onClick={onReflect}
+          thinking={reflection.kind === 'thinking'}
+          hasResult={reflection.kind === 'ok'}
+        />
       </div>
 
       <div className="px-5 py-3 border-t border-rule font-mono text-[10px] tracking-[0.16em] uppercase text-tag/80 flex items-center gap-2">
@@ -293,6 +365,129 @@ function HitRow({
         + pull into draft
       </div>
     </button>
+  );
+}
+
+function ReflectButton({
+  onClick,
+  thinking,
+  hasResult,
+}: {
+  onClick: () => void;
+  thinking: boolean;
+  hasResult: boolean;
+}) {
+  // Three labels:
+  //   · idle (no reflection yet) → "Reflect on this draft"
+  //   · thinking → "Reflecting…" (disabled)
+  //   · result already showing → "Reflect again" (re-runs)
+  const label = thinking
+    ? 'Reflecting…'
+    : hasResult
+      ? '↻ Reflect again'
+      : '⚉ Reflect on this draft';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={thinking}
+      className="self-start font-mono text-[10px] tracking-[0.22em] uppercase border border-rule rounded-[3px] px-3 py-2 text-ink-soft hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {label}
+    </button>
+  );
+}
+
+function ReflectionPanel({
+  state,
+  onClose,
+  onRetry,
+}: {
+  state: Exclude<ReflectionState, { kind: 'idle' }>;
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="border border-accent/40 rounded-[3px] bg-paper px-4 py-4 relative">
+      <div className="flex items-baseline justify-between gap-2 mb-3">
+        <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold">
+          ▸ Reflection
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close reflection"
+          className="font-mono text-[14px] leading-none text-tag hover:text-accent transition-colors"
+        >
+          ✕
+        </button>
+      </div>
+
+      {state.kind === 'thinking' && (
+        <p className="font-serif italic text-[13px] text-tag leading-[1.55]">
+          weaving<span className="opacity-60">…</span>
+        </p>
+      )}
+
+      {state.kind === 'soft' && (
+        <p className="font-serif italic text-[14px] text-ink-soft leading-[1.55]">
+          {state.message}
+        </p>
+      )}
+
+      {state.kind === 'error' && (
+        <div className="flex flex-col gap-2">
+          <p
+            className="font-serif italic text-[14px] text-accent leading-[1.55]"
+            title={state.message}
+          >
+            Couldn't reach the Assistant. Try again in a moment.
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="self-start font-mono text-[10px] tracking-[0.22em] uppercase text-tag hover:text-accent transition-colors"
+          >
+            ↻ Retry
+          </button>
+        </div>
+      )}
+
+      {state.kind === 'ok' && (
+        <>
+          <p className="font-serif text-[14px] text-ink leading-[1.6] whitespace-pre-wrap">
+            {state.reflection}
+          </p>
+
+          {state.sources.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-rule">
+              <div className="font-mono text-[9px] tracking-[0.22em] uppercase text-tag font-bold mb-2">
+                ▸ Drawn from
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {state.sources.map((src, i) => (
+                  <li
+                    key={`${src.kind}-${src.id}`}
+                    className="flex items-baseline gap-2 font-mono text-[10px] text-tag"
+                  >
+                    <span className="text-tag/70">[{i + 1}]</span>
+                    <span className="text-accent" aria-hidden>
+                      {KIND_GLYPH[src.kind]}
+                    </span>
+                    <span className="font-serif italic text-[12px] text-ink-soft truncate normal-case tracking-normal">
+                      {src.title || src.snippet?.slice(0, 60) || '(untitled)'}
+                    </span>
+                    <span className="ml-auto text-tag/60 tracking-[0.04em]">
+                      · {src.similarity.toFixed(2)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
