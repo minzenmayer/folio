@@ -10,6 +10,15 @@
 // "Assistant" didn't fit. The file name is preserved to keep the import
 // surface stable; the copy now reads as "the garden" everywhere.
 //
+// Sprint 12: takes a `mode` prop ('newsletter' | 'linkedin' | 'self-pilot'
+// or undefined when opened outside the composer). Two effects:
+//   · The reflect call is mode-aware so the reflection's voice matches
+//     how the draft was started (newsletter voice / LinkedIn voice /
+//     neutral when self-pilot or unspecified).
+//   · Self-pilot starts the rail in a *dormant* state — no debounced
+//     retrieval, no listening copy. The header carries a small toggle
+//     to wake it up if/when the user wants the garden's company.
+//
 // Design tenets carried over from the rest of the bed:
 //   · Garden, not assistant — retrieval is remembering; generation is
 //     reflecting. Empty/sparse states should feel calm, not broken.
@@ -47,6 +56,8 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   draft: 'draft',
 };
 
+export type GardenRailMode = 'newsletter' | 'linkedin' | 'self-pilot';
+
 type Status =
   | { kind: 'idle' } // waiting for enough text
   | { kind: 'loading' }
@@ -57,12 +68,29 @@ type Status =
 type ReflectionState =
   | { kind: 'idle' }
   | { kind: 'thinking' }
-  | { kind: 'ok'; reflection: string; sources: SimilarHit[]; basedOnChars: number }
+  | {
+      kind: 'ok';
+      reflection: string;
+      sources: SimilarHit[];
+      basedOnChars: number;
+    }
   | { kind: 'soft'; message: string } // too_short / no_text — friendly nudge
   | { kind: 'error'; message: string };
 
-export function AssistantRailLive({ draftId }: { draftId: string }) {
+export function AssistantRailLive({
+  draftId,
+  mode,
+}: {
+  draftId: string;
+  mode?: GardenRailMode;
+}) {
   const { editor } = useEditorContext();
+
+  // Self-pilot opens dormant; everything else opens awake. Once the user
+  // wakes the rail, it stays awake for the rest of the session — we
+  // intentionally don't persist the dormant flag back into the URL or
+  // localStorage. Coming back to a self-pilot draft = fresh quiet rail.
+  const [awake, setAwake] = useState(mode !== 'self-pilot');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [reflection, setReflection] = useState<ReflectionState>({
     kind: 'idle',
@@ -107,9 +135,12 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
   );
 
   // Subscribe to editor updates. Each `update` event triggers a debounced
-  // retrieval call against the editor's current plain text.
+  // retrieval call against the editor's current plain text. When the rail
+  // is dormant (self-pilot, before wake), we skip the subscription
+  // entirely so even the listening loop is silent.
   useEffect(() => {
     if (!editor) return;
+    if (!awake) return;
 
     const trigger = () => {
       const text = editor.getText().trim().slice(0, MAX_QUERY_CHARS);
@@ -134,7 +165,7 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
       editor.off('update', trigger);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [editor, runRetrieval]);
+  }, [editor, runRetrieval, awake]);
 
   // Click handler: insert the hit's content into the editor at the cursor
   // position. Captures + drafts → blockquote (working from words). Ideas
@@ -185,15 +216,16 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
   // Sprint 9: trigger a reflection. The server action loads the most
   // recently saved draft state — autosave's 1s debounce means in the
   // common case (clicking Reflect after a typing pause) the saved state
-  // already reflects what the user sees.
+  // already reflects what the user sees. Sprint 12: pass mode through so
+  // the reflection's voice matches.
   const onReflect = useCallback(async () => {
     const stamp = ++reflectStampRef.current;
     setReflection({ kind: 'thinking' });
     try {
-      const result = await reflect({ draftId });
+      const result = await reflect({ draftId, mode });
       if (stamp !== reflectStampRef.current) return;
       if (!result.ok) {
-        // Discriminated single-test narrowing — see the S6 wave 1 gotcha:
+        // Discriminated single-test narrowing — see the gotchas doc:
         // checking !ok alone is enough; TS narrows to the failure variant.
         if (result.reason === 'error') {
           setReflection({ kind: 'error', message: result.message });
@@ -214,7 +246,7 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
         err instanceof Error ? err.message : 'reflection failed';
       setReflection({ kind: 'error', message });
     }
-  }, [draftId]);
+  }, [draftId, mode]);
 
   const closeReflection = useCallback(() => {
     reflectStampRef.current++; // cancel any inflight result
@@ -226,36 +258,71 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
       className="border-l border-rule bg-paper/40 flex flex-col"
       aria-label="The garden"
     >
-      <div className="px-5 pt-6 pb-4 border-b border-rule">
-        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-3">
-          ☘ The garden
+      <div className="px-5 pt-6 pb-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold">
+            ☘ The garden
+          </div>
+          {mode === 'self-pilot' && (
+            <button
+              type="button"
+              onClick={() => setAwake((v) => !v)}
+              aria-pressed={awake}
+              title={awake ? 'Quiet the garden' : 'Wake the garden'}
+              className={`font-mono text-[9px] tracking-[0.18em] uppercase rounded-full px-2.5 py-1 transition-colors border ${
+                awake
+                  ? 'bg-paper-2 text-ink border-rule hover:border-accent hover:text-accent'
+                  : 'bg-transparent text-tag border-rule hover:bg-paper-2 hover:text-ink'
+              }`}
+            >
+              {awake ? '◉ Awake' : '◌ Asleep'}
+            </button>
+          )}
         </div>
-        <p className="font-serif italic text-[14px] text-ink-soft leading-[1.5]">
-          What your bed is humming with — surfaced as you write. Click a row
-          to drop it into the draft.
-        </p>
-      </div>
-
-      <div className="flex-1 px-5 py-6 overflow-y-auto flex flex-col gap-6">
-        {reflection.kind !== 'idle' && (
-          <ReflectionPanel
-            state={reflection}
-            onClose={closeReflection}
-            onRetry={onReflect}
-          />
+        {awake ? (
+          <p className="font-serif italic text-[14px] text-ink-soft leading-[1.5]">
+            What your bed is humming with — surfaced as you write. Click a row
+            to drop it into the draft.
+          </p>
+        ) : (
+          <p className="font-serif italic text-[14px] text-tag leading-[1.5]">
+            Self-pilot — the garden's resting. Tap{' '}
+            <span className="not-italic font-mono text-[11px] tracking-[0.18em]">
+              ◌ Asleep
+            </span>{' '}
+            above when you want it to listen.
+          </p>
         )}
-
-        <BodyForStatus status={status} onPull={onPull} />
-
-        <ReflectButton
-          onClick={onReflect}
-          thinking={reflection.kind === 'thinking'}
-          hasResult={reflection.kind === 'ok'}
-        />
       </div>
 
-      <div className="px-5 py-3 border-t border-rule font-mono text-[10px] tracking-[0.16em] uppercase text-tag/80 flex items-center gap-2">
-        <FootnoteForStatus status={status} />
+      {awake && (
+        <div className="flex-1 px-5 py-6 overflow-y-auto flex flex-col gap-6">
+          {reflection.kind !== 'idle' && (
+            <ReflectionPanel
+              state={reflection}
+              onClose={closeReflection}
+              onRetry={onReflect}
+            />
+          )}
+
+          <BodyForStatus status={status} onPull={onPull} />
+
+          <ReflectButton
+            onClick={onReflect}
+            thinking={reflection.kind === 'thinking'}
+            hasResult={reflection.kind === 'ok'}
+          />
+        </div>
+      )}
+
+      {!awake && <div className="flex-1" />}
+
+      <div className="px-5 py-3 font-mono text-[10px] tracking-[0.16em] uppercase text-tag/80 flex items-center gap-2">
+        {awake ? (
+          <FootnoteForStatus status={status} />
+        ) : (
+          <span>· dormant</span>
+        )}
       </div>
     </aside>
   );
@@ -272,7 +339,7 @@ function BodyForStatus({
     case 'idle':
       return (
         <div className="flex flex-col items-start gap-3">
-          <span className="inline-block font-mono text-[9px] tracking-[0.22em] uppercase text-tag bg-paper-2 border border-rule rounded-full px-3 py-1">
+          <span className="inline-block font-mono text-[9px] tracking-[0.22em] uppercase text-tag bg-paper-2 rounded-full px-3 py-1">
             Listening
           </span>
           <p className="font-serif italic text-[13px] text-tag leading-[1.55]">
@@ -293,7 +360,7 @@ function BodyForStatus({
     case 'empty':
       return (
         <div className="flex flex-col items-start gap-3">
-          <span className="inline-block font-mono text-[9px] tracking-[0.22em] uppercase text-tag bg-paper-2 border border-rule rounded-full px-3 py-1">
+          <span className="inline-block font-mono text-[9px] tracking-[0.22em] uppercase text-tag bg-paper-2 rounded-full px-3 py-1">
             Quiet
           </span>
           <p className="font-serif italic text-[13px] text-tag leading-[1.55]">
@@ -337,7 +404,7 @@ function HitRow({
     <button
       type="button"
       onClick={() => onPull(hit)}
-      className="w-full text-left rounded-[3px] px-2 py-3 -mx-2 hover:bg-paper-2 transition-colors group focus:outline-none focus:ring-1 focus:ring-accent/40"
+      className="w-full text-left rounded-soft px-3 py-3 -mx-1 hover:bg-paper-2 transition-colors group focus:outline-none focus:ring-1 focus:ring-accent/40"
     >
       <div className="flex items-baseline gap-2 font-mono text-[10px] tracking-[0.16em] uppercase text-tag mb-1">
         <span className="text-accent" aria-hidden>
@@ -390,7 +457,7 @@ function ReflectButton({
       type="button"
       onClick={onClick}
       disabled={thinking}
-      className="self-start font-mono text-[10px] tracking-[0.22em] uppercase border border-rule rounded-[3px] px-3 py-2 text-ink-soft hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="self-start font-mono text-[10px] tracking-[0.22em] uppercase border border-rule rounded-soft px-3 py-2 text-ink-soft hover:border-accent hover:text-accent hover:bg-paper transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {label}
     </button>
@@ -407,7 +474,7 @@ function ReflectionPanel({
   onRetry: () => void;
 }) {
   return (
-    <div className="border border-accent/40 rounded-[3px] bg-paper px-4 py-4 relative">
+    <div className="border border-accent/40 rounded-card bg-paper px-4 py-4 relative shadow-soft">
       <div className="flex items-baseline justify-between gap-2 mb-3">
         <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold">
           ▸ Reflection

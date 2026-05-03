@@ -14,6 +14,10 @@
 // sidebar (rendered by /studio/layout.tsx) already covers draft
 // navigation in its Recent section. Layout here is now 2 columns:
 // editor | garden rail.
+//
+// Sprint 12: composer mode threads through via ?mode=newsletter |
+// linkedin | self-pilot. The garden rail uses it to pick a voice for
+// Reflect; self-pilot also boots the rail dormant.
 
 import type { Metadata } from 'next';
 import { auth } from '@clerk/nextjs/server';
@@ -21,11 +25,15 @@ import { notFound, redirect } from 'next/navigation';
 import { eq, and } from 'drizzle-orm';
 import { db, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
-import { AssistantRailLive } from '../AssistantRailLive';
+import {
+  AssistantRailLive,
+  type GardenRailMode,
+} from '../AssistantRailLive';
 import { EditorContextProvider } from '../EditorContext';
 import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
+type SearchParams = Promise<{ mode?: string | string[] }>;
 
 // Static metadata. Per-draft titles surfaced via the in-page <DraftMeta>
 // header; we deliberately skip auth-in-metadata to avoid the Clerk 6 +
@@ -35,13 +43,35 @@ export const metadata: Metadata = {
   title: 'The Page · Thoughtbed',
 };
 
-export default async function DraftEditorPage({ params }: { params: Params }) {
+const VALID_MODES: ReadonlyArray<GardenRailMode> = [
+  'newsletter',
+  'linkedin',
+  'self-pilot',
+];
+
+function parseMode(raw: string | string[] | undefined): GardenRailMode | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) return undefined;
+  return (VALID_MODES as readonly string[]).includes(value)
+    ? (value as GardenRailMode)
+    : undefined;
+}
+
+export default async function DraftEditorPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: SearchParams;
+}) {
   // Auth check first — synchronous redirect before any heavy await,
   // per the gotchas doc.
   const { userId: clerkId } = await auth();
   if (!clerkId) redirect('/sign-in');
 
   const { id } = await params;
+  const { mode: modeParam } = await searchParams;
+  const mode = parseMode(modeParam);
   const user = await requireUser();
 
   const [draft] = await db
@@ -68,7 +98,7 @@ export default async function DraftEditorPage({ params }: { params: Params }) {
           </div>
         </section>
 
-        <AssistantRailLive draftId={draft.id} />
+        <AssistantRailLive draftId={draft.id} mode={mode} />
       </div>
     </EditorContextProvider>
   );
