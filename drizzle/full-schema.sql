@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   weight integer DEFAULT 0,
   pull integer DEFAULT 0,
   heat real DEFAULT 0,
+  embedding vector(1536),
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now(),
   last_visited_at timestamptz,
@@ -41,6 +42,8 @@ CREATE TABLE IF NOT EXISTS ideas (
 
 CREATE INDEX IF NOT EXISTS idx_ideas_user_visited ON ideas(user_id, last_visited_at);
 CREATE INDEX IF NOT EXISTS idx_ideas_user_maturity ON ideas(user_id, maturity);
+CREATE INDEX IF NOT EXISTS idx_ideas_embedding
+  ON ideas USING hnsw (embedding vector_cosine_ops);
 
 -- ─── CAPTURES ───
 CREATE TABLE IF NOT EXISTS captures (
@@ -129,7 +132,7 @@ CREATE TABLE IF NOT EXISTS assistant_offers (
   created_at timestamptz DEFAULT now()
 );
 
--- ─── DRAFTS ───  (Sprint 5: The Page; version added in Sprint 6)
+-- ─── DRAFTS ───  (Sprint 5: The Page; version added in Sprint 6; embedding in Sprint 7)
 CREATE TABLE IF NOT EXISTS drafts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -137,12 +140,15 @@ CREATE TABLE IF NOT EXISTS drafts (
   content_json jsonb NOT NULL,
   idea_id uuid REFERENCES ideas(id) ON DELETE SET NULL,
   version integer NOT NULL DEFAULT 1,
+  embedding vector(1536),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_drafts_user_updated
   ON drafts(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_drafts_embedding
+  ON drafts USING hnsw (embedding vector_cosine_ops);
 
 -- ─── DRAFT_VERSIONS ───  (Sprint 6 wave 3: history trail)
 CREATE TABLE IF NOT EXISTS draft_versions (

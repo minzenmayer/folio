@@ -62,6 +62,12 @@ export const ideas = pgTable(
     pull: integer('pull').default(0),
     heat: real('heat').default(0),
 
+    // Sprint 7: retrieval substrate. Computed from title + essence + body
+    // on every successful save. Nullable so rows that pre-date Sprint 7 — or
+    // whose embedText() call failed — still read cleanly; backfillEmbeddings
+    // sweeps NULLs in batches.
+    embedding: vector('embedding', { dimensions: 1536 }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
     lastVisitedAt: timestamp('last_visited_at', { withTimezone: true }),
@@ -75,6 +81,10 @@ export const ideas = pgTable(
     userMaturityIdx: index('idx_ideas_user_maturity').on(
       table.userId,
       table.maturity
+    ),
+    embeddingIdx: index('idx_ideas_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
     ),
   })
 );
@@ -255,6 +265,11 @@ export const drafts = pgTable(
     // updateDraft gates the WHERE on this; mismatch = concurrent edit.
     version: integer('version').notNull().default(1),
 
+    // Sprint 7: retrieval substrate. Computed from tiptapJsonToText(contentJson)
+    // on every successful save (createDraft / updateDraft / restoreDraftVersion).
+    // Same nullable + best-effort pattern as ideas.embedding.
+    embedding: vector('embedding', { dimensions: 1536 }),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -266,6 +281,10 @@ export const drafts = pgTable(
     userUpdatedIdx: index('idx_drafts_user_updated').on(
       table.userId,
       table.updatedAt
+    ),
+    embeddingIdx: index('idx_drafts_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
     ),
   })
 );
