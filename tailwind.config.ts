@@ -5,7 +5,8 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Folio's editorial palette — directly from the design issues
+        // Thoughtbed's editorial palette — directly from the design issues.
+        // Sprint 12 leaves the hues alone; the aesthetic refresh is shape-only.
         bg: '#f6f1e8',
         paper: '#fbf7ef',
         'paper-2': '#efe8d9',
@@ -32,6 +33,21 @@ const config: Config = {
         tightest: '-0.025em',
         tighter: '-0.018em',
         editorial: '-0.012em',
+      },
+      // Sprint 12 aesthetic refresh: rounder, calmer shapes inspired by
+      // Ghostbase. The numeric scale below extends Tailwind's defaults so
+      // we can write rounded-card / rounded-soft directly in JSX without
+      // memorising pixel values. xl/2xl shortcuts feed inputs/buttons (xl)
+      // and cards/panels (2xl); pills stay rounded-full.
+      borderRadius: {
+        soft: '8px',   // inputs, small buttons
+        card: '14px',  // composer card, sidebar nav pill
+        panel: '20px', // larger panels, connector cards
+      },
+      boxShadow: {
+        // Subtle hover lift used on cards. Intentionally weaker than
+        // Tailwind's default sm so the editorial restraint is preserved.
+        soft: '0 1px 2px rgba(21, 17, 12, 0.04), 0 1px 4px rgba(21, 17, 12, 0.03)',
       },
     },
   },

@@ -23,9 +23,10 @@
 }
 
 /* ─────────────────────────────────────────────
- * Folio · Tiptap editor typography
+ * Thoughtbed · Tiptap editor typography
  * Editorial defaults for the writing surface in /studio/page.
  * Scoped to .folio-prose so it doesn't leak into other surfaces.
+ * Class name kept stable — Sprint 12 only softens shapes, not type.
  * ─────────────────────────────────────────── */
 .folio-prose {
   /* leave font-* / color from the editor element's classes */
@@ -94,7 +95,7 @@
   font-size: 0.9em;
   background: theme('colors.code-bg');
   padding: 0.12em 0.36em;
-  border-radius: 3px;
+  border-radius: 6px;
   color: theme('colors.ink');
 }
 .folio-prose pre {
@@ -102,7 +103,7 @@
   font-size: 14px;
   background: theme('colors.code-bg');
   border: 1px solid theme('colors.rule');
-  border-radius: 3px;
+  border-radius: 10px;
   padding: 1rem 1.1rem;
   overflow-x: auto;
   line-height: 1.55;
