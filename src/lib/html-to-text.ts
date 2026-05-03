@@ -124,7 +124,15 @@ function stripElements(html: string): string {
 export function htmlToText(html: string): string {
   if (!html) return '';
 
-  let text = stripElements(html);
+  // Beehiiv (and most renderers) prefix the body with <!DOCTYPE html>.
+  // Drop those + HTML comments before any tag pass — they leak through
+  // the <\/?[a-zA-Z][^>]*> catch-all (which only matches tags starting
+  // with a letter, not '!').
+  let text = html
+    .replace(/<!doctype[^>]*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+
+  text = stripElements(text);
 
   // Replace self-closing/inline tags with their placeholders before the
   // generic block-tag pass so we don't lose them.

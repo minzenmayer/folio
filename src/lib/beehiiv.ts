@@ -34,7 +34,7 @@ export class BeehiivError extends Error {
   }
 }
 
-// ─── shapes (subset; keep narrow on purpose) ──────────────────────
+// ─── shapes (subset; keep narrow on purpose) ───────────────────────
 
 export type BeehiivPublication = {
   id: string;
@@ -64,7 +64,13 @@ export type BeehiivPost = {
   status?: string | null;
   publish_date?: number | null; // Unix epoch seconds
   displayed_date?: number | null;
+  // NOTE: As of the Wave 1 spike against the live API, Beehiiv does NOT
+  // return `status_changed_at` on the posts list response. Our upsert
+  // logic falls back to "always re-write" when it's null, so syncs do
+  // a bit of extra embedding work — fine at our archive size. Kept in
+  // the type for future-proofing in case Beehiiv re-adds it.
   status_changed_at?: number | null;
+  created?: number | null;
   thumbnail_url?: string | null;
   content_tags?: string[] | null;
   authors?: string[] | null;
