@@ -1,20 +1,24 @@
 // Folio · Shared studio server actions
 //
-// Sprint 7: backfillEmbeddings — sweeps rows where embedding IS NULL,
-// computes them in batches of 10, sleeps 200ms between batches. Needed
-// because Sprint 3's createCapture already embedded but pre-Sprint-7
-// ideas/drafts and pre-Sprint-3 captures don't.
+// Sprint 7 ships two pieces of plumbing that belong to no single room:
 //
-// Strictly user-scoped — every query carries a userId match.
+//   • backfillEmbeddings({ kind })  — sweeps rows where embedding IS NULL,
+//     computes them in batches of 10, sleeps 200ms between batches. Needed
+//     because Sprint 3's createCapture already embedded but pre-Sprint-7
+//     ideas/drafts and pre-Sprint-3 captures don't.
 //
-// findSimilar lands in this same file in the next commit. The shared
-// embedding-source helpers live here so both actions can pull from the
-// same definitions (write-time and search-time embeddings must stay
-// aligned, otherwise neighbors drift).
+//   • findSimilar({ text, kinds, limit }) — top-N rows across captures /
+//     ideas / drafts ordered by cosine distance to the query embedding.
+//     The single retrieval primitive that the "Related" panel consumes
+//     today and that Sprint 8's Assistant rail will consume tomorrow.
+//
+// Both are strictly user-scoped — every query carries a userId match — and
+// both rely on pgvector's <=> cosine-distance operator with HNSW indexes
+// (idx_*_embedding) for shaping the result.
 
 'use server';
 
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, captures, ideas, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
@@ -25,7 +29,8 @@ import { tiptapJsonToText } from '@/lib/exports';
 
 // Mirror of ideaEmbedSource from /studio/ideas/actions.ts — kept here so the
 // backfill computes embeddings the same way the save path does. If the save
-// path's source-text shape changes, change this too.
+// path's source-text shape changes, change this too (write-time and search-
+// time embeddings must stay aligned, otherwise neighbors drift).
 function ideaEmbedSource(idea: {
   title: string;
   essence: string | null;
@@ -37,7 +42,8 @@ function ideaEmbedSource(idea: {
   return text.length > 0 ? text : null;
 }
 
-// Mirror of draftEmbedSource from /studio/page/actions.ts.
+// Mirror of draftEmbedSource from /studio/page/actions.ts — same stay-aligned
+// reasoning as ideaEmbedSource above.
 function draftEmbedSource(
   contentJson: unknown,
   title: string | null
@@ -61,6 +67,16 @@ const BATCH_SLEEP_MS = 200;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * pgvector wants the embedding as a Postgres literal of shape '[1,2,3,...]'
+ * when interpolated through `sql` template literals. Drizzle's standard
+ * .set({ embedding }) handles this for INSERT/UPDATE on the typed column,
+ * but the ORDER BY ... <=> $1 path inside findSimilar needs the literal.
+ */
+function vectorLiteral(vec: number[]): string {
+  return `[${vec.join(',')}]`;
 }
 
 // ─── backfillEmbeddings ───────────────────────────────────────
@@ -187,4 +203,165 @@ export async function backfillEmbeddings(
   }
 
   return result;
+}
+
+// ─── findSimilar ───────────────────────────────────
+
+export type SimilarKind = 'capture' | 'idea' | 'draft';
+
+export type SimilarHit = {
+  kind: SimilarKind;
+  id: string;
+  title: string | null;
+  snippet: string | null;
+  similarity: number; // 0..1, 1 = identical
+};
+
+const findSimilarSchema = z.object({
+  text: z.string().min(1).max(8000),
+  kinds: z
+    .array(z.enum(['capture', 'idea', 'draft']))
+    .min(1)
+    .default(['capture', 'idea', 'draft']),
+  limit: z.number().int().min(1).max(50).default(10),
+  // Caller passes when retrieval is "things related to X" and X itself
+  // shouldn't show up in its own related list.
+  excludeIdeaId: z.string().uuid().optional(),
+  excludeDraftId: z.string().uuid().optional(),
+  excludeCaptureId: z.string().uuid().optional(),
+});
+
+export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
+  const user = await requireUser();
+  const data = findSimilarSchema.parse(input);
+
+  // Embed the query. If the OpenAI call fails we surface it; this is the
+  // user-visible retrieval path, not a background save, so silent failure
+  // would mean an empty Related panel for an unclear reason.
+  const queryEmbedding = await embedText(data.text);
+  const lit = vectorLiteral(queryEmbedding);
+
+  const wanted = new Set<SimilarKind>(data.kinds);
+  // Each kind queries its own table for top-N by cosine distance, then we
+  // merge + sort in JS. Per-kind limit is the requested global limit so a
+  // single kind can fill the result if the others return nothing.
+  const perKindLimit = data.limit;
+
+  const promises: Promise<SimilarHit[]>[] = [];
+
+  if (wanted.has('capture')) {
+    const captureWhere = data.excludeCaptureId
+      ? sql`${captures.userId} = ${user.id}
+            AND ${captures.embedding} IS NOT NULL
+            AND ${captures.id} != ${data.excludeCaptureId}`
+      : sql`${captures.userId} = ${user.id}
+            AND ${captures.embedding} IS NOT NULL`;
+
+    promises.push(
+      db
+        .select({
+          id: captures.id,
+          body: captures.body,
+          summary: captures.summary,
+          // 1 - cosine_distance == cosine_similarity; the <=> operator returns
+          // the distance (0 = identical, 2 = opposite).
+          distance: sql<number>`${captures.embedding} <=> ${lit}::vector`,
+        })
+        .from(captures)
+        .where(captureWhere)
+        .orderBy(sql`${captures.embedding} <=> ${lit}::vector`)
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map(
+            (r): SimilarHit => ({
+              kind: 'capture',
+              id: r.id,
+              title: r.summary ?? null,
+              snippet: r.body,
+              similarity: 1 - Number(r.distance),
+            })
+          )
+        )
+    );
+  }
+
+  if (wanted.has('idea')) {
+    const ideaWhere = data.excludeIdeaId
+      ? sql`${ideas.userId} = ${user.id}
+            AND ${ideas.embedding} IS NOT NULL
+            AND ${ideas.id} != ${data.excludeIdeaId}`
+      : sql`${ideas.userId} = ${user.id}
+            AND ${ideas.embedding} IS NOT NULL`;
+
+    promises.push(
+      db
+        .select({
+          id: ideas.id,
+          title: ideas.title,
+          essence: ideas.essence,
+          distance: sql<number>`${ideas.embedding} <=> ${lit}::vector`,
+        })
+        .from(ideas)
+        .where(ideaWhere)
+        .orderBy(sql`${ideas.embedding} <=> ${lit}::vector`)
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map(
+            (r): SimilarHit => ({
+              kind: 'idea',
+              id: r.id,
+              title: r.title,
+              snippet: r.essence,
+              similarity: 1 - Number(r.distance),
+            })
+          )
+        )
+    );
+  }
+
+  if (wanted.has('draft')) {
+    const draftWhere = data.excludeDraftId
+      ? sql`${drafts.userId} = ${user.id}
+            AND ${drafts.embedding} IS NOT NULL
+            AND ${drafts.id} != ${data.excludeDraftId}`
+      : sql`${drafts.userId} = ${user.id}
+            AND ${drafts.embedding} IS NOT NULL`;
+
+    promises.push(
+      db
+        .select({
+          id: drafts.id,
+          title: drafts.title,
+          contentJson: drafts.contentJson,
+          distance: sql<number>`${drafts.embedding} <=> ${lit}::vector`,
+        })
+        .from(drafts)
+        .where(draftWhere)
+        .orderBy(sql`${drafts.embedding} <=> ${lit}::vector`)
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map((r): SimilarHit => {
+            // Use the H1-derived title when present; otherwise crib the
+            // first ~120 chars of flattened text as the snippet.
+            const flat = tiptapJsonToText(r.contentJson).trim();
+            const snippet =
+              flat.length > 0
+                ? flat.slice(0, 200) + (flat.length > 200 ? '…' : '')
+                : null;
+            return {
+              kind: 'draft',
+              id: r.id,
+              title: r.title,
+              snippet,
+              similarity: 1 - Number(r.distance),
+            };
+          })
+        )
+    );
+  }
+
+  const buckets = await Promise.all(promises);
+  const all = buckets.flat();
+  all.sort((a, b) => b.similarity - a.similarity);
+  return all.slice(0, data.limit);
 }
