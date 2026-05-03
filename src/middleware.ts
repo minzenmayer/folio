@@ -1,6 +1,8 @@
 // Folio · Clerk middleware
 // All routes are protected by default; the public list is the exception.
 // /api/webhooks/clerk MUST be public — it's how Clerk reaches our server.
+// /api/cron/* MUST be public — Vercel Cron has no Clerk session; the
+// route handler enforces auth via the CRON_SECRET bearer token instead.
 
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
@@ -10,6 +12,7 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/api/webhooks/clerk',
+  '/api/cron/(.*)',
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
