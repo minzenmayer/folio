@@ -17,6 +17,7 @@ import { eq, desc } from 'drizzle-orm';
 import { db, drafts, ideas } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { Sidebar, type RecentItem } from './Sidebar';
+import { SettingsModal } from './SettingsModal';
 
 const RECENT_PER_KIND = 15;
 const RECENT_TOTAL = 20;
@@ -92,6 +93,11 @@ export default async function StudioLayout({
     <div className="min-h-screen flex bg-bg">
       <Sidebar firstName={firstName} recents={recents} />
       <main className="flex-1 min-w-0">{children}</main>
+      {/* Sprint 14: Settings is a modal overlay driven by the
+          ?settings=<section> searchParam. The component renders nothing
+          when no param is present, so it's safe to mount here for every
+          /studio/* route. */}
+      <SettingsModal />
     </div>
   );
 }
