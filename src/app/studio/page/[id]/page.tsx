@@ -56,6 +56,7 @@ export default async function DraftEditorPage({ params }: { params: Params }) {
               draftId={draft.id}
               initialContent={draft.contentJson}
               initialVersion={draft.version}
+              initialUpdatedAt={draft.updatedAt.toISOString()}
             />
           </div>
         </div>
