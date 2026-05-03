@@ -1,193 +1,289 @@
-/**
- * src/lib/markdown.ts
- *
- * Pure-function markdown utilities for the Obsidian connector.
- * No external dependencies beyond Node builtins — keeps the edge
- * runtime happy and avoids pulling in a full AST library.
- *
- * Exports
- * ───────
- * parseFrontmatter(raw)        → { data, content }
- * extractWikilinks(content)    → string[]
- * extractTags(content, data)   → string[]
- * extractTitle(content, data, path) → string | undefined
- * parseMarkdownNote(raw, path) → ParsedNote
- */
+// Thoughtbed · Markdown helpers (Sprint 15 Wave 2)
+//
+// Tiny, dependency-free parsers for the bits of Markdown the Obsidian
+// connector cares about:
+//
+//   · YAML frontmatter (top-of-file --- block) — primitive types only,
+//     enough to capture Obsidian's typical fields (type, tags, status,
+//     aliases, links). Nested objects are stringified.
+//   · Wikilinks: [[Note Name]], [[Note Name|alias]], [[Note Name#Heading]]
+//   · Inline #tags
+//   · Title resolution: frontmatter.title → first H1 → filename
+//
+// Why hand-rolled instead of pulling `gray-matter`+`remark-parse`: the
+// codebase is deliberately lean (svix is the only non-AI dep) and we only
+// need a small slice. The parser is conservative — anything we can't
+// confidently classify falls through as plain text body.
 
-export interface Frontmatter {
-  [key: string]: unknown;
-}
+// ─── frontmatter ───────────────────────────────────────
 
-export interface ParsedNote {
-  title: string | undefined;
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+export type Frontmatter = Record<string, unknown>;
+
+export type ParsedMarkdown = {
   frontmatter: Frontmatter;
-  tags: string[];
-  wikilinks: string[];
-  /** Raw markdown body (frontmatter stripped). */
-  body: string;
-}
-
-// ── Frontmatter ──────────────────────────────────────────────────────────────
+  body: string; // body with frontmatter block stripped
+};
 
 /**
- * Parses YAML-like frontmatter delimited by `---` fences.
- * Deliberately minimal: only handles the scalar + list shapes
- * that Obsidian actually writes (no nested objects, no multiline
- * scalars).  Returns an empty object on any parse failure.
- */
-export function parseFrontmatter(raw: string): {
-  data: Frontmatter;
-  content: string;
-} {
-  const fence = /^---\s*\n([\s\S]*?)\n---\s*\n?/;
-  const match = raw.match(fence);
-  if (!match) return { data: {}, content: raw };
-
-  const yamlBlock = match[1];
-  const content = raw.slice(match[0].length);
-  const data: Frontmatter = {};
-
-  for (const line of yamlBlock.split('\n')) {
-    const colonIdx = line.indexOf(':');
-    if (colonIdx < 1) continue;
-
-    const key = line.slice(0, colonIdx).trim();
-    const rawVal = line.slice(colonIdx + 1).trim();
-
-    // Inline list: key: [a, b, c]
-    if (rawVal.startsWith('[') && rawVal.endsWith(']')) {
-      data[key] = rawVal
-        .slice(1, -1)
-        .split(',')
-        .map((v) => v.trim().replace(/^["']|["']$/g, ''));
-      continue;
-    }
-
-    // Boolean shorthand
-    if (rawVal === 'true')  { data[key] = true;  continue; }
-    if (rawVal === 'false') { data[key] = false; continue; }
-
-    // Numeric
-    if (rawVal !== '' && !isNaN(Number(rawVal))) {
-      data[key] = Number(rawVal);
-      continue;
-    }
-
-    // Strip surrounding quotes then store as string
-    data[key] = rawVal.replace(/^["']|["']$/g, '');
-  }
-
-  // Second pass: collect YAML block-sequence lists
-  //   tags:
-  //     - foo
-  //     - bar
-  let currentKey: string | null = null;
-  for (const line of yamlBlock.split('\n')) {
-    if (/^\w.*:$/.test(line.trim())) {
-      currentKey = line.trim().slice(0, -1);
-      data[currentKey] = [];
-    } else if (currentKey && /^\s*-\s+/.test(line)) {
-      (data[currentKey] as string[]).push(
-        line.replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, '')
-      );
-    } else if (line.trim() !== '') {
-      currentKey = null;
-    }
-  }
-
-  return { data, content };
-}
-
-// ── Wikilinks ─────────────────────────────────────────────────────────────────
-
-/** Extracts all [[wikilink]] and [[wikilink|alias]] targets. */
-export function extractWikilinks(content: string): string[] {
-  const pattern = /\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
-  const links: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(content)) !== null) {
-    links.push(m[1].trim());
-  }
-  return [...new Set(links)];
-}
-
-// ── Tags ──────────────────────────────────────────────────────────────────────
-
-/**
- * Collects tags from two sources:
- *  1. Frontmatter `tags:` field (string | string[]).
- *  2. Inline `#tag` syntax in the body (not inside code spans/blocks).
+ * Split a Markdown source into frontmatter (parsed) + body (raw).
  *
- * All returned tags are lowercase, without the leading `#`.
+ * The parser handles the dialect Obsidian uses by default: YAML between
+ * leading `---` fences, top-level scalar / array values. Nested mappings
+ * are flattened into a JSON-stringified value so the round-trip stays
+ * lossless even when we don't fully model the shape.
+ *
+ * Anything that doesn't start with `---` returns { frontmatter: {}, body }.
  */
-export function extractTags(
-  content: string,
-  frontmatter: Frontmatter
-): string[] {
-  const tags = new Set<string>();
-
-  // Frontmatter tags
-  const fmTags = frontmatter['tags'] ?? frontmatter['tag'];
-  if (Array.isArray(fmTags)) {
-    for (const t of fmTags) {
-      if (typeof t === 'string') tags.add(t.toLowerCase().replace(/^#/, ''));
-    }
-  } else if (typeof fmTags === 'string') {
-    tags.add(fmTags.toLowerCase().replace(/^#/, ''));
+export function parseMarkdown(source: string): ParsedMarkdown {
+  const match = source.match(FRONTMATTER_RE);
+  if (!match) {
+    return { frontmatter: {}, body: source };
   }
-
-  // Inline tags — skip code blocks and code spans
-  const strippedCode = content
-    .replace(/```[\s\S]*?```/g, '')   // fenced code blocks
-    .replace(/`[^`]+`/g, '');         // inline code spans
-
-  const inlinePattern = /(?:^|\s)#([\w/]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = inlinePattern.exec(strippedCode)) !== null) {
-    tags.add(m[1].toLowerCase());
-  }
-
-  return [...tags];
+  const yaml = match[1] ?? '';
+  const frontmatter = parseYamlBlock(yaml);
+  const body = source.slice(match[0].length);
+  return { frontmatter, body };
 }
 
-// ── Title ─────────────────────────────────────────────────────────────────────
+/**
+ * Tiny YAML subset parser — handles the shapes that show up in real
+ * Obsidian vaults:
+ *
+ *   key: value
+ *   key: "quoted value"
+ *   key: 42
+ *   key: true|false
+ *   key: [item, item]
+ *   key:
+ *     - item
+ *     - item
+ *
+ * Nested mappings (`key:\n  subkey: ...`) are captured as raw nested text;
+ * the caller can re-parse if needed. Unknown shapes pass through as strings.
+ */
+function parseYamlBlock(yaml: string): Frontmatter {
+  const out: Frontmatter = {};
+  const lines = yaml.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line || /^\s*#/.test(line) || line.trim().length === 0) {
+      i++;
+      continue;
+    }
+    const m = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+    if (!m) {
+      i++;
+      continue;
+    }
+    const key = m[1];
+    const rest = m[2];
+
+    if (rest.length === 0) {
+      // multi-line list or nested map — peek ahead for `- ` items
+      const items: string[] = [];
+      i++;
+      while (i < lines.length && /^\s+/.test(lines[i])) {
+        const child = lines[i].trim();
+        const li = child.match(/^-\s+(.*)$/);
+        if (li) {
+          items.push(coerceScalar(li[1]));
+        }
+        // (silently drop nested-map syntax — best-effort, not critical)
+        i++;
+      }
+      if (items.length > 0) out[key] = items;
+      else out[key] = '';
+      continue;
+    }
+
+    // inline list: [a, b, c]
+    if (/^\[.*\]$/.test(rest.trim())) {
+      const inner = rest.trim().slice(1, -1);
+      const items = inner
+        .split(',')
+        .map((p) => coerceScalar(p.trim()))
+        .filter((p) => p.length > 0);
+      out[key] = items;
+      i++;
+      continue;
+    }
+
+    out[key] = coerceScalar(rest);
+    i++;
+  }
+  return out;
+}
+
+function coerceScalar(raw: string): string {
+  // strip wrapping quotes
+  const v = raw.trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+// ─── title resolution ──────────────────────────────────
 
 /**
- * Resolves a human-readable title for the note.
- * Priority: frontmatter `title` → first H1 → filename stem.
+ * Resolve a note's title using the same precedence Obsidian's reading
+ * pane uses:
+ *   1. frontmatter.title (explicit override)
+ *   2. first H1 in body
+ *   3. filename (basename, .md stripped, dashes/underscores → spaces)
  */
-export function extractTitle(
-  content: string,
+export function resolveTitle(
   frontmatter: Frontmatter,
-  vaultPath: string
+  body: string,
+  path: string
 ): string {
-  if (typeof frontmatter['title'] === 'string' && frontmatter['title']) {
-    return frontmatter['title'];
-  }
+  const fm = frontmatter['title'];
+  if (typeof fm === 'string' && fm.trim().length > 0) return fm.trim();
 
-  const h1 = content.match(/^#\s+(.+)$/m);
+  const h1 = body.match(/^\s*#\s+(.+?)\s*$/m);
   if (h1) return h1[1].trim();
 
-  // Fall back to the file's basename without extension
-  return vaultPath
-    .split('/')
-    .pop()
-    ?.replace(/\.md$/i, '') ?? vaultPath;
+  const base = path.split('/').pop() ?? path;
+  return base.replace(/\.md$/i, '').replace(/[-_]+/g, ' ').trim();
 }
 
-// ── Composite ─────────────────────────────────────────────────────────────────
+// ─── links + tags ──────────────────────────────────────
 
-/** Parses a raw vault file into a structured note object. */
-export function parseMarkdownNote(
-  raw: string,
-  vaultPath: string
-): ParsedNote {
-  const { data: frontmatter, content: body } = parseFrontmatter(raw);
-  return {
-    title:      extractTitle(body, frontmatter, vaultPath),
-    frontmatter,
-    tags:       extractTags(body, frontmatter),
-    wikilinks:  extractWikilinks(body),
-    body,
-  };
+const WIKILINK_RE = /\[\[([^\]]+?)\]\]/g;
+const MD_LINK_RE = /\[([^\]]*?)\]\(([^)]+?)\)/g;
+const TAG_RE = /(?:^|[^A-Za-z0-9_/])#([A-Za-z][A-Za-z0-9_/-]*)/g;
+
+/**
+ * Pull outbound link targets from a Markdown body. Both [[wikilinks]] and
+ * [text](markdown-links) count. For wikilinks we strip aliases (`A|alias`
+ * → `A`) and section anchors (`A#Heading` → `A`) so the same target
+ * normalizes across writing styles.
+ *
+ * Deduped, preserving first-seen order.
+ */
+export function extractLinks(body: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const m of body.matchAll(WIKILINK_RE)) {
+    const raw = m[1] ?? '';
+    const target = raw.split('|')[0].split('#')[0].trim();
+    if (target && !seen.has(target)) {
+      seen.add(target);
+      out.push(target);
+    }
+  }
+
+  for (const m of body.matchAll(MD_LINK_RE)) {
+    const url = (m[2] ?? '').trim();
+    // Skip image embeds — same shape but the line typically starts with !
+    if (!url || url.startsWith('mailto:')) continue;
+    // Strip URL fragments and queries so `note.md#heading` and `note.md`
+    // collapse to the same target.
+    const target = url.split('#')[0].split('?')[0];
+    if (target && !seen.has(target)) {
+      seen.add(target);
+      out.push(target);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Pull inline #tags from the body. Frontmatter tags should be merged in
+ * separately by the caller.
+ */
+export function extractInlineTags(body: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of body.matchAll(TAG_RE)) {
+    const tag = m[1];
+    if (tag && !seen.has(tag)) {
+      seen.add(tag);
+      out.push(tag);
+    }
+  }
+  return out;
+}
+
+/**
+ * Merge frontmatter `tags` (string or array) with inline #tags found in
+ * body. Returned as a deduped, ordered list.
+ */
+export function resolveTags(
+  frontmatter: Frontmatter,
+  body: string
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const fmTags = frontmatter['tags'];
+  if (Array.isArray(fmTags)) {
+    for (const t of fmTags) {
+      const norm = String(t).replace(/^#/, '').trim();
+      if (norm && !seen.has(norm)) {
+        seen.add(norm);
+        out.push(norm);
+      }
+    }
+  } else if (typeof fmTags === 'string' && fmTags.trim().length > 0) {
+    for (const t of fmTags.split(/[\s,]+/)) {
+      const norm = t.replace(/^#/, '').trim();
+      if (norm && !seen.has(norm)) {
+        seen.add(norm);
+        out.push(norm);
+      }
+    }
+  }
+  for (const t of extractInlineTags(body)) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+// ─── word count + plain text ──────────────────────────
+
+/**
+ * Strip Markdown syntax aggressively enough to give a reasonable word count
+ * and a clean string for embedding. Not a full Markdown→HTML→text pipe;
+ * we don't need fidelity, just something LLMs and embedders can read.
+ */
+export function markdownToPlainText(body: string): string {
+  return (
+    body
+      // fenced code blocks
+      .replace(/```[\s\S]*?```/g, ' ')
+      // inline code
+      .replace(/`[^`]*`/g, ' ')
+      // images
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      // markdown links → keep label
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // wikilinks → keep label after pipe
+      .replace(/\[\[([^\]|]+\|)?([^\]]+?)\]\]/g, '$2')
+      // headings markers
+      .replace(/^#+\s+/gm, '')
+      // emphasis markers
+      .replace(/[*_~]+/g, '')
+      // blockquote markers
+      .replace(/^>\s?/gm, '')
+      // collapse whitespace
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+export function countWords(text: string): number {
+  if (!text) return 0;
+  const matches = text.match(/[A-Za-z0-9_'-]+/g);
+  return matches ? matches.length : 0;
 }
