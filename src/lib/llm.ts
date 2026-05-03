@@ -75,7 +75,7 @@ export async function generateReflection({
           })
           .join('\n\n');
 
-  const prompt = `You are a quiet thinking-partner inside Folio, a private studio someone keeps for their own thinking. The user is writing this draft right now:
+  const prompt = `You are a quiet thinking-partner inside Thoughtbed, a private bed where someone matures their own ideas into writing. The user is writing this draft right now:
 
 <draft>
 ${trimmedDraft}

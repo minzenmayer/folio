@@ -26,9 +26,9 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Folio — A studio for your own thinking',
+  title: 'Thoughtbed — Mature your mind.',
   description:
-    'Folio is your idea bank, your maturation surface, and your writing partner. From you, not for you.',
+    'Thoughtbed is an idea maturation system. Plant seeds, let them connect while you sleep, harvest what is ripe.',
 };
 
 export default function RootLayout({

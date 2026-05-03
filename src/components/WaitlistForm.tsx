@@ -1,6 +1,6 @@
-// Folio · WaitlistForm
-// Email capture for the studio-opening-soon state.
-// No server action wired yet — Phase 5 (Sprint 2) will connect this to a real list.
+// Thoughtbed · WaitlistForm
+// Email capture for the bed-opening-soon state.
+// No server action wired yet — a follow-up sprint will connect this to a real list.
 // For now: optimistic local state, "thank you" surface on submit.
 
 'use client';
@@ -35,7 +35,7 @@ export function WaitlistForm({ variant = 'hero' }: WaitlistFormProps) {
             ▸ You're on the list
           </div>
           <p className="font-serif italic text-[18px] text-ink leading-[1.45]">
-            We'll write when the studio opens.
+            We'll write when the bed opens.
           </p>
           <p className="font-sans text-[12px] text-tag mt-3">
             Saved: <span className="font-mono text-ink">{email}</span>
@@ -70,7 +70,7 @@ export function WaitlistForm({ variant = 'hero' }: WaitlistFormProps) {
         </button>
       </div>
       <p className="font-sans text-[11px] text-tag mt-3 text-center tracking-[0.04em]">
-        We'll only write when the studio opens. No newsletters between now and
+        We'll only write when the bed opens. No newsletters between now and
         then.
       </p>
     </form>

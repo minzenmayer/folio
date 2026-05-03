@@ -1,6 +1,6 @@
-// Folio · Inbox
-// Where unfiled captures land. The room you visit when you want to file —
-// or, deliberately, never visit at all.
+// Thoughtbed · Inbox
+// Where unfiled seeds land. The bed you visit when you want to file
+// what's accumulated — or, deliberately, never visit at all.
 
 import { eq, and, desc } from 'drizzle-orm';
 import { db, captures, ideas } from '@/db';
@@ -39,8 +39,8 @@ export default async function InboxPage() {
           </h1>
           <p className="font-serif font-light text-[18px] leading-[1.5] text-ink-soft max-w-[56ch]">
             {inboxCaptures.length === 0
-              ? 'Nothing yet. Paste a thought below — anything you don\'t want to lose.'
-              : `${inboxCaptures.length} unfiled ${inboxCaptures.length === 1 ? 'thing' : 'things'}. File when you're ready, or leave them — the assistant connects on the backend either way.`}
+              ? 'Nothing yet. Plant a seed below — anything you don\'t want to lose.'
+              : `${inboxCaptures.length} unfiled ${inboxCaptures.length === 1 ? 'seed' : 'seeds'}. File when you're ready, or leave them — the bed connects them on its own either way.`}
           </p>
         </div>
 
@@ -55,7 +55,7 @@ export default async function InboxPage() {
                 ▸ Empty
               </div>
               <p className="font-serif italic text-[16px] text-tag">
-                No captures yet. The Inbox fills as you do.
+                No seeds yet. The Inbox fills as you plant.
               </p>
             </div>
           ) : (

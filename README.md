@@ -1,10 +1,10 @@
-# Folio
+# Thoughtbed
 
-A studio for your own thinking. From you, not for you.
+An idea maturation system. Mature your mind.
 
-> Other tools write _for_ you. Folio writes _from_ you.
+> Notes apps remember. Thoughtbed thinks.
 
-This is the v0 codebase, Sprint 1.
+Plant seeds, watch them connect while you sleep, harvest what's ripe.
 
 ---
 
@@ -13,7 +13,7 @@ This is the v0 codebase, Sprint 1.
 - Next.js 15 (App Router) · TypeScript · Tailwind
 - Postgres on Neon + pgvector + Drizzle ORM
 - Auth: Clerk (magic-link only)
-- LLM: Anthropic Claude (Assistant) + OpenAI text-embedding-3-small (embeddings)
+- LLM: Anthropic Claude (reflection) + OpenAI text-embedding-3-small (embeddings)
 - Editor: Tiptap (added in Sprint 5)
 - Webhooks: svix-verified Clerk webhook → mirrors users into our table
 

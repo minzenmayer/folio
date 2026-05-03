@@ -1,6 +1,6 @@
-// Folio · LifecycleLoop
-// The closed-loop architecture diagram from Issue 07.
-// Pure SVG, no library. Reusable across pages.
+// Thoughtbed · LifecycleLoop
+// The closed-loop architecture diagram. Pure SVG, no library.
+// Stages: Plant → Grow → Harvest → Circulate → back into the bed.
 
 export function LifecycleLoop() {
   return (
@@ -8,12 +8,12 @@ export function LifecycleLoop() {
       viewBox="0 0 720 320"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="Folio lifecycle: Capture, Mature, Build, Circulate — connected in a closed loop"
+      aria-label="Thoughtbed lifecycle: Plant, Grow, Harvest, Circulate — connected in a closed loop"
       className="max-w-full h-auto"
     >
       <defs>
         <marker
-          id="folio-arrow"
+          id="tb-arrow"
           viewBox="0 0 10 10"
           refX="9"
           refY="5"
@@ -31,28 +31,28 @@ export function LifecycleLoop() {
         stroke="#b9ad92"
         strokeWidth="1.2"
         fill="none"
-        markerEnd="url(#folio-arrow)"
+        markerEnd="url(#tb-arrow)"
       />
       <path
         d="M 370 175 Q 470 175 555 175"
         stroke="#b9ad92"
         strokeWidth="1.2"
         fill="none"
-        markerEnd="url(#folio-arrow)"
+        markerEnd="url(#tb-arrow)"
       />
       <path
         d="M 590 200 Q 590 280 460 280"
         stroke="#b9ad92"
         strokeWidth="1.2"
         fill="none"
-        markerEnd="url(#folio-arrow)"
+        markerEnd="url(#tb-arrow)"
       />
       <path
         d="M 410 280 Q 80 280 95 175"
         stroke="#b9ad92"
         strokeWidth="1.2"
         fill="none"
-        markerEnd="url(#folio-arrow)"
+        markerEnd="url(#tb-arrow)"
       />
 
       {/* nodes */}
@@ -74,7 +74,7 @@ export function LifecycleLoop() {
           fontWeight="500"
           fill="#15110c"
         >
-          Capture
+          Plant
         </text>
         <text
           x="115"
@@ -85,7 +85,7 @@ export function LifecycleLoop() {
           letterSpacing="1.5"
           fill="#6b5e44"
         >
-          SIX SURFACES
+          SEEDS
         </text>
       </g>
 
@@ -107,7 +107,7 @@ export function LifecycleLoop() {
           fontWeight="500"
           fill="#15110c"
         >
-          Mature
+          Grow
         </text>
         <text
           x="385"
@@ -118,7 +118,7 @@ export function LifecycleLoop() {
           letterSpacing="1.5"
           fill="#6b5e44"
         >
-          THE LIBRARY
+          THE GARDEN
         </text>
       </g>
 
@@ -140,7 +140,7 @@ export function LifecycleLoop() {
           fontWeight="500"
           fill="#15110c"
         >
-          Build
+          Harvest
         </text>
         <text
           x="610"
@@ -184,7 +184,7 @@ export function LifecycleLoop() {
           letterSpacing="1.5"
           fill="#e0c4ad"
         >
-          BACK INTO THE BANK
+          BACK INTO THE BED
         </text>
       </g>
     </svg>

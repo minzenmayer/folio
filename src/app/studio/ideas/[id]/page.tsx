@@ -129,7 +129,7 @@ export default async function IdeaDetailPage({
           href="/studio/ideas"
           className="font-sans text-[11px] tracking-[0.18em] uppercase text-tag hover:text-accent transition-colors"
         >
-          ← Back to library
+          ← Back to the garden
         </Link>
 
         {/* Header */}

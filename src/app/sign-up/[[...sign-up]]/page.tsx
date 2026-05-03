@@ -9,18 +9,18 @@ import { Footer } from '@/components/Footer';
 export default function SignUpPage() {
   return (
     <div className="min-h-screen flex flex-col">
-      <Masthead rightSlot="Open a new folio" />
+      <Masthead rightSlot="Plant a new bed" />
 
       <section className="flex-1 flex items-center">
         <div className="max-w-[1200px] mx-auto px-[7%] py-20 w-full">
           <div className="max-w-[440px] mx-auto">
             <div className="text-center mb-8">
               <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold mb-4">
-                ▸ A new studio
+                ☘ A new bed
               </div>
               <h1 className="font-serif font-normal text-[40px] leading-[1.05] tracking-tighter text-ink mb-3">
-                Open your{' '}
-                <em className="italic font-light text-accent">folio.</em>
+                Plant your{' '}
+                <em className="italic font-light text-accent">first seed.</em>
               </h1>
               <p className="font-serif italic text-[15px] text-ink-soft leading-[1.5]">
                 One email. We'll send a magic link to start.

@@ -1,4 +1,4 @@
-// Folio · Studio layout
+// Thoughtbed · Studio layout
 // The authed shell. Wraps every protected route under /studio with a
 // masthead carrying the Clerk UserButton.
 
@@ -18,16 +18,16 @@ export default function StudioLayout({
           <Link
             href="/studio"
             className="font-serif italic text-[22px] text-ink font-medium hover:text-accent transition-colors"
-            aria-label="Folio — studio home"
+            aria-label="Thoughtbed — home"
           >
-            Folio
+            Thoughtbed
           </Link>
-          <nav className="flex items-center gap-6" aria-label="Studio navigation">
+          <nav className="flex items-center gap-6" aria-label="Thoughtbed navigation">
             <Link
               href="/studio"
               className="font-sans text-[12px] tracking-[0.04em] text-ink-soft hover:text-accent transition-colors"
             >
-              Home
+              Write
             </Link>
             <Link
               href="/studio/inbox"
@@ -39,13 +39,13 @@ export default function StudioLayout({
               href="/studio/ideas"
               className="font-sans text-[12px] tracking-[0.04em] text-ink-soft hover:text-accent transition-colors"
             >
-              Library
+              Garden
             </Link>
             <Link
-              href="/studio/page"
+              href="/studio/knowledge"
               className="font-sans text-[12px] tracking-[0.04em] text-ink-soft hover:text-accent transition-colors"
             >
-              The Page
+              Knowledge
             </Link>
             <UserButton
               appearance={{

@@ -1,5 +1,5 @@
-// Folio · Masthead
-// Top bar for every page. Italic Folio wordmark on the left,
+// Thoughtbed · Masthead
+// Top bar for every page. Italic Thoughtbed wordmark on the left,
 // optional contextual text on the right.
 
 import Link from 'next/link';
@@ -15,12 +15,12 @@ export function Masthead({ rightSlot }: MastheadProps) {
         <Link
           href="/"
           className="font-serif italic text-[22px] text-ink font-medium hover:text-accent transition-colors"
-          aria-label="Folio — home"
+          aria-label="Thoughtbed — home"
         >
-          Folio
+          Thoughtbed
         </Link>
         <div className="font-sans text-[11px] sm:text-[12px] uppercase tracking-[0.18em] text-tag whitespace-nowrap">
-          {rightSlot ?? 'A studio for your own thinking'}
+          {rightSlot ?? 'Mature your mind'}
         </div>
       </div>
     </header>

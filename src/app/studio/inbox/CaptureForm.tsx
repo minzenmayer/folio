@@ -34,7 +34,7 @@ export function CaptureForm() {
     >
       <div className="px-6 pt-5 pb-3">
         <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold mb-3">
-          ▸ Capture
+          ☘ Plant a seed
         </div>
         <textarea
           value={body}
@@ -42,7 +42,7 @@ export function CaptureForm() {
           placeholder="Paste a thought, a quote, an excerpt. Anything you don't want to lose."
           rows={4}
           className="w-full resize-none bg-transparent font-serif text-[17px] text-ink placeholder:text-tag placeholder:italic placeholder:font-light leading-[1.55] focus:outline-none"
-          aria-label="Capture body"
+          aria-label="Seed body"
         />
       </div>
 
@@ -74,7 +74,7 @@ export function CaptureForm() {
             disabled={pending || !body.trim()}
             className="px-4 py-2 bg-ink text-bg font-sans text-[11px] tracking-[0.18em] uppercase font-bold rounded-[3px] hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {pending ? 'Saving…' : '⏎ Save to Inbox'}
+            {pending ? 'Planting…' : '⏎ Plant'}
           </button>
         </div>
       </div>

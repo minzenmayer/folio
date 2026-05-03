@@ -25,7 +25,7 @@ type Params = Promise<{ id: string }>;
 // header; we deliberately skip auth-in-metadata to avoid the Clerk 6 + Next
 // 15.5 edge case where `auth()` outside the page render path can throw.
 export const metadata: Metadata = {
-  title: 'The Page · Folio',
+  title: 'The Page · Thoughtbed',
 };
 
 export default async function DraftEditorPage({ params }: { params: Params }) {

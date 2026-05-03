@@ -1,6 +1,7 @@
-// Folio · Ideas list — minimal Library view (Sprint 3 v0)
-// Eventually replaced by the full Library (Mature stage) in Sprint 5+.
-// For now: chronological list of all your ideas with attachment counts.
+// Thoughtbed · The Garden — ideas list
+// Chronological list of all the user's ideas with attachment counts.
+// The garden is where seeds grow into ideas; the orbit view (/studio/ideas/[id])
+// is where each one matures alongside its captures and Related neighbours.
 
 import Link from 'next/link';
 import { eq, sql, desc } from 'drizzle-orm';
@@ -45,7 +46,7 @@ export default async function IdeasPage() {
       <div className="max-w-[1000px] mx-auto px-[7%] py-12 md:py-16">
         <div className="mb-10">
           <div className="font-mono text-[12px] tracking-[0.22em] uppercase text-accent font-bold mb-4">
-            ▸ The Library
+            ☘ The Garden
           </div>
           <h1 className="font-serif font-normal text-[clamp(36px,5vw,56px)] leading-[1.05] tracking-tightest text-ink mb-3">
             Your{' '}
@@ -53,8 +54,8 @@ export default async function IdeasPage() {
           </h1>
           <p className="font-serif font-light text-[18px] leading-[1.5] text-ink-soft max-w-[56ch]">
             {rows.length === 0
-              ? 'Nothing yet. Capture something in the Inbox first, or start an idea below.'
-              : `${rows.length} ${rows.length === 1 ? 'idea' : 'ideas'}. The Library will get richer in later sprints — graphs, themes, daily logs. For now, the basic shape.`}
+              ? 'Nothing yet. Plant a seed in the Inbox first, or start an idea below.'
+              : `${rows.length} ${rows.length === 1 ? 'idea' : 'ideas'} in the garden. Tap one to walk its orbit — captures attached, related items, the bed humming around it.`}
           </p>
         </div>
 
@@ -67,7 +68,7 @@ export default async function IdeasPage() {
                 ▸ Empty
               </div>
               <p className="font-serif italic text-[16px] text-tag">
-                No ideas yet. The bank fills as you do.
+                No ideas yet. The bed fills as you plant.
               </p>
             </div>
           ) : (

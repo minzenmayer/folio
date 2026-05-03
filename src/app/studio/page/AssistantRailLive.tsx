@@ -1,18 +1,17 @@
-// Folio · AssistantRailLive
+// Thoughtbed · GardenRail (live)
 //
-// Sprint 8: the right pane on /studio/page/[id]. Wires the Sprint 7
-// retrieval substrate into the writing surface — as the user types, we
-// debounce the editor's text, call findSimilar against captures + ideas +
-// drafts, and surface the top hits as pull-able rows.
+// The right pane on /studio/page/[id]. As the user writes, we debounce
+// the editor's text, call findSimilar against captures + ideas + drafts,
+// and surface the top hits as pull-able rows. Click "▸ Reflect" to ask
+// Claude to weave them back into a 2-3 sentence reflection on what
+// they're circling around.
 //
-// Sprint 9: adds the generative half. A "▸ Reflect on this draft" button
-// below the live list runs the reflect() server action, which grounds
-// Claude in findSimilar hits and returns a 2-3 sentence reflection in
-// the user's own voice. Result renders as a card at the top of the rail
-// with a "drawn from" sources list and a close affordance.
+// Sprint 10 renamed this from "AssistantRailLive" in copy — the word
+// "Assistant" didn't fit. The file name is preserved to keep the import
+// surface stable; the copy now reads as "the garden" everywhere.
 //
-// Design tenets carried over from the rest of the studio:
-//   · "from you, not for you" — retrieval is remembering, generation is
+// Design tenets carried over from the rest of the bed:
+//   · Garden, not assistant — retrieval is remembering; generation is
 //     reflecting. Empty/sparse states should feel calm, not broken.
 //   · Editorial restraint — Fraunces for content, JetBrains Mono for
 //     system labels, single-character glyphs as decoration.
@@ -21,9 +20,9 @@
 //
 // Pull behaviour: clicking a row inserts the source text into the editor
 // at the current selection. Captures and drafts insert as a blockquote
-// (you're working from someone else's words — your own past words count).
-// Ideas insert as an H2 + a paragraph for the essence (you're picking up
-// a thread of your own thinking).
+// (you're working from words — your own past words count). Ideas insert
+// as an H2 + a paragraph for the essence (you're picking up a thread of
+// your own thinking).
 
 'use client';
 
@@ -225,14 +224,14 @@ export function AssistantRailLive({ draftId }: { draftId: string }) {
   return (
     <aside
       className="border-l border-rule bg-paper/40 flex flex-col"
-      aria-label="Assistant"
+      aria-label="The garden"
     >
       <div className="px-5 pt-6 pb-4 border-b border-rule">
         <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-3">
-          ▸ The closed loop
+          ☘ The garden
         </div>
         <p className="font-serif italic text-[14px] text-ink-soft leading-[1.5]">
-          What your bank is humming with — pulled as you write. Click a row
+          What your bed is humming with — surfaced as you write. Click a row
           to drop it into the draft.
         </p>
       </div>
@@ -277,8 +276,8 @@ function BodyForStatus({
             Listening
           </span>
           <p className="font-serif italic text-[13px] text-tag leading-[1.55]">
-            Start writing. Once a sentence or two lands, the Assistant will
-            surface what your captures and earlier drafts already have to say
+            Start writing. Once a sentence or two lands, the garden will
+            surface what your seeds and earlier drafts already have to say
             about it.
           </p>
         </div>
@@ -298,8 +297,8 @@ function BodyForStatus({
             Quiet
           </span>
           <p className="font-serif italic text-[13px] text-tag leading-[1.55]">
-            Nothing in your bank is resonating with this yet. Keep going —
-            the assistant remembers more as you capture more.
+            Nothing in your bed is resonating with this yet. Keep going —
+            the garden grows denser as you plant more.
           </p>
         </div>
       );
@@ -310,7 +309,7 @@ function BodyForStatus({
           className="font-serif italic text-[13px] text-accent leading-[1.55]"
           title={status.message}
         >
-          Couldn't reach the Assistant just now. Keep typing — it'll try again.
+          Couldn't reach the garden just now. Keep typing — it'll try again.
         </p>
       );
 
@@ -441,7 +440,7 @@ function ReflectionPanel({
             className="font-serif italic text-[14px] text-accent leading-[1.55]"
             title={state.message}
           >
-            Couldn't reach the Assistant. Try again in a moment.
+            Couldn't reach the garden. Try again in a moment.
           </p>
           <button
             type="button"

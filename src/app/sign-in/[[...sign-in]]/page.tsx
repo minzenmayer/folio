@@ -10,7 +10,7 @@ import { Footer } from '@/components/Footer';
 export default function SignInPage() {
   return (
     <div className="min-h-screen flex flex-col">
-      <Masthead rightSlot="Sign in to your folio" />
+      <Masthead rightSlot="Sign in to your bed" />
 
       <section className="flex-1 flex items-center">
         <div className="max-w-[1200px] mx-auto px-[7%] py-20 w-full">
@@ -20,8 +20,8 @@ export default function SignInPage() {
                 ▸ Welcome back
               </div>
               <h1 className="font-serif font-normal text-[40px] leading-[1.05] tracking-tighter text-ink">
-                Open your{' '}
-                <em className="italic font-light text-accent">folio.</em>
+                Back to your{' '}
+                <em className="italic font-light text-accent">bed.</em>
               </h1>
             </div>
 
@@ -67,12 +67,12 @@ export default function SignInPage() {
             />
 
             <p className="font-serif text-[15px] text-center mt-8 text-ink-soft">
-              Don't have a folio yet?{' '}
+              Don't have a bed yet?{' '}
               <Link
                 href="/sign-up"
                 className="text-accent italic hover:underline underline-offset-4"
               >
-                Open one →
+                Plant one →
               </Link>
             </p>
           </div>
