@@ -8,6 +8,11 @@
 // duplicated during active typing). Adds listDraftVersions and
 // restoreDraftVersion for the History modal.
 //
+// Sprint 7: every successful save also recomputes and stores an embedding
+// of the flattened doc text. Best-effort try/catch — same pattern as
+// snapshotVersion. Drafts now participate in findSimilar alongside ideas
+// and captures.
+//
 // Conventions match Sprint 3 (inbox/ideas actions): `requireUser()` for auth,
 // `revalidatePath()` for the rail and detail page. Title is derived from the
 // first H1 in the Tiptap doc — a small bit of structural sugar so the user
@@ -21,6 +26,8 @@ import { eq, and, desc } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, drafts, draftVersions } from '@/db';
 import { requireUser } from '@/lib/auth';
+import { embedText } from '@/lib/embed';
+import { tiptapJsonToText } from '@/lib/exports';
 
 // ─── helpers ───────────────────────────────────
 
@@ -63,6 +70,49 @@ function deriveTitle(doc: any): string | null {
 // version for a draft is younger than this, the next autosave overwrites
 // it in place rather than creating a new row.
 const VERSION_COALESCE_MS = 30_000;
+
+/**
+ * Build the embedding source text for a draft. The Tiptap doc gets
+ * flattened to plain text and prefixed with the derived title (when
+ * present) so a draft about "X" matches search queries about "X" even
+ * if the body text doesn't repeat the title verbatim.
+ *
+ * Returns null when the draft is effectively empty — embedText() rejects
+ * empty input, so the caller skips the OpenAI call entirely in that case.
+ */
+function draftEmbedSource(
+  contentJson: unknown,
+  title: string | null
+): string | null {
+  const body = tiptapJsonToText(contentJson).trim();
+  const head = title?.trim();
+  const text = head ? `${head}\n\n${body}` : body;
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Best-effort embedding write for a draft. Computes embedText() on the
+ * flattened doc and patches the row in place. Logs but never throws —
+ * saves are sacred, embedding is auxiliary. Concurrent updates are fine:
+ * the version-gated update has already landed; this only sets `embedding`.
+ */
+async function patchDraftEmbedding(
+  draftId: string,
+  userId: string,
+  text: string | null
+) {
+  try {
+    if (!text) return;
+    const embedding = await embedText(text);
+    await db
+      .update(drafts)
+      .set({ embedding })
+      .where(and(eq(drafts.id, draftId), eq(drafts.userId, userId)));
+  } catch (err) {
+    console.warn('[patchDraftEmbedding] failed', err);
+  }
+}
 
 /**
  * Best-effort snapshot into draft_versions. Coalesces consecutive autosaves
@@ -129,6 +179,14 @@ export async function createDraft() {
       contentJson: emptyDoc(),
     })
     .returning();
+
+  // An empty doc has no meaningful text → draftEmbedSource returns null →
+  // patchDraftEmbedding is a no-op. The next save will fill it in.
+  await patchDraftEmbedding(
+    draft.id,
+    user.id,
+    draftEmbedSource(draft.contentJson, draft.title)
+  );
 
   revalidatePath('/studio/page');
   redirect(`/studio/page/${draft.id}`);
@@ -229,6 +287,13 @@ export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
 
   // Snapshot into history. Best-effort — never blocks the save.
   await snapshotVersion(user.id, data.draftId, data.contentJson, 'autosave');
+
+  // Re-embed the draft so it stays current in findSimilar. Best-effort.
+  await patchDraftEmbedding(
+    data.draftId,
+    user.id,
+    draftEmbedSource(data.contentJson, title)
+  );
 
   revalidatePath('/studio/page');
   revalidatePath(`/studio/page/${data.draftId}`);
@@ -377,6 +442,14 @@ export async function restoreDraftVersion(
 
   // Linear history: a restore is itself a versioned event.
   await snapshotVersion(user.id, draftId, version.contentJson, 'restore');
+
+  // Re-embed against the restored content so retrieval reflects what the
+  // draft now says, not what it said before the time-travel.
+  await patchDraftEmbedding(
+    draftId,
+    user.id,
+    draftEmbedSource(version.contentJson, title)
+  );
 
   revalidatePath('/studio/page');
   revalidatePath(`/studio/page/${draftId}`);
