@@ -57,7 +57,13 @@ import { eq, and, isNull, sql, desc, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { db, captures, ideas, drafts } from '@/db';
+import {
+  db,
+  captures,
+  ideas,
+  drafts,
+  newsletterIssues,
+} from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
@@ -245,7 +251,11 @@ export async function backfillEmbeddings(
 
 // ─── findSimilar ──────────────────────────────────────
 
-export type SimilarKind = 'capture' | 'idea' | 'draft';
+// Sprint 13 adds `newsletter_issue` as a retrieval kind. Issues live in
+// their own table (newsletter_issues) with their own embedding column;
+// the kind discriminates so the rail can render the right glyph (✉) and
+// Reflect can label the source as "from your own newsletter".
+export type SimilarKind = 'capture' | 'idea' | 'draft' | 'newsletter_issue';
 
 export type SimilarHit = {
   kind: SimilarKind;
@@ -258,15 +268,16 @@ export type SimilarHit = {
 const findSimilarSchema = z.object({
   text: z.string().min(1).max(8000),
   kinds: z
-    .array(z.enum(['capture', 'idea', 'draft']))
+    .array(z.enum(['capture', 'idea', 'draft', 'newsletter_issue']))
     .min(1)
-    .default(['capture', 'idea', 'draft']),
+    .default(['capture', 'idea', 'draft', 'newsletter_issue']),
   limit: z.number().int().min(1).max(50).default(10),
   // Caller passes when retrieval is "things related to X" and X itself
   // shouldn't show up in its own related list.
   excludeIdeaId: z.string().uuid().optional(),
   excludeDraftId: z.string().uuid().optional(),
   excludeCaptureId: z.string().uuid().optional(),
+  excludeNewsletterIssueId: z.string().uuid().optional(),
 });
 
 export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
@@ -388,6 +399,45 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
                 : null;
             return {
               kind: 'draft',
+              id: r.id,
+              title: r.title,
+              snippet,
+              similarity: 1 - Number(r.distance),
+            };
+          })
+        )
+    );
+  }
+
+  if (wanted.has('newsletter_issue')) {
+    const issueWhere = data.excludeNewsletterIssueId
+      ? sql`${newsletterIssues.userId} = ${user.id}
+            AND ${newsletterIssues.embedding} IS NOT NULL
+            AND ${newsletterIssues.id} != ${data.excludeNewsletterIssueId}`
+      : sql`${newsletterIssues.userId} = ${user.id}
+            AND ${newsletterIssues.embedding} IS NOT NULL`;
+
+    promises.push(
+      db
+        .select({
+          id: newsletterIssues.id,
+          title: newsletterIssues.title,
+          bodyText: newsletterIssues.bodyText,
+          distance: sql<number>`${newsletterIssues.embedding} <=> ${lit}::vector`,
+        })
+        .from(newsletterIssues)
+        .where(issueWhere)
+        .orderBy(sql`${newsletterIssues.embedding} <=> ${lit}::vector`)
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map((r): SimilarHit => {
+            const body = (r.bodyText ?? '').trim();
+            const snippet =
+              body.length > 0
+                ? body.slice(0, 200) + (body.length > 200 ? '…' : '')
+                : null;
+            return {
+              kind: 'newsletter_issue',
               id: r.id,
               title: r.title,
               snippet,

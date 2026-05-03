@@ -31,7 +31,9 @@
 // at the current selection. Captures and drafts insert as a blockquote
 // (you're working from words — your own past words count). Ideas insert
 // as an H2 + a paragraph for the essence (you're picking up a thread of
-// your own thinking).
+// your own thinking). Sprint 13 added newsletter_issue — treated like a
+// capture/draft (blockquote with body snippet) since they're approved
+// prose, not a thread of thinking like ideas.
 
 'use client';
 
@@ -48,12 +50,14 @@ const KIND_GLYPH: Record<SimilarHit['kind'], string> = {
   capture: '"',
   idea: '▸',
   draft: '✎',
+  newsletter_issue: '✉',
 };
 
 const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   capture: 'capture',
   idea: 'idea',
   draft: 'draft',
+  newsletter_issue: 'issue',
 };
 
 export type GardenRailMode = 'newsletter' | 'linkedin' | 'self-pilot';
@@ -195,7 +199,7 @@ export function AssistantRailLive({
         return;
       }
 
-      // captures + drafts → blockquote with the body / snippet text.
+      // captures + drafts + newsletter_issues → blockquote with the body / snippet text.
       const text = hit.snippet?.trim() || hit.title?.trim();
       if (!text) return;
       chain

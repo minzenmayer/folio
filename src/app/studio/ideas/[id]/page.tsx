@@ -34,11 +34,13 @@ const TYPE_GLYPHS: Record<string, string> = {
 };
 
 // Glyph + route per related-item kind. Visual shorthand from the design
-// brief: capture = ", idea = ▸, draft = ✎. Click → that item's detail page.
+// brief: capture = ", idea = ▸, draft = ✎, newsletter_issue = ✉.
+// Click → that item's detail page.
 const RELATED_GLYPHS: Record<SimilarHit['kind'], string> = {
   capture: '"',
   idea: '▸',
   draft: '✎',
+  newsletter_issue: '✉',
 };
 
 function relatedHref(hit: SimilarHit): string {
@@ -49,9 +51,15 @@ function relatedHref(hit: SimilarHit): string {
       return `/studio/page/${hit.id}`;
     case 'capture':
       // No capture-detail route yet; route to inbox where the capture lives
-      // until the user files it. Acceptable until Sprint 8+ adds capture
-      // permalinks.
+      // until the user files it. Acceptable until a later sprint adds
+      // capture permalinks.
       return `/studio/inbox`;
+    case 'newsletter_issue':
+      // Sprint 13 Wave 1 has no /studio/issues/[id] surface yet. Route to
+      // the connectors page where the user can manage their newsletter
+      // archive. A future sprint can add per-issue detail or link out to
+      // the publication's web_url.
+      return `/studio/settings/connectors`;
   }
 }
 
