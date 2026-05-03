@@ -1,7 +1,12 @@
 // Folio · /studio/page/[id] — editor for a single draft
-// Three-pane layout. Loads the draft server-side, hands its data to
-// <EditorPane>, which is the client wrapper that owns the live Tiptap
-// editor instance and orchestrates DraftMeta + DraftEditor + HistoryModal.
+// Three-pane layout. Loads the draft server-side and hands its data to
+// <EditorPane>, the client wrapper that owns the live Tiptap editor
+// instance and orchestrates DraftMeta + DraftEditor + HistoryModal.
+//
+// Sprint 8: the right pane is now <AssistantRailLive>, which calls Sprint 7's
+// findSimilar against the draft's text and lets the user pull retrieval
+// results into the editor. EditorPane and AssistantRailLive share the editor
+// instance via <EditorContextProvider>; both must be inside the provider.
 
 import type { Metadata } from 'next';
 import { auth } from '@clerk/nextjs/server';
@@ -10,7 +15,8 @@ import { eq, and } from 'drizzle-orm';
 import { db, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { DraftsRail } from '../DraftsRail';
-import { AssistantRail } from '../AssistantRail';
+import { AssistantRailLive } from '../AssistantRailLive';
+import { EditorContextProvider } from '../EditorContext';
 import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
@@ -40,23 +46,25 @@ export default async function DraftEditorPage({ params }: { params: Params }) {
   if (!draft) notFound();
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)_300px] min-h-[calc(100vh-100px)]">
-      <DraftsRail user={user} activeId={draft.id} />
+    <EditorContextProvider>
+      <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)_300px] min-h-[calc(100vh-100px)]">
+        <DraftsRail user={user} activeId={draft.id} />
 
-      <section className="px-[7%] py-12 md:py-14 overflow-y-auto">
-        <div className="max-w-[68ch] mx-auto">
-          <EditorPane
-            draftId={draft.id}
-            initialContent={draft.contentJson}
-            initialVersion={draft.version}
-            initialUpdatedAt={draft.updatedAt.toISOString()}
-            title={draft.title}
-            updatedAt={draft.updatedAt}
-          />
-        </div>
-      </section>
+        <section className="px-[7%] py-12 md:py-14 overflow-y-auto">
+          <div className="max-w-[68ch] mx-auto">
+            <EditorPane
+              draftId={draft.id}
+              initialContent={draft.contentJson}
+              initialVersion={draft.version}
+              initialUpdatedAt={draft.updatedAt.toISOString()}
+              title={draft.title}
+              updatedAt={draft.updatedAt}
+            />
+          </div>
+        </section>
 
-      <AssistantRail />
-    </div>
+        <AssistantRailLive draftId={draft.id} />
+      </div>
+    </EditorContextProvider>
   );
 }

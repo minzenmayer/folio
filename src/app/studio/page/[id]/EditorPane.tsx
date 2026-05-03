@@ -1,19 +1,21 @@
 // Folio · EditorPane
-// Client wrapper for the editor + meta + history modal. Owns the Tiptap
-// editor instance via state so DraftMeta (exports, history toggle) and
-// HistoryModal (restore action) can act on it without prop drilling.
+// Client wrapper for the editor + meta + history modal. The Tiptap editor
+// instance is held in a shared Context (EditorContextProvider) so siblings
+// further out in the route tree — most importantly the Sprint 8 Assistant
+// rail — can read it and act on it (insertContent for "pull into draft").
 //
-// Why it exists: DraftMeta needs `editor.getJSON()` / `getHTML()` for
-// exports, and HistoryModal needs `editor.commands.setContent` after a
-// restore. Both are siblings of DraftEditor in the route, so the editor
-// instance has to be lifted up. We use a local state slot rather than
-// React Context — same effect, less ceremony.
+// Why context: prior to Sprint 8 the editor lived in local state here and
+// was forwarded to direct children (DraftMeta, HistoryModal) via props.
+// The Assistant rail is a sibling of EditorPane in the route grid, so it
+// can't be reached by prop drilling. A tiny scoped context is the cleanest
+// fix. EditorPane writes to the context (setEditor) and reads from it for
+// its own children that need the live instance.
 
 'use client';
 
 import { useState } from 'react';
-import type { Editor } from '@tiptap/react';
 import { DraftEditor } from '../DraftEditor';
+import { useEditorContext } from '../EditorContext';
 import { DraftMeta } from './DraftMeta';
 import { HistoryModal } from './HistoryModal';
 
@@ -32,7 +34,7 @@ export function EditorPane({
   title: string | null;
   updatedAt: Date | string | null;
 }) {
-  const [editor, setEditor] = useState<Editor | null>(null);
+  const { editor, setEditor } = useEditorContext();
   const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
