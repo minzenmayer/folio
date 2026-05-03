@@ -575,7 +575,10 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
   try {
     sources = await findSimilar({
       text: draftText.slice(0, 4000),
-      kinds: ['capture', 'idea', 'draft'],
+      // Sprint 15 Wave 3 prep: include newsletter_issue. The type union
+      // and generateReflection have supported it since Sprint 13, but
+      // this call site was missed when that landed.
+      kinds: ['capture', 'idea', 'draft', 'newsletter_issue'],
       limit: REFLECT_HIT_LIMIT,
       excludeDraftId: draftId,
     });

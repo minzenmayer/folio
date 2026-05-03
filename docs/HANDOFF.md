@@ -9,10 +9,16 @@
 
 ## TL;DR
 
-**Folio** (codename Thoughtbed in the codebase, pivoting to HeyBubble per
-recent vault notes) is an idea-maturation system. It captures inputs from
+**Thoughtbed** is an idea-maturation system. It captures inputs from
 multiple connectors, scores them on depth + breadth, and surfaces past
 material to the user while they're writing.
+
+The repo is still named `folio` (the project's pre-pivot codename) and
+the codebase has historical references to Heybubble, a parallel solo
+project of Payton's whose published planning docs at
+`github.com/minzenmayer/heybubble` were used as the Wave 2.1 calibration
+corpus. Heybubble is not a brand pivot target; it's a separate (now
+paused) effort whose vault slice happens to be public and useful.
 
 **Stack:** Next.js 15.5.7 / React 19 / Clerk auth / Drizzle ORM + Neon HTTP
 Postgres / pgvector HNSW indexes / Tailwind 3.4 / AI SDK (Anthropic Haiku
@@ -38,8 +44,8 @@ rewrite). See `docs/WAVE-3-BRIEF.md`.
 | Production URL       | `https://folio-payton-minzenmayers-projects.vercel.app`                |
 | Vercel project       | `prj_2nspi4JfHOHdXVXCOWZ5lTIYzWZN` (team `payton-minzenmayers-projects`)|
 | Process              | Lean. Single commit per wave. Push to `main`. Vercel auto-deploys.     |
-| Brand discipline     | Ghostbase. Geist/Inter only (no Fraunces). Settings = overlay modal.   |
-| Copy guardrails      | "New post / Sync / Connect" — never garden vocabulary.                 |
+| Brand                | Thoughtbed. Editorial fonts: Fraunces, Inter, JetBrains Mono. Garden vocabulary IS the voice — Plant / Grow / Harvest / Circulate; "the bed", "ripe ideas", "the garden in the right margin". Settings = overlay modal at `?settings=connectors`. |
+| Copy guardrails      | Editorial restraint, no AI-tells. The garden metaphor is load-bearing — don't pave it with generic SaaS chrome ("Add", "Save"). Historical note: Sprint 14 used a Ghostbase-inspired monochrome aesthetic — component comments reference that lineage and should be left intact (they explain layout choices). |
 
 ---
 
@@ -243,7 +249,8 @@ and `extractIdeasFromObsidian` log + return on Anthropic flake; the
 parent sync still completes. The retroactive backfill on `/studio`
 catches sources that missed extraction.
 
-**Brand vocabulary** is enforced at the copy level. Code uses
-`Thoughtbed` historically; UI should always say "the Bed" or product
-names. Settings is `?settings=connectors` not a route. No "garden"
-vocabulary in user-facing strings.
+**Brand vocabulary** — the garden metaphor IS the brand. The deployed
+product embraces Plant / Grow / Harvest / Circulate as the four-stage
+closed loop; copy says "the bed", "your garden", "ripe ideas". Settings
+is `?settings=connectors` (overlay modal, not a route). Editorial fonts
+are Fraunces / Inter / JetBrains Mono.

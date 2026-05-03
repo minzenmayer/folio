@@ -9,8 +9,9 @@
 ## The prompt (copy everything below)
 
 ```
-You are picking up the Folio project (codename Thoughtbed in code,
-pivoting to HeyBubble per recent vault notes). Repo: minzenmayer/folio.
+You are picking up the Thoughtbed project. The repo is still named
+`folio` (the project's pre-pivot codename); the deployed brand is
+Thoughtbed. Repo: minzenmayer/folio.
 Main is at 76ee5874 (Sprint 15 Wave 2.1 shipped). Production at
 folio-payton-minzenmayers-projects.vercel.app.
 
@@ -57,12 +58,17 @@ C. (Optional) Push the rest of the Obsidian vault to a private GitHub
    repo so the curation formula can be re-tuned against full-vault
    patterns. Currently tuned against the heybubble slice only.
 
-Brand discipline (non-negotiable):
-- Ghostbase aesthetic. Geist/Inter only. No Fraunces.
+Brand:
+- Thoughtbed. Editorial fonts: Fraunces (serif), Inter (sans),
+  JetBrains Mono.
+- Garden vocabulary IS the voice — Plant / Grow / Harvest / Circulate,
+  "the bed", "ripe ideas". Don't pave the metaphor with generic SaaS
+  chrome.
 - Settings is an overlay modal at /studio?settings=connectors, not a
   route.
-- Copy: "New post / Sync / Connect". No garden vocabulary in user-
-  facing strings.
+- Historical note: Sprint 14 used a Ghostbase-inspired monochrome
+  aesthetic. Component comments still carry that lineage — leave them;
+  they explain layout choices. The deployed brand is Thoughtbed.
 
 How we work together:
 - Plan before code. Show the plan, wait for confirmation.
