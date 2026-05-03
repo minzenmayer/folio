@@ -1,90 +1,125 @@
-import { Suspense }         from 'react';
-import { auth }             from '@clerk/nextjs/server';
-import { redirect }         from 'next/navigation';
-import { db }               from '@/db';
-import { newsletterIssues, obsidianNotes } from '@/db/schema';
-import { sql }              from 'drizzle-orm';
+// Thoughtbed · Knowledge
+// Sprint 14 brand pivot: monochrome restyle, drop garden vocabulary.
+// Note that real connector setup lives in Settings (the modal); this
+// page is a placeholder for now and points to the modal.
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+import Link from 'next/link';
+import { auth } from '@clerk/nextjs/server';
+import { redirect } from 'next/navigation';
 
-interface SourceCard {
-  id:          string;
-  label:       string;
-  count:       number;
-  status:      'live' | 'soon';
-  description: string;
-}
-
-// ── Data fetching ─────────────────────────────────────────────────────────────
-
-async function getSourceCounts(): Promise<{ newsletter: number; obsidian: number }> {
-  const [nlRow, obRow] = await Promise.all([
-    db.select({ count: sql<number>`count(*)` }).from(newsletterIssues),
-    db.select({ count: sql<number>`count(*)` }).from(obsidianNotes),
-  ]);
-  return {
-    newsletter: Number(nlRow[0]?.count ?? 0),
-    obsidian:   Number(obRow[0]?.count ?? 0),
-  };
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
+const SOURCES = [
+  {
+    id: 'beehiiv',
+    label: 'Beehiiv',
+    blurb:
+      'Your published newsletter issues. Voice training data in your own approved words.',
+    state: 'live',
+  },
+  {
+    id: 'linkedin',
+    label: 'LinkedIn',
+    blurb:
+      'Posts, comments, articles. Voice training data, in your own words.',
+    state: 'soon',
+  },
+  {
+    id: 'obsidian',
+    label: 'Obsidian',
+    blurb:
+      'Sync your Markdown vault from a Git repo. Each note becomes retrievable; ideas extract automatically.',
+    state: 'live',
+  },
+  {
+    id: 'gdrive',
+    label: 'Google Drive',
+    blurb:
+      'Selected docs land as captures. Pick which folders Thoughtbed reads — nothing automatic.',
+    state: 'soon',
+  },
+  {
+    id: 'gmail',
+    label: 'Gmail',
+    blurb:
+      'Subscribed newsletters land in the Inbox; you triage. Other email stays untouched.',
+    state: 'soon',
+  },
+  {
+    id: 'voiceid',
+    label: 'Voice ID',
+    blurb:
+      'Your distinct rhythm, vocabulary, and shape — modeled from what you have already written. Reflection writes from this, never around it.',
+    state: 'soon',
+  },
+];
 
 export default async function KnowledgePage() {
-  const { userId } = await auth();
-  if (!userId) redirect('/sign-in');
-
-  const counts = await getSourceCounts();
-
-  const sources: SourceCard[] = [
-    {
-      id:          'newsletter',
-      label:       'Newsletter',
-      count:       counts.newsletter,
-      status:      'live',
-      description: 'Issues synced from Beehiiv.',
-    },
-    {
-      id:          'obsidian',
-      label:       'Obsidian Vault',
-      count:       counts.obsidian,
-      status:      'live',      // ← flipped from "soon" in Wave 2
-      description: 'Notes synced from your GitHub-backed vault.',
-    },
-  ];
+  const { userId: clerkId } = await auth();
+  if (!clerkId) redirect('/sign-in');
 
   return (
-    <main className="p-8 max-w-3xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold">Knowledge</h1>
-        <p className="text-muted-foreground mt-1">
-          All ingested content, ready for retrieval and synthesis.
-        </p>
-      </div>
+    <section>
+      <div className="max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
+        <div className="mb-8">
+          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
+            Knowledge
+          </h1>
+          <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[60ch]">
+            The Inbox is the primary loop — anything you paste lands there.
+            Knowledge is everything else: data sources that flow in
+            automatically so Thoughtbed knows your voice, your archive, and
+            the writers you read.
+          </p>
+        </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {sources.map((src) => (
-          <div
-            key={src.id}
-            className="rounded-xl border bg-card p-6 space-y-2"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-semibold">{src.label}</span>
-              <span
-                className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  src.status === 'live'
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-                    : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300'
-                }`}
-              >
-                {src.status === 'live' ? 'Live' : 'Coming soon'}
-              </span>
-            </div>
-            <p className="text-3xl font-bold">{src.count.toLocaleString()}</p>
-            <p className="text-sm text-muted-foreground">{src.description}</p>
-          </div>
-        ))}
+        <ul className="grid sm:grid-cols-2 gap-3 mb-10">
+          {SOURCES.map((src) => (
+            <li
+              key={src.id}
+              className="border border-rule rounded-card bg-paper px-5 py-5"
+            >
+              <div className="flex items-baseline gap-3 mb-2">
+                <h3 className="font-sans text-[16px] font-semibold text-ink leading-[1.3] flex-1">
+                  {src.label}
+                </h3>
+                <span
+                  className={`font-mono text-[9px] tracking-[0.22em] uppercase rounded-full px-2 py-0.5 ${
+                    src.state === 'live'
+                      ? 'bg-ink text-bg'
+                      : 'text-tag bg-paper-2 border border-rule'
+                  }`}
+                >
+                  {src.state}
+                </span>
+              </div>
+              <p className="font-sans text-[13.5px] leading-[1.55] text-ink-soft">
+                {src.blurb}
+              </p>
+            </li>
+          ))}
+        </ul>
+
+        <div className="border-t border-rule pt-6">
+          <p className="font-sans text-[14px] text-ink-soft leading-[1.6] max-w-[60ch]">
+            Manage connectors in{' '}
+            <Link
+              href="/studio?settings=connectors"
+              scroll={false}
+              className="text-ink underline underline-offset-4 decoration-rule-strong hover:decoration-ink"
+            >
+              Settings
+            </Link>
+            . Use the{' '}
+            <Link
+              href="/studio/inbox"
+              className="text-ink underline underline-offset-4 decoration-rule-strong hover:decoration-ink"
+            >
+              Inbox
+            </Link>{' '}
+            to capture manually. Anything you paste in becomes a capture
+            Thoughtbed can connect, surface, and reflect against.
+          </p>
+        </div>
       </div>
-    </main>
+    </section>
   );
 }
