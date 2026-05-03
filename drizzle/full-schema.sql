@@ -144,4 +144,19 @@ CREATE TABLE IF NOT EXISTS drafts (
 CREATE INDEX IF NOT EXISTS idx_drafts_user_updated
   ON drafts(user_id, updated_at);
 
--- Done. You should now have 9 tables visible in Neon's Tables panel.
+-- ─── DRAFT_VERSIONS ───  (Sprint 6 wave 3: history trail)
+CREATE TABLE IF NOT EXISTS draft_versions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  draft_id uuid NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content_json jsonb NOT NULL,
+  word_count integer,
+  source text NOT NULL,
+  -- 'autosave' | 'restore'
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_draft_versions_draft_created
+  ON draft_versions(draft_id, created_at);
+
+-- Done. You should now have 10 tables visible in Neon's Tables panel.

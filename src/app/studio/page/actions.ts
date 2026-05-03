@@ -2,6 +2,12 @@
 // Sprint 5: drafts CRUD. Auto-save is debounced client-side and calls
 // updateDraft() on every quiet beat.
 //
+// Sprint 6 wave 1: optimistic concurrency on drafts.version.
+// Sprint 6 wave 3: snapshot every save into draft_versions, with a 30s
+// coalesce window (most-recent autosave row gets overwritten rather than
+// duplicated during active typing). Adds listDraftVersions and
+// restoreDraftVersion for the History modal.
+//
 // Conventions match Sprint 3 (inbox/ideas actions): `requireUser()` for auth,
 // `revalidatePath()` for the rail and detail page. Title is derived from the
 // first H1 in the Tiptap doc — a small bit of structural sugar so the user
@@ -13,10 +19,10 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { eq, and, desc } from 'drizzle-orm';
 import { z } from 'zod';
-import { db, drafts } from '@/db';
+import { db, drafts, draftVersions } from '@/db';
 import { requireUser } from '@/lib/auth';
 
-// ─── helpers ──────────────────────────────────────
+// ─── helpers ───────────────────────────────────
 
 // Empty Tiptap/ProseMirror doc — what a fresh draft contains.
 function emptyDoc() {
@@ -53,6 +59,63 @@ function deriveTitle(doc: any): string | null {
   return null;
 }
 
+// Coalesce window for the snapshot policy. If the most recent autosave
+// version for a draft is younger than this, the next autosave overwrites
+// it in place rather than creating a new row.
+const VERSION_COALESCE_MS = 30_000;
+
+/**
+ * Best-effort snapshot into draft_versions. Coalesces consecutive autosaves
+ * within VERSION_COALESCE_MS; otherwise inserts a new row. Failures are
+ * logged but don't block the save itself — saves are sacred, version
+ * history is best-effort.
+ */
+async function snapshotVersion(
+  userId: string,
+  draftId: string,
+  contentJson: unknown,
+  source: 'autosave' | 'restore'
+) {
+  try {
+    if (source === 'autosave') {
+      const [latest] = await db
+        .select({
+          id: draftVersions.id,
+          source: draftVersions.source,
+          createdAt: draftVersions.createdAt,
+        })
+        .from(draftVersions)
+        .where(eq(draftVersions.draftId, draftId))
+        .orderBy(desc(draftVersions.createdAt))
+        .limit(1);
+
+      if (
+        latest &&
+        latest.source === 'autosave' &&
+        Date.now() - latest.createdAt.getTime() < VERSION_COALESCE_MS
+      ) {
+        // Within the coalesce window — overwrite the existing autosave row
+        // rather than burning a new history entry on every keystroke burst.
+        await db
+          .update(draftVersions)
+          .set({ contentJson: contentJson as any })
+          .where(eq(draftVersions.id, latest.id));
+        return;
+      }
+    }
+
+    await db.insert(draftVersions).values({
+      draftId,
+      userId,
+      contentJson: contentJson as any,
+      source,
+    });
+  } catch (err) {
+    // Don't surface to the user — saves succeed even if history doesn't.
+    console.warn('[snapshotVersion] failed', err);
+  }
+}
+
 // ─── createDraft ──────────────────────────────────
 // Empty draft, redirects into the editor immediately.
 export async function createDraft() {
@@ -73,7 +136,7 @@ export async function createDraft() {
 
 // ─── updateDraft ──────────────────────────────────
 // Called by the debounced auto-save. Owns title derivation, updatedAt bump,
-// and optimistic-concurrency gating via drafts.version.
+// optimistic-concurrency gating via drafts.version, and the version snapshot.
 //
 // Contract: client sends the version it last saw; server matches it in the
 // WHERE clause and bumps to expectedVersion+1 on success. If no row matches
@@ -164,6 +227,9 @@ export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
     };
   }
 
+  // Snapshot into history. Best-effort — never blocks the save.
+  await snapshotVersion(user.id, data.draftId, data.contentJson, 'autosave');
+
   revalidatePath('/studio/page');
   revalidatePath(`/studio/page/${data.draftId}`);
 
@@ -203,4 +269,122 @@ export async function listDrafts() {
     .from(drafts)
     .where(eq(drafts.userId, user.id))
     .orderBy(desc(drafts.updatedAt));
+}
+
+// ─── listDraftVersions ────────────────────────────────
+// Used by the History modal. Verifies draft ownership before returning
+// snapshots. Limit 50 — a deeper history would mean a different UX.
+const listDraftVersionsSchema = z.object({ draftId: z.string().uuid() });
+
+export type DraftVersionRow = {
+  id: string;
+  source: string;
+  createdAt: string;
+  contentJson: unknown;
+};
+
+export async function listDraftVersions(
+  input: unknown
+): Promise<DraftVersionRow[]> {
+  const user = await requireUser();
+  const { draftId } = listDraftVersionsSchema.parse(input);
+
+  const [draft] = await db
+    .select({ id: drafts.id })
+    .from(drafts)
+    .where(and(eq(drafts.id, draftId), eq(drafts.userId, user.id)))
+    .limit(1);
+  if (!draft) throw new Error('Draft not found');
+
+  const rows = await db
+    .select({
+      id: draftVersions.id,
+      source: draftVersions.source,
+      createdAt: draftVersions.createdAt,
+      contentJson: draftVersions.contentJson,
+    })
+    .from(draftVersions)
+    .where(eq(draftVersions.draftId, draftId))
+    .orderBy(desc(draftVersions.createdAt))
+    .limit(50);
+
+  return rows.map((r) => ({
+    id: r.id,
+    source: r.source,
+    createdAt: r.createdAt.toISOString(),
+    contentJson: r.contentJson,
+  }));
+}
+
+// ─── restoreDraftVersion ──────────────────────────────
+// Replaces the draft's content with a historical version. Linear, never
+// destructive — the act of restoring spawns a new draft_versions row with
+// source='restore'. Bypasses optimistic concurrency: the user explicitly
+// chose to time-travel, so we overwrite whatever's current.
+const restoreDraftVersionSchema = z.object({
+  draftId: z.string().uuid(),
+  versionId: z.string().uuid(),
+});
+
+export type RestoreDraftResult = {
+  savedAt: string;
+  title: string | null;
+  version: number;
+  content: unknown;
+};
+
+export async function restoreDraftVersion(
+  input: unknown
+): Promise<RestoreDraftResult> {
+  const user = await requireUser();
+  const { draftId, versionId } = restoreDraftVersionSchema.parse(input);
+
+  // Fetch draft + version together. Ownership check via draft.user_id.
+  const [draft] = await db
+    .select({ id: drafts.id, version: drafts.version })
+    .from(drafts)
+    .where(and(eq(drafts.id, draftId), eq(drafts.userId, user.id)))
+    .limit(1);
+  if (!draft) throw new Error('Draft not found');
+
+  const [version] = await db
+    .select({
+      id: draftVersions.id,
+      contentJson: draftVersions.contentJson,
+    })
+    .from(draftVersions)
+    .where(
+      and(
+        eq(draftVersions.id, versionId),
+        eq(draftVersions.draftId, draftId)
+      )
+    )
+    .limit(1);
+  if (!version) throw new Error('Version not found');
+
+  const newVersion = draft.version + 1;
+  const title = deriveTitle(version.contentJson);
+
+  await db
+    .update(drafts)
+    .set({
+      contentJson: version.contentJson as any,
+      title,
+      version: newVersion,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(drafts.id, draftId), eq(drafts.userId, user.id)));
+
+  // Linear history: a restore is itself a versioned event.
+  await snapshotVersion(user.id, draftId, version.contentJson, 'restore');
+
+  revalidatePath('/studio/page');
+  revalidatePath(`/studio/page/${draftId}`);
+
+  return {
+    savedAt: new Date().toISOString(),
+    title,
+    version: newVersion,
+    content: version.contentJson,
+  };
 }

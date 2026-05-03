@@ -16,9 +16,9 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // USERS — managed by Clerk; we mirror just the ID + minimal profile
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   clerkId: text('clerk_id').notNull().unique(),
@@ -27,9 +27,9 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // IDEAS — the foundational primitive
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const ideas = pgTable(
   'ideas',
   {
@@ -81,7 +81,7 @@ export const ideas = pgTable(
 
 // ──────────────────────────────────────────────
 // CAPTURES — raw material; the bank's content
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const captures = pgTable(
   'captures',
   {
@@ -126,9 +126,9 @@ export const captures = pgTable(
   })
 );
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // ARTIFACTS — built things
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const artifacts = pgTable('artifacts', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id')
@@ -157,9 +157,9 @@ export const artifacts = pgTable('artifacts', {
   embedding: vector('embedding', { dimensions: 1536 }),
 });
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // THREADS — journal entries on an idea
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const threads = pgTable('threads', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id')
@@ -188,9 +188,9 @@ export const threadEntries = pgTable('thread_entries', {
   embedding: vector('embedding', { dimensions: 1536 }),
 });
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // IDEA EDGES — typed relationships between ideas
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const ideaEdges = pgTable('idea_edges', {
   id: uuid('id').primaryKey().defaultRandom(),
   fromIdea: uuid('from_idea')
@@ -207,10 +207,10 @@ export const ideaEdges = pgTable('idea_edges', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // ASSISTANT_OFFERS — log of what the Assistant suggested
 // Used to tune retrieval over time and track acceptance
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const assistantOffers = pgTable('assistant_offers', {
   id: uuid('id').primaryKey().defaultRandom(),
   artifactId: uuid('artifact_id').references(() => artifacts.id, {
@@ -226,11 +226,11 @@ export const assistantOffers = pgTable('assistant_offers', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // DRAFTS — Sprint 5: The Page
 // In-progress writing surfaces. Tiptap doc serialized as ProseMirror JSON.
 // May mature into an idea + artifact later; nullable ideaId reflects that.
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export const drafts = pgTable(
   'drafts',
   {
@@ -270,9 +270,41 @@ export const drafts = pgTable(
   })
 );
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
+// DRAFT VERSIONS — Sprint 6: history trail for The Page
+// Every successful save snapshots into here, with a 30s coalesce window
+// (an autosave row younger than 30s gets overwritten in place rather than
+// duplicated). Restoring a version creates a new row with source='restore'.
+// ──────────────────────────────────────────────
+export const draftVersions = pgTable(
+  'draft_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => drafts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    contentJson: jsonb('content_json').notNull(),
+    wordCount: integer('word_count'),
+    source: text('source').notNull(),
+    // 'autosave' | 'restore'  (room for 'manual' later)
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    draftCreatedIdx: index('idx_draft_versions_draft_created').on(
+      table.draftId,
+      table.createdAt
+    ),
+  })
+);
+
+// ──────────────────────────────────────────────
 // Type exports for inference
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
 export type Idea = typeof ideas.$inferSelect;
 export type Capture = typeof captures.$inferSelect;
@@ -282,9 +314,11 @@ export type ThreadEntry = typeof threadEntries.$inferSelect;
 export type IdeaEdge = typeof ideaEdges.$inferSelect;
 export type AssistantOffer = typeof assistantOffers.$inferSelect;
 export type Draft = typeof drafts.$inferSelect;
+export type DraftVersion = typeof draftVersions.$inferSelect;
 
 export type NewUser = typeof users.$inferInsert;
 export type NewIdea = typeof ideas.$inferInsert;
 export type NewCapture = typeof captures.$inferInsert;
 export type NewArtifact = typeof artifacts.$inferInsert;
 export type NewDraft = typeof drafts.$inferInsert;
+export type NewDraftVersion = typeof draftVersions.$inferInsert;
