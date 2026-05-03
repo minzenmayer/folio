@@ -1,66 +1,145 @@
-/**
- * src/app/api/cron/obsidian-sync/route.ts
- *
- * Daily backstop cron for Obsidian vault synchronisation.
- *
- * Vercel Cron invokes this at 08:30 UTC every day (see vercel.json).
- * It iterates every active Obsidian connector row in `user_connectors`
- * and runs a full `syncVault()` pass, then logs a summary.
- *
- * Security
- * ────────
- * The route is protected by the Vercel-injected `x-vercel-cron` header.
- * Unauthenticated external callers receive 401.
- */
+// Thoughtbed · /api/cron/obsidian-sync (Sprint 15 Wave 2)
+//
+// Daily backstop for the Obsidian-via-GitHub connector. Real-time push
+// is the primary path (GitHub push webhook → Wave-1 dispatcher); this
+// cron catches:
+//   · Pushes that fired before our last deploy and were missed.
+//   · Pushes that 5xx'd on our side without GitHub retrying past the cap.
+//   · Branch protections / repo settings that disable webhooks for a
+//     period without disconnecting the connector.
+//
+// Mirrors src/app/api/cron/beehiiv-sync — same Bearer-token auth, same
+// per-account error isolation. Runs at 08:30 UTC (30 minutes after the
+// Beehiiv cron) to spread load across the function pool.
 
-import { NextResponse }        from 'next/server';
-import { db }                  from '@/db';
-import { userConnectors }      from '@/db/schema';
-import { eq }                  from 'drizzle-orm';
-import { obsidianConnector }   from '@/lib/connectors/obsidian';
-import { syncVault }           from '@/lib/obsidian-sync';
-import { parseRepoUrl }        from '@/lib/obsidian';
-import type { ObsidianCredentials } from '@/lib/connectors/obsidian';
+import { eq, and, isNotNull } from 'drizzle-orm';
+import { db, connectorAccounts } from '@/db';
+import { decryptSecret } from '@/lib/crypto';
+import { runSync } from '@/lib/obsidian-sync';
 
-export const runtime  = 'nodejs';
-export const maxDuration = 300; // 5 min Vercel limit for cron
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-export async function GET(request: Request) {
-  // ── Auth ──────────────────────────────────────────────────────────────────
-  const isCron = request.headers.get('x-vercel-cron') === '1';
-  if (!isCron) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+type AccountReport = {
+  accountId: string;
+  userId: string;
+  status: 'ok' | 'error' | 'skipped';
+  fetched?: number;
+  touched?: number;
+  removed?: number;
+  reason?: string;
+};
+
+function unauthorized() {
+  return new Response('Unauthorized', { status: 401 });
+}
+
+export async function GET(req: Request) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) {
+    console.error('[cron:obsidian] CRON_SECRET is not set — cron disabled.');
+    return unauthorized();
+  }
+  const auth = req.headers.get('authorization');
+  if (auth !== `Bearer ${expected}`) {
+    return unauthorized();
   }
 
-  // ── Load active Obsidian connectors ───────────────────────────────────────
-  const rows = await db
+  const startedAt = Date.now();
+
+  const accounts = await db
     .select()
-    .from(userConnectors)
-    .where(eq(userConnectors.connectorId, 'obsidian'));
+    .from(connectorAccounts)
+    .where(
+      and(
+        eq(connectorAccounts.provider, 'obsidian'),
+        eq(connectorAccounts.status, 'connected'),
+        isNotNull(connectorAccounts.encryptedSecret)
+      )
+    );
 
-  if (rows.length === 0) {
-    return NextResponse.json({ ok: true, message: 'No Obsidian connectors configured.' });
-  }
+  const reports: AccountReport[] = [];
 
-  const results: Record<string, unknown> = {};
+  for (const account of accounts) {
+    if (!account.encryptedSecret) {
+      reports.push({
+        accountId: account.id,
+        userId: account.userId,
+        status: 'skipped',
+        reason: 'missing encrypted_secret',
+      });
+      continue;
+    }
 
-  for (const row of rows) {
-    const creds     = row.credentials as ObsidianCredentials;
-    const repoFull  = parseRepoUrl(creds.repoUrl);
+    const meta = (account.metadata ?? {}) as {
+      owner?: string;
+      repo?: string;
+      branch?: string;
+    };
+    if (!meta.owner || !meta.repo) {
+      reports.push({
+        accountId: account.id,
+        userId: account.userId,
+        status: 'skipped',
+        reason: 'missing owner/repo in metadata',
+      });
+      continue;
+    }
+
+    let pat: string;
+    try {
+      pat = decryptSecret(account.encryptedSecret);
+    } catch (err) {
+      console.warn('[cron:obsidian] decrypt failed', account.id, err);
+      reports.push({
+        accountId: account.id,
+        userId: account.userId,
+        status: 'error',
+        reason: 'decrypt_failed',
+      });
+      continue;
+    }
 
     try {
-      const result = await syncVault({
-        repoFull,
-        branch: creds.branch,
-        token:  creds.githubToken,
+      const { fetched, touched, removed } = await runSync(
+        account.userId,
+        account.id,
+        {
+          pat,
+          owner: meta.owner,
+          repo: meta.repo,
+          branch: meta.branch ?? 'main',
+        }
+      );
+      reports.push({
+        accountId: account.id,
+        userId: account.userId,
+        status: 'ok',
+        fetched,
+        touched,
+        removed,
       });
-      results[repoFull] = result;
     } catch (err) {
-      results[repoFull] = {
-        error: err instanceof Error ? err.message : String(err),
-      };
+      const message = err instanceof Error ? err.message : 'unknown';
+      console.warn('[cron:obsidian] runSync failed', account.id, message);
+      reports.push({
+        accountId: account.id,
+        userId: account.userId,
+        status: 'error',
+        reason: message.slice(0, 200),
+      });
     }
   }
 
-  return NextResponse.json({ ok: true, results });
+  const elapsedMs = Date.now() - startedAt;
+  return Response.json({
+    ok: true as const,
+    ranAt: new Date(startedAt).toISOString(),
+    elapsedMs,
+    accounts: reports.length,
+    succeeded: reports.filter((r) => r.status === 'ok').length,
+    skipped: reports.filter((r) => r.status === 'skipped').length,
+    failed: reports.filter((r) => r.status === 'error').length,
+    reports,
+  });
 }

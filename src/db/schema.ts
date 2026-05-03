@@ -1,177 +1,612 @@
-/**
- * src/db/schema.ts — Sprint 15 Wave 2
- *
- * Full Drizzle schema.  Changes from Wave 1:
- *   + obsidianNotes table
- *   + extractedIdeas table (XOR FK to newsletter_issues or obsidian_notes)
- *   + obsidian entry in the ConnectorId enum
- */
+// Folio · Database Schema
+// Full schema as specified in Issue 09.
+// All Idea object fields shipped from Day 1, even where v0 UI doesn't surface them.
+// Migrating shape later is harder than over-specifying now.
 
 import {
   pgTable,
-  pgEnum,
-  text,
   uuid,
+  text,
+  integer,
+  real,
   timestamp,
   jsonb,
-  real,
-  integer,
-  boolean,
-  check,
+  vector,
   index,
-  uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enums
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const connectorIdEnum = pgEnum('connector_id', [
-  'beehiiv',
-  'obsidian',   // ← Wave 2
-]);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// users
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ────────────────────────────────────────────
+// USERS — managed by Clerk; we mirror just the ID + minimal profile
+// ────────────────────────────────────────────
 export const users = pgTable('users', {
-  id:        uuid('id').primaryKey().defaultRandom(),
-  email:     text('email').notNull().unique(),
-  name:      text('name'),
-  avatarUrl: text('avatar_url'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  id: uuid('id').primaryKey().defaultRandom(),
+  clerkId: text('clerk_id').notNull().unique(),
+  email: text('email').notNull(),
+  name: text('name'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// newsletter_issues
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────
+// IDEAS — the foundational primitive
+// ────────────────────────────────────────────
+export const ideas = pgTable(
+  'ideas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
 
+    // identity
+    title: text('title').notNull(),
+    essence: text('essence'),
+    posedAs: text('posed_as'),
+    tags: text('tags').array().default(sql`'{}'`),
+    themes: text('themes').array().default(sql`'{}'`),
+
+    // state — text + check constraint instead of enum (more migratable)
+    maturity: text('maturity').notNull().default('seed'),
+    // 'seed' | 'forming' | 'shaping' | 'ready' | 'circulated' | 'dormant'
+    energy: text('energy').notNull().default('active'),
+    // 'active' | 'warming' | 'cooling' | 'archived'
+
+    // provenance
+    origin: text('origin').notNull().default('captured'),
+    // 'captured' | 'noticed' | 'synthesized' | 'spawned'
+    originRef: uuid('origin_ref'),
+    parentIdeaId: uuid('parent_idea_id').references((): any => ideas.id),
+
+    // signal — denormalized, refreshed via trigger or background job
+    weight: integer('weight').default(0),
+    pull: integer('pull').default(0),
+    heat: real('heat').default(0),
+
+    // Sprint 7: retrieval substrate. Computed from title + essence + body
+    // on every successful save. Nullable so rows that pre-date Sprint 7 — or
+    // whose embedText() call failed — still read cleanly; backfillEmbeddings
+    // sweeps NULLs in batches.
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+    lastVisitedAt: timestamp('last_visited_at', { withTimezone: true }),
+    lastEvolvedAt: timestamp('last_evolved_at', { withTimezone: true }),
+  },
+  (table) => ({
+    userVisitedIdx: index('idx_ideas_user_visited').on(
+      table.userId,
+      table.lastVisitedAt
+    ),
+    userMaturityIdx: index('idx_ideas_user_maturity').on(
+      table.userId,
+      table.maturity
+    ),
+    embeddingIdx: index('idx_ideas_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
+);
+
+// ────────────────────────────────────────────
+// CAPTURES — raw material; the bank's content
+// ────────────────────────────────────────────
+export const captures = pgTable(
+  'captures',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    ideaId: uuid('idea_id').references(() => ideas.id, {
+      onDelete: 'set null',
+    }),
+    // null = unfiled, in Inbox
+
+    type: text('type').notNull(),
+    // 'link' | 'quote' | 'image' | 'voice_memo' | 'doc' | 'feed_item' | 'paste'
+    source: text('source'),
+    body: text('body').notNull(),
+    summary: text('summary'),
+
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    status: text('status').default('inbox'),
+    // 'inbox' | 'attached' | 'stashed' | 'discarded'
+
+    capturedVia: text('captured_via').notNull(),
+    // 'paste' | 'extension' | 'share' | 'manual' | 'email' | 'feed' | 'mobile'
+    capturedAt: timestamp('captured_at', { withTimezone: true }).defaultNow(),
+    metadata: jsonb('metadata').default({}),
+  },
+  (table) => ({
+    embeddingIdx: index('idx_captures_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+    userIdeaIdx: index('idx_captures_user_idea').on(
+      table.userId,
+      table.ideaId,
+      table.capturedAt
+    ),
+    inboxIdx: index('idx_captures_inbox')
+      .on(table.userId, table.status)
+      .where(sql`${table.status} = 'inbox'`),
+  })
+);
+
+// ────────────────────────────────────────────
+// ARTIFACTS — built things
+// ────────────────────────────────────────────
+export const artifacts = pgTable('artifacts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  ideaId: uuid('idea_id')
+    .notNull()
+    .references(() => ideas.id, { onDelete: 'cascade' }),
+
+  format: text('format').notNull().default('draft'),
+  // 'essay' | 'post' | 'newsletter' | 'talk' | 'draft'
+  title: text('title').notNull(),
+  body: jsonb('body').notNull().default({}),
+  // ProseMirror JSON for editor fidelity
+
+  status: text('status').default('draft'),
+  // 'draft' | 'complete' | 'shipped'
+  voiceMatchScore: real('voice_match_score'),
+  wordCount: integer('word_count').default(0),
+
+  builtAt: timestamp('built_at', { withTimezone: true }).defaultNow(),
+  shippedAt: timestamp('shipped_at', { withTimezone: true }),
+  shippedDestination: text('shipped_destination'),
+  ingredientIdeaIds: uuid('ingredient_idea_ids').array().default(sql`'{}'`),
+
+  embedding: vector('embedding', { dimensions: 1536 }),
+});
+
+// ────────────────────────────────────────────
+// THREADS — journal entries on an idea
+// ────────────────────────────────────────────
+export const threads = pgTable('threads', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  ideaId: uuid('idea_id')
+    .notNull()
+    .references(() => ideas.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull().default('journal'),
+  // 'journal' | 'log' | 'synthesis' | 'graph'
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  lastEvolvedAt: timestamp('last_evolved_at', { withTimezone: true }),
+});
+
+export const threadEntries = pgTable('thread_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  threadId: uuid('thread_id')
+    .notNull()
+    .references(() => threads.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  entryType: text('entry_type').notNull().default('text'),
+  // 'text' | 'voice' | 'quote'
+  sourceCaptureId: uuid('source_capture_id').references(() => captures.id),
+  sourceArtifactId: uuid('source_artifact_id').references(() => artifacts.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  embedding: vector('embedding', { dimensions: 1536 }),
+});
+
+// ────────────────────────────────────────────
+// IDEA EDGES — typed relationships between ideas
+// ────────────────────────────────────────────
+export const ideaEdges = pgTable('idea_edges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  fromIdea: uuid('from_idea')
+    .notNull()
+    .references(() => ideas.id, { onDelete: 'cascade' }),
+  toIdea: uuid('to_idea')
+    .notNull()
+    .references(() => ideas.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull(),
+  // 'parent' | 'supports' | 'extends' | 'echoes' | 'contradicts' | 'supersedes'
+  strength: real('strength').default(1),
+  userConfirmed: integer('user_confirmed').default(0),
+  // 0 = suggested by Assistant, 1 = user-confirmed
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// ────────────────────────────────────────────
+// ASSISTANT_OFFERS — log of what the Assistant suggested
+// Used to tune retrieval over time and track acceptance
+// ────────────────────────────────────────────
+export const assistantOffers = pgTable('assistant_offers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  artifactId: uuid('artifact_id').references(() => artifacts.id, {
+    onDelete: 'cascade',
+  }),
+  paragraphIndex: integer('paragraph_index'),
+  offerType: text('offer_type').notNull(),
+  // 'capture_pull' | 'angle' | 'tension' | 'voice'
+  sourceCaptureId: uuid('source_capture_id').references(() => captures.id),
+  sourceIdeaId: uuid('source_idea_id').references(() => ideas.id),
+  confidence: real('confidence'),
+  actedOn: integer('acted_on').default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
+// ────────────────────────────────────────────
+// DRAFTS — Sprint 5: The Page
+// In-progress writing surfaces. Tiptap doc serialized as ProseMirror JSON.
+// May mature into an idea + artifact later; nullable ideaId reflects that.
+// ────────────────────────────────────────────
+export const drafts = pgTable(
+  'drafts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // Implicit title — derived from the first H1 in contentJson on each save.
+    // Nullable so empty drafts read as "Untitled" in the rail.
+    title: text('title'),
+
+    // Tiptap doc as ProseMirror JSON (default empty doc on insert).
+    contentJson: jsonb('content_json').notNull(),
+
+    // Drafts can mature into ideas. Until then, no parent.
+    ideaId: uuid('idea_id').references(() => ideas.id, {
+      onDelete: 'set null',
+    }),
+
+    // Optimistic-concurrency token. Bumped on every successful update.
+    // updateDraft gates the WHERE on this; mismatch = concurrent edit.
+    version: integer('version').notNull().default(1),
+
+    // Sprint 7: retrieval substrate. Computed from tiptapJsonToText(contentJson)
+    // on every successful save (createDraft / updateDraft / restoreDraftVersion).
+    // Same nullable + best-effort pattern as ideas.embedding.
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userUpdatedIdx: index('idx_drafts_user_updated').on(
+      table.userId,
+      table.updatedAt
+    ),
+    embeddingIdx: index('idx_drafts_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
+);
+
+// ────────────────────────────────────────────
+// DRAFT VERSIONS — Sprint 6: history trail for The Page
+// Every successful save snapshots into here, with a 30s coalesce window
+// (an autosave row younger than 30s gets overwritten in place rather than
+// duplicated). Restoring a version creates a new row with source='restore'.
+// ────────────────────────────────────────────
+export const draftVersions = pgTable(
+  'draft_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => drafts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    contentJson: jsonb('content_json').notNull(),
+    wordCount: integer('word_count'),
+    source: text('source').notNull(),
+    // 'autosave' | 'restore'  (room for 'manual' later)
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    draftCreatedIdx: index('idx_draft_versions_draft_created').on(
+      table.draftId,
+      table.createdAt
+    ),
+  })
+);
+
+// ────────────────────────────────────────────
+// CONNECTOR_ACCOUNTS — Sprint 13: per-(user, provider) integration record
+// Generic across providers. The plaintext API key never lives here —
+// `encryptedSecret` holds AES-256-GCM ciphertext (see src/lib/crypto.ts).
+// On Disconnect we zero the secret but keep the row for status tracking
+// and so newsletter_issues stay reachable through the FK chain.
+// ────────────────────────────────────────────
+export const connectorAccounts = pgTable(
+  'connector_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    provider: text('provider').notNull(),
+    // 'beehiiv' | 'obsidian' | 'linkedin' | 'gdrive' | 'gmail'
+
+    status: text('status').notNull().default('pending'),
+    // 'pending' | 'connected' | 'error' | 'disconnected'
+
+    encryptedSecret: text('encrypted_secret'),
+    // base64(iv || authTag || ciphertext) — see src/lib/crypto.ts
+
+    metadata: jsonb('metadata').default({}),
+    // beehiiv: { publicationId, publication_name, webhook_id?, plan_tier? }
+
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    lastSyncStatus: text('last_sync_status'),
+    // 'ok' | 'partial' | 'rate_limited' | 'auth_failed' | 'error'
+    lastSyncError: text('last_sync_error'),
+    lastSyncCount: integer('last_sync_count'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userProviderIdx: index('idx_connector_accounts_user_provider').on(
+      table.userId,
+      table.provider
+    ),
+  })
+);
+
+// ────────────────────────────────────────────
+// NEWSLETTER_ISSUES — Sprint 13: published Beehiiv issues, ingested via
+// /api/cron + manual sync. Mirrors a Beehiiv post with the bits the bed
+// cares about (title, body_html, body_text, publish_date, audience). The
+// embedding column lets findSimilar surface past issues alongside captures,
+// ideas, and drafts so the user's own published voice resonates while
+// they're writing.
+// ────────────────────────────────────────────
 export const newsletterIssues = pgTable(
   'newsletter_issues',
   {
-    id:          uuid('id').primaryKey().defaultRandom(),
-    beehiivId:   text('beehiiv_id').notNull().unique(),
-    title:       text('title'),
-    subtitle:    text('subtitle'),
-    content:     text('content').notNull().default(''),
-    summary:     text('summary'),
-    tags:        text('tags').array().notNull().default(sql`'{}'`),
-    publishedAt: timestamp('published_at', { withTimezone: true }),
-    status:      text('status').notNull().default('draft'),
-    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    connectorAccountId: uuid('connector_account_id')
+      .notNull()
+      .references(() => connectorAccounts.id, { onDelete: 'cascade' }),
+
+    externalId: text('external_id').notNull(),
+    // Beehiiv post id (e.g. 'post_abc123...'). Unique per user — upsert key.
+
+    publicationId: text('publication_id').notNull(),
+    title: text('title').notNull(),
+    subtitle: text('subtitle'),
+    slug: text('slug'),
+    webUrl: text('web_url'),
+
+    audience: text('audience'),
+    // 'free' | 'premium' | 'all'
+
+    status: text('status'),
+    // mirrors Beehiiv: 'draft' | 'confirmed' | 'archived'
+
+    publishDate: timestamp('publish_date', { withTimezone: true }),
+
+    bodyHtml: text('body_html'),
+    bodyText: text('body_text'),
+
+    contentTags: text('content_tags').array().default(sql`'{}'`),
+    wordCount: integer('word_count'),
+
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    raw: jsonb('raw'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
-  (t) => ([
-    index('newsletter_issues_published_at_idx').on(t.publishedAt),
-    index('newsletter_issues_status_idx').on(t.status),
-  ])
+  (table) => ({
+    userPublishIdx: index('idx_newsletter_issues_user_publish').on(
+      table.userId,
+      table.publishDate
+    ),
+    embeddingIdx: index('idx_newsletter_issues_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// obsidian_notes   (Wave 2)
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ────────────────────────────────────────────
+// OBSIDIAN_NOTES — Sprint 15 Wave 2: vault notes synced via the Git-backed
+// Obsidian connector. Mirrors newsletter_issues' shape (per-(user,
+// externalId) row + embedding for findSimilar). externalId == path so
+// the upsert key survives renames-as-deletes-plus-inserts (Obsidian's
+// rename semantics through Git, anyway).
+//
+// blob_sha is the Git blob's content hash; the sync engine skips re-embed
+// when it matches what's already stored.
+// ────────────────────────────────────────────
 export const obsidianNotes = pgTable(
   'obsidian_notes',
   {
-    /** Stable ID: "owner/repo::vault/relative/path.md" */
-    id:          text('id').primaryKey(),
-    repoFull:    text('repo_full').notNull(),
-    title:       text('title'),
-    content:     text('content').notNull().default(''),
-    frontmatter: jsonb('frontmatter').notNull().default({}),
-    tags:        text('tags').array().notNull().default(sql`'{}'`),
-    wikilinks:   text('wikilinks').array().notNull().default(sql`'{}'`),
-    blobSha:     text('blob_sha'),
-    syncedAt:    timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
-    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    connectorAccountId: uuid('connector_account_id')
+      .notNull()
+      .references(() => connectorAccounts.id, { onDelete: 'cascade' }),
+
+    externalId: text('external_id').notNull(),
+    path: text('path').notNull(),
+
+    blobSha: text('blob_sha'),
+    commitSha: text('commit_sha'),
+
+    title: text('title').notNull(),
+
+    frontmatter: jsonb('frontmatter').default({}),
+
+    bodyText: text('body_text'),
+    bodyMarkdown: text('body_markdown'),
+
+    links: text('links').array().default(sql`'{}'`),
+    tags: text('tags').array().default(sql`'{}'`),
+
+    wordCount: integer('word_count'),
+
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    raw: jsonb('raw'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
-  (t) => ([
-    index('obsidian_notes_repo_full_idx').on(t.repoFull),
-    index('obsidian_notes_synced_at_idx').on(t.syncedAt),
-  ])
+  (table) => ({
+    userPathIdx: index('idx_obsidian_notes_user_path').on(
+      table.userId,
+      table.path
+    ),
+    userAccountIdx: index('idx_obsidian_notes_user_account').on(
+      table.userId,
+      table.connectorAccountId
+    ),
+    embeddingIdx: index('idx_obsidian_notes_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// extracted_ideas   (Wave 2)
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ────────────────────────────────────────────
+// EXTRACTED_IDEAS — Sprint 15 Wave 2: the unit of meaning extractIdeas()
+// pulls out of a source. Each row is one Idea with title/claim/evidence +
+// depth/breadth signals. Wave 3's retrieval ranking will boost matches by
+// these signals; for Wave 2 they're written + retrievable but not yet
+// consumed by the assistant.
+//
+// Source is a discriminated FK: source_kind picks which of the two
+// nullable reference columns is set. ON DELETE CASCADE on each FK means
+// re-syncing a source naturally cleans up its previously-extracted ideas
+// (the sync path deletes the source row on full-replace; for partial
+// updates we delete-by-source explicitly).
+// ────────────────────────────────────────────
 export const extractedIdeas = pgTable(
   'extracted_ideas',
   {
-    id:            uuid('id').primaryKey().defaultRandom(),
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
 
-    // Exactly one of these must be non-NULL (XOR enforced by check constraint).
-    issueId:       uuid('issue_id').references(() => newsletterIssues.id, { onDelete: 'cascade' }),
-    noteId:        text('note_id').references(() => obsidianNotes.id,     { onDelete: 'cascade' }),
-
-    title:         text('title').notNull(),
-    claim:         text('claim').notNull(),
-    evidence:      text('evidence'),
-
-    depthScore:    real('depth_score'),
-    breadthScore:  real('breadth_score'),
-
-    outboundLinks: text('outbound_links').array().notNull().default(sql`'{}'`),
-    sourceRef:     text('source_ref'),
-
-    extractedAt:   timestamp('extracted_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ([
-    check(
-      'extracted_ideas_single_source',
-      sql`(${t.issueId} IS NOT NULL)::int + (${t.noteId} IS NOT NULL)::int = 1`
+    // 'newsletter_issue' | 'obsidian_note' (extend as new providers land).
+    sourceKind: text('source_kind').notNull(),
+    newsletterIssueId: uuid('newsletter_issue_id').references(
+      () => newsletterIssues.id,
+      { onDelete: 'cascade' }
     ),
-    index('extracted_ideas_issue_id_idx').on(t.issueId),
-    index('extracted_ideas_note_id_idx').on(t.noteId),
-    index('extracted_ideas_depth_idx').on(t.depthScore),
-    index('extracted_ideas_breadth_idx').on(t.breadthScore),
-  ])
-);
+    obsidianNoteId: uuid('obsidian_note_id').references(
+      () => obsidianNotes.id,
+      { onDelete: 'cascade' }
+    ),
 
-// ─────────────────────────────────────────────────────────────────────────────
-// user_connectors
-// ─────────────────────────────────────────────────────────────────────────────
+    title: text('title').notNull(),
+    claim: text('claim').notNull(),
+    evidence: text('evidence'),
 
-export const userConnectors = pgTable(
-  'user_connectors',
-  {
-    id:          uuid('id').primaryKey().defaultRandom(),
-    userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    connectorId: connectorIdEnum('connector_id').notNull(),
-    credentials: jsonb('credentials').notNull().default({}),
-    syncedAt:    timestamp('synced_at', { withTimezone: true }),
-    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    depthSignal: real('depth_signal').notNull().default(0),
+    breadthSignal: real('breadth_signal').notNull().default(0),
+
+    links: text('links').array().default(sql`'{}'`),
+
+    sourceRef: jsonb('source_ref').notNull().default({}),
+
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
-  (t) => ([
-    uniqueIndex('user_connectors_user_connector_uidx').on(t.userId, t.connectorId),
-    index('user_connectors_connector_id_idx').on(t.connectorId),
-  ])
+  (table) => ({
+    sourceXor: check(
+      'extracted_ideas_source_xor',
+      sql`(${table.sourceKind} = 'newsletter_issue' AND ${table.newsletterIssueId} IS NOT NULL AND ${table.obsidianNoteId} IS NULL)
+          OR
+          (${table.sourceKind} = 'obsidian_note' AND ${table.obsidianNoteId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL)`
+    ),
+    userKindIdx: index('idx_extracted_ideas_user_kind').on(
+      table.userId,
+      table.sourceKind
+    ),
+    newsletterSourceIdx: index('idx_extracted_ideas_newsletter_source')
+      .on(table.newsletterIssueId)
+      .where(sql`${table.newsletterIssueId} IS NOT NULL`),
+    obsidianSourceIdx: index('idx_extracted_ideas_obsidian_source')
+      .on(table.obsidianNoteId)
+      .where(sql`${table.obsidianNoteId} IS NOT NULL`),
+    signalsIdx: index('idx_extracted_ideas_signals').on(
+      table.userId,
+      table.depthSignal,
+      table.breadthSignal
+    ),
+    embeddingIdx: index('idx_extracted_ideas_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// newsletter_embeddings
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────
+// Type exports for inference
+// ────────────────────────────────────────────
+export type User = typeof users.$inferSelect;
+export type Idea = typeof ideas.$inferSelect;
+export type Capture = typeof captures.$inferSelect;
+export type Artifact = typeof artifacts.$inferSelect;
+export type Thread = typeof threads.$inferSelect;
+export type ThreadEntry = typeof threadEntries.$inferSelect;
+export type IdeaEdge = typeof ideaEdges.$inferSelect;
+export type AssistantOffer = typeof assistantOffers.$inferSelect;
+export type Draft = typeof drafts.$inferSelect;
+export type DraftVersion = typeof draftVersions.$inferSelect;
+export type ConnectorAccount = typeof connectorAccounts.$inferSelect;
+export type NewsletterIssue = typeof newsletterIssues.$inferSelect;
+export type ObsidianNote = typeof obsidianNotes.$inferSelect;
+export type ExtractedIdea = typeof extractedIdeas.$inferSelect;
 
-export const newsletterEmbeddings = pgTable(
-  'newsletter_embeddings',
-  {
-    id:        uuid('id').primaryKey().defaultRandom(),
-    issueId:   uuid('issue_id').notNull().references(() => newsletterIssues.id, { onDelete: 'cascade' }),
-    chunkIdx:  integer('chunk_idx').notNull().default(0),
-    content:   text('content').notNull(),
-    // pgvector column — declared as text here; actual type set by migration.
-    embedding: text('embedding'),
-    model:     text('model').notNull().default('text-embedding-3-small'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ([
-    uniqueIndex('newsletter_embeddings_issue_chunk_uidx').on(t.issueId, t.chunkIdx),
-    index('newsletter_embeddings_issue_id_idx').on(t.issueId),
-  ])
-);
+export type NewUser = typeof users.$inferInsert;
+export type NewIdea = typeof ideas.$inferInsert;
+export type NewCapture = typeof captures.$inferInsert;
+export type NewArtifact = typeof artifacts.$inferInsert;
+export type NewDraft = typeof drafts.$inferInsert;
+export type NewDraftVersion = typeof draftVersions.$inferInsert;
+export type NewConnectorAccount = typeof connectorAccounts.$inferInsert;
+export type NewNewsletterIssue = typeof newsletterIssues.$inferInsert;
+export type NewObsidianNote = typeof obsidianNotes.$inferInsert;
+export type NewExtractedIdea = typeof extractedIdeas.$inferInsert;
