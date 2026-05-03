@@ -1,17 +1,8 @@
 // Thoughtbed · Studio home — writing-first
 //
-// Sprint 10: the authed homepage IS the writing surface. Greeting + a
-// composer that branches into Draft / Idea / Plant by mode, and below
-// it your recent ideas + drafts as a dense list — your bank of past
-// issues, kept one click away.
-//
-// Sprint 12: the composer's modes shift to intent-driven (Newsletter /
-// LinkedIn / Ideas / Self-pilot); the home defaults to Newsletter mode.
-// The greeting copy updates to match. The rest is aesthetic — rounded
-// cards, gentler borders, sentence-case where natural.
-//
-// The legacy "dashboard with two CTAs" is gone. Most days the user
-// has something to say; we honour that as the default.
+// Sprint 14 brand pivot: Ghostbase shape — system sans, monochrome
+// palette, no decorative glyphs, no italic accents. The composer + recent
+// items pattern stays; only the visual language changes.
 
 import Link from 'next/link';
 import { eq, and, desc, sql } from 'drizzle-orm';
@@ -37,18 +28,13 @@ function timeAgo(date: Date | string | null): string {
 }
 
 export default async function StudioHome() {
-  // Auth check at top so redirect() fires before any RSC streaming begins.
   const { userId: clerkId } = await auth();
-  if (!clerkId) {
-    redirect('/sign-in');
-  }
+  if (!clerkId) redirect('/sign-in');
 
   const user = await requireUser();
   const clerk = await currentUser();
-  const firstName = clerk?.firstName || user.name?.split(' ')[0] || 'friend';
+  const firstName = clerk?.firstName || user.name?.split(' ')[0] || 'there';
 
-  // Counts + freshest items so the page can adapt empty vs. populated
-  // states without an extra round-trip.
   const [counts] = await db
     .select({
       inbox: sql<number>`(
@@ -98,38 +84,36 @@ export default async function StudioHome() {
 
   return (
     <section>
-      <div className="max-w-[800px] mx-auto px-[7%] py-12 md:py-16">
+      <div className="max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
         {/* Greeting */}
         <div className="mb-8">
-          <div className="font-mono text-[11px] tracking-[0.22em] uppercase text-accent font-bold mb-4">
-            ☘ {isEmpty ? 'Your bed is freshly turned' : 'Welcome back'}
-          </div>
-          <h1 className="font-serif font-normal text-[clamp(36px,5vw,56px)] leading-[1.0] tracking-tightest text-ink mb-3">
-            Hello,{' '}
-            <em className="italic font-light text-accent">{firstName}.</em>
+          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
+            Hello, {firstName}.
           </h1>
-          <p className="font-serif font-light text-[clamp(17px,1.8vw,21px)] leading-[1.5] text-ink-soft max-w-[56ch]">
+          <p className="font-sans text-[15.5px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {isEmpty
-              ? 'Drop in a topic to get started. Newsletter is the default; switch modes if you\'re writing for LinkedIn, exploring ideas, or just want a blank page.'
+              ? "Drop in a topic to get started. Newsletter is the default; switch modes if you're writing for LinkedIn, exploring ideas, or just want a blank page."
               : 'What are you writing today? Pick a mode below, type your topic, and the page opens.'}
           </p>
         </div>
 
-        {/* The composer — Sprint 12 intent-driven modes */}
+        {/* Composer */}
         <Composer initialMode="newsletter" />
 
-        {/* Recent ideas + drafts — the bank of past issues */}
+        {/* Recent drafts + recent ideas */}
         {(recentDrafts.length > 0 || recentIdeas.length > 0) && (
-          <div className="mt-12 grid sm:grid-cols-2 gap-8">
+          <div className="mt-10 grid sm:grid-cols-2 gap-6">
             {recentDrafts.length > 0 && (
               <div>
-                <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-4 flex items-baseline gap-3">
-                  <span>▸ Recent drafts</span>
+                <div className="flex items-baseline justify-between mb-3">
+                  <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+                    Recent drafts
+                  </h2>
                   <Link
                     href="/studio/page"
-                    className="ml-auto text-tag/70 normal-case tracking-[0.04em] font-sans italic font-normal hover:text-accent transition-colors"
+                    className="font-sans text-[12px] text-tag hover:text-ink transition-colors"
                   >
-                    all →
+                    All →
                   </Link>
                 </div>
                 <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
@@ -137,14 +121,11 @@ export default async function StudioHome() {
                     <li key={d.id}>
                       <Link
                         href={`/studio/page/${d.id}`}
-                        className="flex items-baseline gap-3 py-3 px-4 hover:bg-paper-2 transition-colors group"
+                        className="flex items-baseline gap-3 py-2.5 px-4 hover:bg-paper-2 transition-colors"
                       >
-                        <span className="font-mono text-accent" aria-hidden>
-                          ✎
-                        </span>
-                        <span className="font-serif text-[15px] text-ink leading-[1.4] flex-1 truncate group-hover:text-accent transition-colors">
+                        <span className="font-sans text-[14px] text-ink leading-[1.4] flex-1 truncate">
                           {d.title || (
-                            <em className="italic text-tag">Untitled</em>
+                            <span className="text-tag">Untitled</span>
                           )}
                         </span>
                         <span className="font-mono text-[10px] text-tag tracking-[0.04em]">
@@ -159,13 +140,15 @@ export default async function StudioHome() {
 
             {recentIdeas.length > 0 && (
               <div>
-                <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-4 flex items-baseline gap-3">
-                  <span>▸ Recent ideas</span>
+                <div className="flex items-baseline justify-between mb-3">
+                  <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+                    Recent ideas
+                  </h2>
                   <Link
                     href="/studio/ideas"
-                    className="ml-auto text-tag/70 normal-case tracking-[0.04em] font-sans italic font-normal hover:text-accent transition-colors"
+                    className="font-sans text-[12px] text-tag hover:text-ink transition-colors"
                   >
-                    garden →
+                    Library →
                   </Link>
                 </div>
                 <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
@@ -173,12 +156,9 @@ export default async function StudioHome() {
                     <li key={i.id}>
                       <Link
                         href={`/studio/ideas/${i.id}`}
-                        className="flex items-baseline gap-3 py-3 px-4 hover:bg-paper-2 transition-colors group"
+                        className="flex items-baseline gap-3 py-2.5 px-4 hover:bg-paper-2 transition-colors"
                       >
-                        <span className="font-mono text-accent" aria-hidden>
-                          ▸
-                        </span>
-                        <span className="font-serif text-[15px] text-ink leading-[1.4] flex-1 truncate group-hover:text-accent transition-colors">
+                        <span className="font-sans text-[14px] text-ink leading-[1.4] flex-1 truncate">
                           {i.title}
                         </span>
                         <span className="font-mono text-[9px] text-tag uppercase tracking-[0.16em]">
@@ -193,66 +173,60 @@ export default async function StudioHome() {
           </div>
         )}
 
-        {/* Inbox callout — keep it discoverable when something's pending */}
+        {/* Inbox callout */}
         {inboxCount > 0 && (
-          <div className="mt-10 rounded-card bg-paper border border-rule px-5 py-4 flex items-center gap-3 shadow-soft">
-            <span className="font-mono text-accent" aria-hidden>
-              "
-            </span>
-            <p className="font-serif text-[14px] text-ink-soft flex-1">
-              <span className="font-mono text-[12px] text-accent font-bold">
+          <div className="mt-8 rounded-card bg-paper border border-rule px-5 py-4 flex items-center gap-3">
+            <p className="font-sans text-[13.5px] text-ink-soft flex-1">
+              <span className="font-medium text-ink">
                 {inboxCount}
               </span>{' '}
-              {inboxCount === 1 ? 'seed waiting' : 'seeds waiting'} in the
-              Inbox.
+              {inboxCount === 1 ? 'item' : 'items'} waiting in the Inbox.
             </p>
             <Link
               href="/studio/inbox"
-              className="font-mono text-[11px] tracking-[0.22em] uppercase text-accent hover:text-ink transition-colors"
+              className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink hover:text-tag transition-colors"
             >
               File →
             </Link>
           </div>
         )}
 
-        {/* Maintenance — backfill embeddings (admin-style, kept here from Sprint 7) */}
+        {/* Maintenance — backfill embeddings (admin) */}
         <BackfillButton />
 
-        {/* Roadmap — only shown when bed is empty so newcomers see direction */}
+        {/* First-run guide */}
         {isEmpty && (
-          <div className="border-t border-rule pt-10 mt-12">
-            <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-6">
-              ▸ How it works
-            </div>
+          <div className="border-t border-rule pt-8 mt-12">
+            <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-5">
+              How it works
+            </h2>
             <ul className="space-y-4">
-              <li className="grid grid-cols-[80px_1fr] gap-6 items-baseline border-b border-rule pb-4">
-                <span className="font-mono text-[11px] text-accent font-bold">
-                  Plant
+              <li className="grid grid-cols-[100px_1fr] gap-6 items-baseline border-b border-rule pb-4">
+                <span className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink font-medium">
+                  Capture
                 </span>
-                <p className="font-serif text-[15px] text-ink-soft leading-[1.5]">
-                  <span className="text-ink font-medium">Inbox</span>
-                  {' — '}paste a thought, a quote, anything you don't want to
-                  lose.
+                <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
+                  <span className="text-ink font-medium">Inbox</span> — paste a
+                  thought, a quote, anything you don't want to lose.
                 </p>
               </li>
-              <li className="grid grid-cols-[80px_1fr] gap-6 items-baseline border-b border-rule pb-4">
-                <span className="font-mono text-[11px] text-accent font-bold">
-                  Grow
+              <li className="grid grid-cols-[100px_1fr] gap-6 items-baseline border-b border-rule pb-4">
+                <span className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink font-medium">
+                  Connect
                 </span>
-                <p className="font-serif text-[15px] text-ink-soft leading-[1.5]">
-                  <span className="text-ink font-medium">Garden</span>
-                  {' — '}seeds connect to ideas, drafts, and each other while
-                  you sleep.
+                <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
+                  <span className="text-ink font-medium">Library</span> —
+                  captures connect to ideas, drafts, and each other while you
+                  sleep.
                 </p>
               </li>
-              <li className="grid grid-cols-[80px_1fr] gap-6 items-baseline">
-                <span className="font-mono text-[11px] text-accent font-bold">
-                  Harvest
+              <li className="grid grid-cols-[100px_1fr] gap-6 items-baseline">
+                <span className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink font-medium">
+                  Write
                 </span>
-                <p className="font-serif text-[15px] text-ink-soft leading-[1.5]">
-                  <span className="text-ink font-medium">The Page</span>
-                  {' — '}sit down to write, and ripe ideas surface as you
-                  type.
+                <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
+                  <span className="text-ink font-medium">The page</span> — sit
+                  down to write, and ripe ideas surface as you type.
                 </p>
               </li>
             </ul>

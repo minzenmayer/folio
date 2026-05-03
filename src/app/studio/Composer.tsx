@@ -1,32 +1,19 @@
-// Thoughtbed · Composer (Sprint 12)
+// Thoughtbed · Composer
 //
-// The writing-first entry on /studio. Sprint 12 replaces the old
-// data-shape modes (Draft / Idea / Plant) with intent-driven modes that
-// match how the user actually writes:
+// Sprint 14 brand pivot: Ghostbase shape — monochrome, no glyphs, system
+// sans, mono-uppercase letterspaced labels for system actions.
 //
-//   · Newsletter (default) — "Write a newsletter on…" → seeded draft with
-//     the typed topic as the H1, redirect into the editor.
-//   · LinkedIn — "Write a LinkedIn post on…" → body-only draft (no H1)
-//     with a soft 3000-char target counter.
-//   · Ideas — query interface, NOT a draft creator. Three preset prompts
-//     plus an inline semantic search over the user's ideas.
-//   · Self-pilot — "Open a blank page." Empty draft; the garden rail
-//     starts dormant. Honours "sometimes I just want to write".
+// Modes (intent-driven, unchanged from Sprint 12):
+//   · Newsletter (default) — seeded draft with topic as H1
+//   · LinkedIn — body-only draft with 3000-char target counter
+//   · Ideas — query interface, three preset prompts + search
+//   · Self-pilot — blank page; rail starts dormant
 //
-// The current composeNew() server action grew a richer mode discriminator;
-// Ideas mode is a separate exploreIdeas({ intent, query }) action that
-// returns ranked items rather than creating anything.
-//
-// Cmd/Ctrl+Enter submits in newsletter / linkedin / self-pilot modes. The
-// button is disabled while empty (newsletter / linkedin) or in flight,
-// so accidental empty submits don't ping the server.
-//
-// Aesthetic: rounded-card outer (~14px), generous internal padding, mode
-// pills as rounded-full pill toggles. The textarea is the hero.
+// Cmd/Ctrl+Enter submits in newsletter / linkedin / self-pilot modes.
 
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   composeNew,
@@ -42,39 +29,35 @@ type IdeasIntent = 'untouched' | 'mature' | 'search';
 const MODE_DEFS: Array<{
   id: ComposerMode;
   label: string;
-  glyph: string;
   hint: string;
 }> = [
   {
     id: 'newsletter',
     label: 'Newsletter',
-    glyph: '✉',
-    hint: 'a draft scaffolded with your topic as the title',
+    hint: 'A draft scaffolded with your topic as the title.',
   },
   {
     id: 'linkedin',
     label: 'LinkedIn',
-    glyph: '⊟',
-    hint: 'a body-only draft with a soft 3000-char target',
+    hint: 'A body-only draft with a soft 3,000-character target.',
   },
   {
     id: 'ideas',
     label: 'Ideas',
-    glyph: '▸',
-    hint: 'explore what your bed already holds — no draft created',
+    hint: 'Explore what Thoughtbed already holds — no draft created.',
   },
   {
     id: 'self-pilot',
     label: 'Self-pilot',
-    glyph: '○',
-    hint: 'a blank page; the garden stays asleep',
+    hint: 'A blank page. Resonance stays quiet until you call for it.',
   },
 ];
 
 const PLACEHOLDER: Record<Exclude<ComposerMode, 'ideas'>, string> = {
   newsletter: 'Write a newsletter on…',
   linkedin: 'Write a LinkedIn post on…',
-  'self-pilot': "Open a blank page. (Optional: drop a one-line note to start with.)",
+  'self-pilot':
+    'Open a blank page. (Optional: drop a one-line note to start with.)',
 };
 
 const SUBMIT_LABEL: Record<Exclude<ComposerMode, 'ideas'>, string> = {
@@ -86,22 +69,18 @@ const SUBMIT_LABEL: Record<Exclude<ComposerMode, 'ideas'>, string> = {
 const IDEA_PRESETS: Array<{
   id: IdeasIntent;
   label: string;
-  glyph: string;
 }> = [
   {
     id: 'untouched',
     label: "What's something I haven't written about?",
-    glyph: '◌',
   },
   {
     id: 'mature',
     label: 'What are some mature ideas I can write on?',
-    glyph: '☘',
   },
   {
     id: 'search',
     label: 'Help me search through my ideas.',
-    glyph: '⌕',
   },
 ];
 
@@ -117,8 +96,6 @@ export function Composer({
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Ideas-mode state. Kept here (not in a child) so the choice persists
-  // when the user toggles back to Ideas after a detour into another mode.
   const [activePreset, setActivePreset] = useState<IdeasIntent | null>(null);
   const [ideaQuery, setIdeaQuery] = useState('');
   const [ideasResult, setIdeasResult] = useState<ExploreIdeasResult | null>(
@@ -126,8 +103,6 @@ export function Composer({
   );
   const [ideasPending, startIdeasTransition] = useTransition();
 
-  // composeNew handles its own redirect; we just relay the trimmed text +
-  // mode. Self-pilot accepts an empty submit (= just open a blank page).
   const submit = useCallback(() => {
     if (mode === 'ideas') return;
     const trimmed = text.trim();
@@ -137,7 +112,6 @@ export function Composer({
         await composeNew({ text: trimmed, mode });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown';
-        // Next.js wraps redirect() in a special throw the runtime swallows.
         if (!/NEXT_REDIRECT/.test(message)) {
           console.error('[Composer] submit failed', err);
         }
@@ -156,8 +130,6 @@ export function Composer({
     [submit]
   );
 
-  // Switching mode resets the per-mode state so previous text doesn't
-  // bleed into the next one's textarea.
   function switchMode(next: ComposerMode) {
     if (next === mode) return;
     setMode(next);
@@ -177,12 +149,12 @@ export function Composer({
   const charCount = text.length;
 
   return (
-    <div className="bg-paper rounded-card border border-rule shadow-soft">
-      {/* Mode pills */}
+    <div className="bg-paper rounded-card border border-rule">
+      {/* Mode pills — monochrome, sans-uppercase letterspaced */}
       <div
         role="tablist"
         aria-label="Compose mode"
-        className="flex flex-wrap items-center gap-1.5 px-5 pt-5"
+        className="flex flex-wrap items-center gap-1 px-4 pt-4"
       >
         {MODE_DEFS.map((m) => {
           const selected = m.id === mode;
@@ -193,15 +165,12 @@ export function Composer({
               role="tab"
               aria-selected={selected}
               onClick={() => switchMode(m.id)}
-              className={`font-sans text-[12px] font-medium rounded-full px-3 py-1.5 transition-colors ${
+              className={`font-mono text-[11px] tracking-[0.16em] uppercase rounded-soft px-3 py-1.5 transition-colors ${
                 selected
                   ? 'bg-ink text-bg'
                   : 'bg-transparent text-tag hover:bg-paper-2 hover:text-ink'
               }`}
             >
-              <span className="mr-1.5" aria-hidden>
-                {m.glyph}
-              </span>
               {m.label}
             </button>
           );
@@ -311,18 +280,18 @@ function DraftPanel({
         rows={mode === 'self-pilot' ? 3 : 5}
         placeholder={PLACEHOLDER[mode]}
         aria-label={`${meta.label} composer`}
-        className="w-full resize-none bg-transparent px-6 pt-5 pb-3 font-serif text-[18px] leading-[1.6] text-ink placeholder:text-tag/80 placeholder:italic focus:outline-none"
+        className="w-full resize-none bg-transparent px-5 pt-4 pb-2 font-sans text-[16px] leading-[1.55] text-ink placeholder:text-tag focus:outline-none"
       />
 
-      <div className="flex flex-wrap items-center gap-3 px-5 py-3">
-        <div className="font-serif italic text-[12px] text-tag flex-1 min-w-0 truncate">
+      <div className="flex flex-wrap items-center gap-3 px-5 pb-4 pt-1">
+        <div className="font-sans text-[12.5px] text-ink-soft flex-1 min-w-0 truncate">
           {meta.hint}
         </div>
 
         {showCharCount && (
           <div
-            className={`font-mono text-[10px] tracking-[0.04em] ${
-              overTarget ? 'text-accent' : 'text-tag'
+            className={`font-mono text-[10px] tracking-[0.06em] ${
+              overTarget ? 'text-ink' : 'text-tag'
             }`}
             aria-label="LinkedIn character target"
           >
@@ -334,13 +303,13 @@ function DraftPanel({
           type="button"
           onClick={submit}
           disabled={!canSubmit}
-          className="font-sans text-[12px] font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-accent disabled:bg-tag/40 disabled:cursor-not-allowed transition-colors"
+          className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors"
         >
-          {isPending ? 'Sending…' : `⏎ ${SUBMIT_LABEL[mode]}`}
+          {isPending ? 'Sending…' : SUBMIT_LABEL[mode]}
         </button>
       </div>
 
-      <p className="px-6 pb-3 font-mono text-[10px] tracking-[0.04em] text-tag/70">
+      <p className="px-5 pb-3 font-mono text-[10px] tracking-[0.04em] text-tag">
         ⌘+Enter to submit
       </p>
     </>
@@ -369,8 +338,8 @@ function IdeasPanel({
   const router = useRouter();
 
   return (
-    <div className="px-5 pt-4 pb-5">
-      <p className="font-serif italic text-[14px] text-tag leading-[1.5] mb-4">
+    <div className="px-5 pt-3 pb-5">
+      <p className="font-sans text-[13px] text-ink-soft leading-[1.5] mb-4">
         Pick a question, or search by idea — nothing here creates a draft.
       </p>
 
@@ -383,23 +352,13 @@ function IdeasPanel({
               type="button"
               onClick={() => onPreset(p.id)}
               aria-pressed={active}
-              className={`flex items-center gap-3 text-left rounded-soft border px-4 py-3 transition-colors ${
+              className={`text-left rounded-soft border px-4 py-3 transition-colors font-sans text-[14px] ${
                 active
-                  ? 'border-accent bg-paper-2 text-ink'
-                  : 'border-rule bg-paper hover:border-accent hover:bg-paper-2 text-ink-soft'
+                  ? 'border-ink bg-paper-2 text-ink font-medium'
+                  : 'border-rule bg-paper hover:border-ink/40 hover:bg-paper-2 text-ink-soft'
               }`}
             >
-              <span
-                className={`font-mono text-[14px] w-5 text-center shrink-0 ${
-                  active ? 'text-accent' : 'text-tag'
-                }`}
-                aria-hidden
-              >
-                {p.glyph}
-              </span>
-              <span className="font-serif text-[15px] leading-[1.4]">
-                {p.label}
-              </span>
+              {p.label}
             </button>
           );
         })}
@@ -418,15 +377,15 @@ function IdeasPanel({
             value={ideaQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search ideas by what they're about…"
-            className="flex-1 bg-paper-2 rounded-soft border border-rule px-3 py-2 font-serif text-[14px] text-ink placeholder:text-tag/80 placeholder:italic focus:outline-none focus:border-accent"
+            className="flex-1 bg-paper-2 rounded-soft border border-rule px-3 py-2 font-sans text-[13.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
             aria-label="Search ideas"
           />
           <button
             type="submit"
             disabled={ideasPending || ideaQuery.trim().length === 0}
-            className="font-sans text-[12px] font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-accent disabled:bg-tag/40 disabled:cursor-not-allowed transition-colors"
+            className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors"
           >
-            {ideasPending ? 'Searching…' : '⌕ Search'}
+            {ideasPending ? 'Searching…' : 'Search'}
           </button>
         </form>
       )}
@@ -454,8 +413,8 @@ function IdeasResultsBlock({
 }) {
   if (loading) {
     return (
-      <p className="font-serif italic text-[13px] text-tag leading-[1.5]">
-        thinking<span className="opacity-60">…</span>
+      <p className="font-sans text-[13px] text-tag leading-[1.5]">
+        Thinking…
       </p>
     );
   }
@@ -463,7 +422,7 @@ function IdeasResultsBlock({
   if (!result) {
     if (activePreset === 'search') {
       return (
-        <p className="font-serif italic text-[13px] text-tag leading-[1.5]">
+        <p className="font-sans text-[13px] text-tag leading-[1.5]">
           Type a phrase to search your ideas semantically.
         </p>
       );
@@ -473,7 +432,7 @@ function IdeasResultsBlock({
 
   if (!result.ok) {
     return (
-      <p className="font-serif italic text-[13px] text-accent leading-[1.5]">
+      <p className="font-sans text-[13px] text-ink leading-[1.5]">
         {result.message}
       </p>
     );
@@ -481,14 +440,14 @@ function IdeasResultsBlock({
 
   if (result.ideas.length === 0) {
     return (
-      <p className="font-serif italic text-[13px] text-tag leading-[1.5]">
-        Nothing surfaced. Try a different prompt or plant more seeds first.
+      <p className="font-sans text-[13px] text-tag leading-[1.5]">
+        Nothing surfaced. Try a different prompt or capture more first.
       </p>
     );
   }
 
   return (
-    <ul className="flex flex-col gap-1.5 mt-1">
+    <ul className="flex flex-col gap-1 mt-1">
       {result.ideas.map((idea) => (
         <li key={idea.id}>
           <button
@@ -497,10 +456,7 @@ function IdeasResultsBlock({
             className="w-full text-left rounded-soft px-3 py-2.5 hover:bg-paper-2 transition-colors group focus:outline-none focus:bg-paper-2"
           >
             <div className="flex items-baseline gap-3">
-              <span className="font-mono text-[10px] text-accent" aria-hidden>
-                ▸
-              </span>
-              <span className="font-serif text-[14px] text-ink leading-[1.35] flex-1 truncate group-hover:text-accent transition-colors">
+              <span className="font-sans text-[14px] text-ink leading-[1.35] flex-1 truncate group-hover:underline underline-offset-4 decoration-rule-strong">
                 {idea.title}
               </span>
               {typeof idea.similarity === 'number' && (
@@ -515,7 +471,7 @@ function IdeasResultsBlock({
               )}
             </div>
             {idea.essence && (
-              <p className="font-serif italic text-[12px] text-ink-soft leading-[1.4] mt-1 pl-6 line-clamp-2">
+              <p className="font-sans text-[12.5px] text-ink-soft leading-[1.4] mt-1 line-clamp-2">
                 {idea.essence}
               </p>
             )}
