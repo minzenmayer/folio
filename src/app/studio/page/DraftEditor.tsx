@@ -111,10 +111,16 @@ export function DraftEditor({
         contentJson: doc,
       });
 
-      if (!result.ok && result.conflict) {
-        // Concurrent edit detected. Don't bump versionRef; surface the banner
-        // and stash the user's local doc back into pendingDocRef so "Keep
-        // mine" can flush it after they resolve.
+      if (!result.ok) {
+        // Concurrent edit detected (the only failure variant). Don't bump
+        // versionRef; surface the banner and stash the user's local doc back
+        // into pendingDocRef so "Keep mine" can flush it after they resolve.
+        // Narrowing note: a single `!result.ok` is necessary AND sufficient
+        // for TS to narrow `result` to the conflict variant in this branch
+        // and to the success variant after the return. Adding a redundant
+        // `&& result.conflict` collapses the post-return narrowing back to
+        // the union (TS doesn't simplify "ok || !conflict") and breaks the
+        // success path's `result.version` access. Keep it as the single test.
         pendingDocRef.current = doc;
         setConflict({
           currentDoc: result.currentDoc,
