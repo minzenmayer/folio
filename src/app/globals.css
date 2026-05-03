@@ -21,3 +21,114 @@
     color: theme('colors.ink');
   }
 }
+
+/* ─────────────────────────────────────────────
+ * Folio · Tiptap editor typography
+ * Editorial defaults for the writing surface in /studio/page.
+ * Scoped to .folio-prose so it doesn't leak into other surfaces.
+ * ─────────────────────────────────────────── */
+.folio-prose {
+  /* leave font-* / color from the editor element's classes */
+}
+.folio-prose > * + * {
+  margin-top: 1.1em;
+}
+.folio-prose h1 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(32px, 4.5vw, 48px);
+  line-height: 1.05;
+  letter-spacing: -0.022em;
+  color: theme('colors.ink');
+  margin-top: 1.2em;
+}
+.folio-prose h2 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.018em;
+  color: theme('colors.ink');
+  margin-top: 1.6em;
+}
+.folio-prose h3 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 500;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  color: theme('colors.ink');
+  margin-top: 1.4em;
+}
+.folio-prose p {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+.folio-prose em {
+  font-style: italic;
+}
+.folio-prose strong {
+  font-weight: 600;
+  color: theme('colors.ink');
+}
+.folio-prose blockquote {
+  border-left: 2px solid theme('colors.accent');
+  padding-left: 1.25rem;
+  font-style: italic;
+  color: theme('colors.ink-soft');
+}
+.folio-prose ul,
+.folio-prose ol {
+  padding-left: 1.5rem;
+}
+.folio-prose ul {
+  list-style: disc;
+}
+.folio-prose ol {
+  list-style: decimal;
+}
+.folio-prose li > * + * {
+  margin-top: 0.4em;
+}
+.folio-prose code {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.9em;
+  background: theme('colors.code-bg');
+  padding: 0.12em 0.36em;
+  border-radius: 3px;
+  color: theme('colors.ink');
+}
+.folio-prose pre {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 14px;
+  background: theme('colors.code-bg');
+  border: 1px solid theme('colors.rule');
+  border-radius: 3px;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  line-height: 1.55;
+}
+.folio-prose pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+.folio-prose hr {
+  border: 0;
+  border-top: 1px solid theme('colors.rule');
+  margin: 2em 0;
+}
+.folio-prose a {
+  color: theme('colors.accent');
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+/* Tiptap empty-doc placeholder — purely decorative when the editor is fresh */
+.folio-prose p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: theme('colors.tag');
+  font-style: italic;
+  pointer-events: none;
+  height: 0;
+}
