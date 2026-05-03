@@ -1,20 +1,18 @@
-// Thoughtbed · Settings · Connectors (Sprint 12 scaffold)
+// Thoughtbed · Settings · Connectors
 //
-// UI scaffolding for the connector ecosystem. Real OAuth lands in
-// Sprint 13+ (Beehiiv first, then Obsidian, LinkedIn, Google Drive,
-// Gmail). For now the page exists to:
+// Sprint 12 shipped this as static scaffolding. Sprint 13 Wave 1 makes the
+// Beehiiv card LIVE — connect via API key, immediate sync, last-synced
+// status, disconnect — while leaving the other four (Obsidian, LinkedIn,
+// Google Drive, Gmail) as `soon` placeholders waiting for their sprint.
 //
-//   1. Make the sidebar Settings icon useful (it linked nowhere before)
-//   2. Show the user the roadmap so the empty Inbox doesn't feel like
-//      forever
-//   3. Anchor the privacy commitment in plain prose at the bottom
-//
-// Each card carries a `soon` pill and the Connect button is disabled.
-// The connector mark is a single mono glyph — letting us avoid bringing
-// in brand SVGs for a Sprint-13-and-later integration.
+// The page itself stays a server component: it loads the live Beehiiv
+// status from the DB and hands it to the client BeehiivCard. Other cards
+// stay declarative since they have no state to read.
 
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
+import { BeehiivCard } from './BeehiivCard';
+import { getBeehiivStatus } from './actions';
 
 type ConnectorCard = {
   id: string;
@@ -25,14 +23,7 @@ type ConnectorCard = {
 
 // Order matches the Sprint 13–16 ship order. The user reads this top-down
 // and can map each card to a future release.
-const CONNECTORS: ConnectorCard[] = [
-  {
-    id: 'beehiiv',
-    name: 'Beehiiv',
-    glyph: '✉',
-    blurb:
-      'Pulls in your published newsletter issues as seeds. Voice training data in your own approved words.',
-  },
+const SOON_CONNECTORS: ConnectorCard[] = [
   {
     id: 'obsidian',
     name: 'Obsidian',
@@ -67,6 +58,8 @@ export default async function ConnectorsPage() {
   const { userId: clerkId } = await auth();
   if (!clerkId) redirect('/sign-in');
 
+  const beehiivStatus = await getBeehiivStatus();
+
   return (
     <section>
       <div className="max-w-[860px] mx-auto px-[7%] py-12 md:py-16">
@@ -81,13 +74,14 @@ export default async function ConnectorsPage() {
           <p className="font-serif font-light text-[18px] leading-[1.5] text-ink-soft max-w-[60ch]">
             The Inbox is the primary loop — anything you paste lands there.
             Connectors flow in automatically: your archive, your reading,
-            your work. None are wired up yet; the cards below are coming
-            up next.
+            your work. Beehiiv is live; the rest are coming up next.
           </p>
         </div>
 
         <ul className="grid sm:grid-cols-2 gap-4 mb-10">
-          {CONNECTORS.map((c) => (
+          <BeehiivCard initialStatus={beehiivStatus} />
+
+          {SOON_CONNECTORS.map((c) => (
             <li
               key={c.id}
               className="rounded-panel bg-paper border border-rule p-6 flex flex-col gap-3 transition-shadow hover:shadow-soft"
@@ -115,7 +109,7 @@ export default async function ConnectorsPage() {
                   disabled
                   aria-disabled="true"
                   className="font-sans text-[12px] font-medium rounded-soft px-4 py-2 bg-paper-2 text-tag/80 cursor-not-allowed border border-rule"
-                  title="Available in Sprint 13+"
+                  title="Coming in a later sprint"
                 >
                   Connect
                 </button>
@@ -130,7 +124,8 @@ export default async function ConnectorsPage() {
           </div>
           <p className="font-serif italic text-[15px] leading-[1.6] text-ink-soft">
             Thoughtbed only reads what you connect, never sells, and never
-            trains on you. Your bed is yours.
+            trains on you. Your bed is yours. API keys are encrypted at rest
+            with AES-256-GCM and zeroed on disconnect.
           </p>
         </div>
       </div>
