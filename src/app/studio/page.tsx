@@ -83,8 +83,13 @@ export default async function StudioHome() {
                 </>
               )}
               <em className="italic">
-                The Page (writing surface) and the Assistant come online in
-                later sprints — Sprints 5–10.
+                <Link
+                  href="/studio/page"
+                  className="text-accent hover:underline underline-offset-4 not-italic"
+                >
+                  The Page
+                </Link>{' '}
+                is open for writing now. The Assistant comes online in Sprint 8.
               </em>
             </p>
           )}
@@ -169,10 +174,12 @@ export default async function StudioHome() {
                 </p>
               </li>
               <li className="grid grid-cols-[60px_1fr] gap-6 items-baseline border-b border-rule pb-4">
-                <span className="font-mono text-[11px] text-tag">S 5–7</span>
+                <span className="font-mono text-[11px] text-accent font-bold">
+                  S 5
+                </span>
                 <p className="font-serif text-[16px] text-ink-soft leading-[1.5]">
                   <span className="text-ink font-medium">The Page</span>
-                  {' — '}three-pane writing surface, Tiptap editor.
+                  {' — '}live now. Three-pane writing surface, Tiptap editor.
                 </p>
               </li>
               <li className="grid grid-cols-[60px_1fr] gap-6 items-baseline border-b border-rule pb-4">

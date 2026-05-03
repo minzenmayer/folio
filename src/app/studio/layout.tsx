@@ -41,12 +41,12 @@ export default function StudioLayout({
             >
               Library
             </Link>
-            <span className="font-sans text-[12px] tracking-[0.04em] text-tag/70">
+            <Link
+              href="/studio/page"
+              className="font-sans text-[12px] tracking-[0.04em] text-ink-soft hover:text-accent transition-colors"
+            >
               The Page
-              <span className="ml-2 text-[9px] uppercase tracking-[0.2em]">
-                soon
-              </span>
-            </span>
+            </Link>
             <UserButton
               appearance={{
                 elements: {
