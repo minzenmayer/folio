@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
 import { findSimilar, reflect, type SimilarHit } from '../actions';
+import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 
 const DEBOUNCE_MS = 1500;
 const MIN_QUERY_CHARS = 12;
@@ -35,6 +36,9 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   idea: 'Idea',
   draft: 'Draft',
   newsletter_issue: 'Issue',
+  // Sprint 15 Wave 3 — see ideas/[id]/page.tsx for label rationale.
+  obsidian_note: 'Note',
+  extracted_idea: 'Lesson',
 };
 
 export type GardenRailMode = 'newsletter' | 'linkedin' | 'self-pilot';
@@ -84,7 +88,10 @@ export function AssistantRailLive({
       try {
         const hits = await findSimilar({
           text,
-          kinds: ['capture', 'idea', 'draft', 'newsletter_issue'],
+          // Sprint 15 Wave 3: rail pulls from every retrieval kind. Driven
+          // off the same SIMILAR_KINDS const that drives the schema —
+          // adding a kind requires touching one place, not three.
+          kinds: [...SIMILAR_KINDS],
           limit: RESULT_LIMIT,
           excludeDraftId: draftId,
         });

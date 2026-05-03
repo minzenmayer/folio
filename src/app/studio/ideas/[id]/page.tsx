@@ -27,6 +27,12 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   idea: 'Idea',
   draft: 'Draft',
   newsletter_issue: 'Issue',
+  // Sprint 15 Wave 3: vault notes + the curated extracted-idea layer.
+  // 'Note' for obsidian to differentiate from user-authored 'Idea';
+  // 'Lesson' for extracted_idea to lean into the founder's voice
+  // convention ("**Lesson:**" markers in the heybubble slice).
+  obsidian_note: 'Note',
+  extracted_idea: 'Lesson',
 };
 
 function relatedHref(hit: SimilarHit): string {
@@ -38,6 +44,12 @@ function relatedHref(hit: SimilarHit): string {
     case 'capture':
       return `/studio/inbox`;
     case 'newsletter_issue':
+    case 'obsidian_note':
+    case 'extracted_idea':
+      // Sprint 15 Wave 3: no per-row detail routes for these kinds yet.
+      // Settle for routing to the connectors panel which is where the
+      // user manages the source. A future wave can add /studio/notes/[id]
+      // and /studio/insights/[id] surfaces.
       return `/studio?settings=connectors`;
   }
 }
