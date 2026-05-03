@@ -173,7 +173,7 @@ export default async function IdeaDetailPage({
           </div>
 
           {attachedCaptures.length === 0 ? (
-            <div className="text-center py-10 border border-dashed border-rule rounded-[3px] bg-paper/50">
+            <div className="text-center py-10 border border-dashed border-rule rounded-card bg-paper/50">
               <p className="font-serif italic text-[15px] text-tag mb-2">
                 Nothing attached yet.
               </p>
@@ -191,7 +191,7 @@ export default async function IdeaDetailPage({
                   key={capture.id}
                   className="border-b border-rule py-5 px-2 flex items-start gap-4"
                 >
-                  <span className="flex-shrink-0 w-7 h-7 rounded-[3px] bg-paper-2 border border-rule flex items-center justify-center text-[12px] text-accent font-mono mt-0.5">
+                  <span className="flex-shrink-0 w-7 h-7 rounded-soft bg-paper-2 border border-rule flex items-center justify-center text-[12px] text-accent font-mono mt-0.5">
                     {TYPE_GLYPHS[capture.type] ?? '·'}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -234,7 +234,7 @@ export default async function IdeaDetailPage({
           </div>
 
           {relatedItems.length === 0 ? (
-            <div className="text-center py-10 border border-dashed border-rule rounded-[3px] bg-paper/50">
+            <div className="text-center py-10 border border-dashed border-rule rounded-card bg-paper/50">
               <p className="font-serif italic text-[15px] text-tag mb-1">
                 Nothing's resonating yet.
               </p>
@@ -250,7 +250,7 @@ export default async function IdeaDetailPage({
                   href={relatedHref(hit)}
                   className="flex items-start gap-4 py-5 px-2 border-b border-rule hover:bg-paper/50 transition-colors group"
                 >
-                  <span className="flex-shrink-0 w-7 h-7 rounded-[3px] bg-paper-2 border border-rule flex items-center justify-center text-[12px] text-accent font-mono mt-0.5">
+                  <span className="flex-shrink-0 w-7 h-7 rounded-soft bg-paper-2 border border-rule flex items-center justify-center text-[12px] text-accent font-mono mt-0.5">
                     {RELATED_GLYPHS[hit.kind]}
                   </span>
                   <div className="flex-1 min-w-0">

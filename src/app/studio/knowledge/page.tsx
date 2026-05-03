@@ -91,7 +91,7 @@ export default async function KnowledgePage() {
           {SOURCES.map((src) => (
             <div
               key={src.id}
-              className="border border-rule rounded-[3px] bg-paper/60 px-5 py-5"
+              className="border border-rule rounded-card bg-paper/60 px-5 py-5 transition-shadow hover:shadow-soft"
             >
               <div className="flex items-baseline gap-2 mb-2">
                 <span

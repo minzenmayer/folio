@@ -30,7 +30,7 @@ export function CaptureForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-paper border border-rule rounded-[3px]"
+      className="bg-paper border border-rule rounded-card shadow-soft"
     >
       <div className="px-6 pt-5 pb-3">
         <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-accent font-bold mb-3">
@@ -52,16 +52,16 @@ export function CaptureForm() {
             value={source}
             onChange={(e) => setSource(e.target.value)}
             placeholder="Source (optional) — URL, person, book, anywhere"
-            className="w-full bg-bg border border-rule rounded-[3px] px-3 py-2 font-sans text-[13px] text-ink-soft placeholder:text-tag placeholder:italic focus:outline-none focus:border-accent"
+            className="w-full bg-paper-2 border border-rule rounded-soft px-3 py-2 font-sans text-[13px] text-ink-soft placeholder:text-tag placeholder:italic focus:outline-none focus:border-accent"
           />
         </div>
       )}
 
-      <div className="border-t border-rule px-6 py-3 flex items-center justify-between gap-3">
+      <div className="px-5 py-3 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={() => setShowSourceField((s) => !s)}
-          className="font-sans text-[11px] tracking-[0.04em] text-tag hover:text-accent transition-colors"
+          className="font-sans text-[12px] text-tag hover:text-accent transition-colors"
         >
           {showSourceField ? '— hide source' : '+ add source'}
         </button>
@@ -72,7 +72,7 @@ export function CaptureForm() {
           <button
             type="submit"
             disabled={pending || !body.trim()}
-            className="px-4 py-2 bg-ink text-bg font-sans text-[11px] tracking-[0.18em] uppercase font-bold rounded-[3px] hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-ink text-bg font-sans text-[12px] font-medium rounded-soft hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {pending ? 'Planting…' : '⏎ Plant'}
           </button>

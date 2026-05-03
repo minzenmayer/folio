@@ -37,7 +37,7 @@ export function BackfillButton() {
         <button
           onClick={run}
           disabled={isPending}
-          className="font-mono text-[11px] tracking-[0.16em] uppercase border border-rule rounded-[3px] px-3 py-1.5 text-ink-soft hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="font-mono text-[11px] tracking-[0.16em] uppercase border border-rule rounded-soft px-3 py-1.5 text-ink-soft hover:border-accent hover:text-accent hover:bg-paper transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isPending ? 'Backfilling…' : 'Backfill embeddings'}
         </button>

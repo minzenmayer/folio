@@ -50,7 +50,7 @@ export default async function InboxPage() {
         {/* Inbox list */}
         <div className="mt-12">
           {inboxCaptures.length === 0 ? (
-            <div className="text-center py-12 border border-dashed border-rule rounded-[3px] bg-paper/50">
+            <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper/50">
               <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-3">
                 ▸ Empty
               </div>

@@ -25,7 +25,7 @@ const TYPE_GLYPHS: Record<string, string> = {
   image: '▣',
   voice_memo: '◉',
   doc: '▭',
-  feed_item: '⌁',
+  feed_item: '⎁',
 };
 
 function timeAgo(date: Date | string | null): string {
@@ -91,7 +91,7 @@ export function InboxRow({ capture, ideas }: InboxRowProps) {
         className="w-full text-left flex items-start gap-4 px-2 py-5"
         aria-expanded={open}
       >
-        <span className="flex-shrink-0 w-8 h-8 rounded-[3px] bg-paper-2 border border-rule flex items-center justify-center text-[14px] text-accent font-mono mt-0.5">
+        <span className="flex-shrink-0 w-8 h-8 rounded-soft bg-paper-2 border border-rule flex items-center justify-center text-[14px] text-accent font-mono mt-0.5">
           {glyph}
         </span>
         <div className="flex-1 min-w-0">
@@ -129,7 +129,7 @@ export function InboxRow({ capture, ideas }: InboxRowProps) {
                     key={idea.id}
                     onClick={() => handleAttach(idea.id)}
                     disabled={pending}
-                    className="px-3 py-1.5 border border-rule-strong rounded-[3px] font-serif text-[14px] text-ink-soft hover:border-accent hover:text-accent transition-colors disabled:opacity-40"
+                    className="px-3 py-1.5 border border-rule rounded-soft bg-paper hover:bg-paper-2 font-serif text-[14px] text-ink-soft hover:border-accent hover:text-accent transition-colors disabled:opacity-40"
                   >
                     {idea.title}
                   </button>
@@ -150,12 +150,12 @@ export function InboxRow({ capture, ideas }: InboxRowProps) {
                   value={newIdeaTitle}
                   onChange={(e) => setNewIdeaTitle(e.target.value)}
                   placeholder="What's this idea called?"
-                  className="flex-1 bg-bg border border-rule-strong rounded-[3px] px-3 py-2 font-serif text-[14px] text-ink placeholder:text-tag placeholder:italic focus:outline-none focus:border-accent"
+                  className="flex-1 bg-paper border border-rule rounded-soft px-3 py-2 font-serif text-[14px] text-ink placeholder:text-tag placeholder:italic focus:outline-none focus:border-accent"
                 />
                 <button
                   type="submit"
                   disabled={pending || !newIdeaTitle.trim()}
-                  className="px-4 py-2 bg-accent text-bg font-sans text-[11px] tracking-[0.18em] uppercase font-bold rounded-[3px] hover:bg-ink transition-colors disabled:opacity-40"
+                  className="px-4 py-2 bg-accent text-bg font-sans text-[12px] font-medium rounded-soft hover:bg-ink transition-colors disabled:opacity-40"
                 >
                   {pending ? '…' : 'Create'}
                 </button>
