@@ -67,18 +67,18 @@ const VOICE_INSTRUCTIONS: Record<
 > = {
   default: {
     instruction:
-      "Reflect back what they seem to be circling around or working toward — in 2-3 short sentences. Use ONLY their own material; quote it where natural. Reference items by bracket number, like [1] or [2], inline. No preamble. No advice. No \"I notice that\" or \"It seems like\". Editorial tone, the voice of a thoughtful friend who's been listening.",
-    maxTokens: 400,
+      "Surface 2 to 4 connections between their draft and items in the bank. For each connection, write a short 'You explored [idea or source name] in [source title] — that connects to [your draft] because [one sentence of real reasoning]' beat. Refer to ideas by name. Do NOT quote source text verbatim. After the beats, drop a blank line and list 'Sources: [1] [2] [3]' as bracket-numbered receipts (the same numbers you used in the beats). No preamble. No advice. No 'I notice that' or 'It seems like'. Editorial tone, the voice of a thoughtful friend who's been listening.",
+    maxTokens: 500,
   },
   newsletter: {
     instruction:
-      "Reflect back what they seem to be circling around — in newsletter voice, 2-3 short sentences. Read as if it could close out a section of their next issue: confident, observational, direct. Use ONLY their own material; quote it where natural. Reference grounding items by bracket number, like [1] or [2], inline. No preamble, no advice, no \"I notice\" or \"It seems like\".",
-    maxTokens: 400,
+      "Surface 2 to 4 connections between their draft and items in the bank, in newsletter voice. For each, write a confident, observational beat in the shape 'You explored [idea or source name] in [source title] — that connects to [what they're writing now] because [reasoning].' One sentence of real reasoning per beat, no padding. Refer to ideas by name; do NOT quote source text. After the beats, blank line, then 'Sources: [1] [2] [3]' receipts. Reads like a section closer of next week's issue: direct, no hedge language ('I notice', 'It seems'), no preamble.",
+    maxTokens: 500,
   },
   linkedin: {
     instruction:
-      "Reflect back the shape of their thinking — in 1-2 punchy sentences, LinkedIn-post energy. Use ONLY their own material; quote it where natural. Reference grounding items by bracket number, like [1] or [2], inline. No preamble, no advice, no hashtags, no \"I notice\" or \"It seems like\". Tighter than an essay; not a generic motivational beat.",
-    maxTokens: 250,
+      "Surface 2 to 3 connections between their draft and items in the bank, LinkedIn-post energy — punchier and tighter. For each, one sentence in the shape 'You explored [idea or source name] in [source title] — that connects to [draft] because [reasoning].' Refer to ideas by name; do NOT quote source text. After the lines, blank line, then 'Sources: [1] [2]' receipts. No hashtags, no preamble, no advice, no 'I notice' or 'It seems like'. Not a generic motivational beat.",
+    maxTokens: 400,
   },
 };
 
@@ -112,11 +112,13 @@ export async function generateReflection({
       ? '(nothing in the bank resembles this draft yet)'
       : hits
           .map((h) => {
-            // Label by kind, with the title for ideas/drafts/issues so the
-            // source is self-evident in the reflection.
-            // Sprint 15 Wave 3: vault notes and extracted ideas get their
-            // own label shapes so the LLM can refer to "your vault note on X"
-            // or "the idea you call X" instead of generic source language.
+            // Sprint 15 Wave 3 layer 3: when an extracted Idea is attached
+            // to the source (ideaTitle + ideaClaim), we surface the curated
+            // claim instead of the raw body excerpt. The LLM is then asked
+            // to refer to the idea BY NAME — not to quote the body — which
+            // is what the synthesis-prompt rewrite enforces in the voice
+            // instruction. Sources without an attached Idea fall back to
+            // the snippet (still cleaned by Phase 3's cleanText).
             const label =
               h.kind === 'idea' && h.title
                 ? `idea: ${h.title}`
@@ -129,10 +131,25 @@ export async function generateReflection({
                       : h.kind === 'extracted_idea' && h.title
                         ? `extracted idea: ${h.title}`
                         : h.kind;
-            const body = (h.snippet?.trim() || h.title?.trim() || '').slice(
+
+            const ideaName = h.ideaTitle?.trim();
+            const ideaClaim = h.ideaClaim?.trim();
+            const fallbackBody = (h.snippet?.trim() || h.title?.trim() || '').slice(
               0,
               MAX_HIT_CHARS
             );
+
+            // Prefer 'the idea you call X — claim: …' rendering when the
+            // source has an extracted_idea attached. This is what makes
+            // the reflection sound like 'you explored X in Y' instead of
+            // 'this passage from your newsletter says blah blah blah'.
+            const body =
+              ideaName && ideaClaim
+                ? `the idea you call \"${ideaName}\" — claim: ${ideaClaim.slice(0, MAX_HIT_CHARS)}`
+                : ideaName
+                  ? `the idea you call \"${ideaName}\"`
+                  : fallbackBody;
+
             return `[${h.index}] (${label}) ${body}`;
           })
           .join('\n\n');
@@ -145,7 +162,7 @@ export async function generateReflection({
 ${trimmedDraft}
 </draft>
 
-These passages from their own captures, ideas, and earlier drafts resemble what they're writing about — in their own words:
+These items from their own captures, ideas, drafts, newsletter issues, vault notes, and extracted ideas resemble what they're writing about. The (label) tag tells you what kind of source each one is. When an item shows 'the idea you call X — claim: ...', that's a curated Idea pulled from the source — refer to it by NAME, not by quoting the claim text.
 
 <bank>
 ${bankBlock}
