@@ -5,9 +5,11 @@
 // post. Auth is bearer-token (the user's workspace API key). No OAuth.
 //
 // API surface used:
-//   GET /v2/publications                                  — resolve publicationId
-//   GET /v2/publications/{pubId}/posts?expand=...&page=N  — paginated archive
-//   GET /v2/publications/{pubId}/posts/{postId}           — single post refresh
+//   GET    /v2/publications                                  — resolve publicationId
+//   GET    /v2/publications/{pubId}/posts?expand=...&page=N  — paginated archive
+//   GET    /v2/publications/{pubId}/posts/{postId}           — single post refresh
+//   POST   /v2/publications/{pubId}/webhooks                 — Sprint 15 Wave 1: subscribe
+//   DELETE /v2/publications/{pubId}/webhooks/{whId}          — Sprint 15 Wave 1: unsubscribe
 //
 // Rate limit: 180 req/min per organization. We don't actively throttle
 // here — the founder's archive is small enough to never approach that —
@@ -117,12 +119,19 @@ async function maybeCooldown(headers: Headers) {
   if (waitMs > 0 && waitMs < 65_000) await sleep(waitMs);
 }
 
+type CallOpts = {
+  method?: 'GET' | 'POST' | 'DELETE';
+  query?: Record<string, string | string[] | number | undefined>;
+  body?: unknown;
+};
+
 async function callBeehiiv<T>(
   apiKey: string,
   path: string,
-  query?: Record<string, string | string[] | number | undefined>,
+  opts: CallOpts = {},
   attempt = 0
 ): Promise<T> {
+  const { method = 'GET', query, body } = opts;
   const url = new URL(BASE + path);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -137,12 +146,16 @@ async function callBeehiiv<T>(
     }
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: 'application/json',
+  };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
   const res = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: 'application/json',
-    },
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
     // Beehiiv responses are user-scoped; never want a stale cached page.
     cache: 'no-store',
   });
@@ -150,7 +163,13 @@ async function callBeehiiv<T>(
   if (res.status === 429 && attempt < MAX_429_RETRIES) {
     const backoff = 1000 * Math.pow(2, attempt) + Math.floor(Math.random() * 250);
     await sleep(backoff);
-    return callBeehiiv<T>(apiKey, path, query, attempt + 1);
+    return callBeehiiv<T>(apiKey, path, opts, attempt + 1);
+  }
+
+  // 204 No Content (DELETE) — nothing to parse.
+  if (res.status === 204) {
+    await maybeCooldown(res.headers);
+    return undefined as T;
   }
 
   if (!res.ok) {
@@ -193,7 +212,7 @@ export async function listPublications(
   const res = await callBeehiiv<{ data: BeehiivPublication[] }>(
     apiKey,
     '/publications',
-    { limit: 100 }
+    { query: { limit: 100 } }
   );
   return res.data ?? [];
 }
@@ -210,13 +229,15 @@ export async function listPosts(
     apiKey,
     `/publications/${params.publicationId}/posts`,
     {
-      page: params.page ?? 1,
-      limit: params.limit ?? 50,
-      expand: params.expand?.length ? params.expand : undefined,
-      status: params.status ?? 'confirmed',
-      platform: params.platform ?? 'both',
-      order_by: params.orderBy ?? 'publish_date',
-      direction: params.direction ?? 'desc',
+      query: {
+        page: params.page ?? 1,
+        limit: params.limit ?? 50,
+        expand: params.expand?.length ? params.expand : undefined,
+        status: params.status ?? 'confirmed',
+        platform: params.platform ?? 'both',
+        order_by: params.orderBy ?? 'publish_date',
+        direction: params.direction ?? 'desc',
+      },
     }
   );
   return res.data ?? [];
@@ -240,7 +261,7 @@ export async function listAllPosts(
   return out;
 }
 
-/** Re-fetch a single post (used by the webhook handler in Wave 3). */
+/** Re-fetch a single post (used by the webhook handler in Sprint 15). */
 export async function getPost(
   apiKey: string,
   publicationId: string,
@@ -250,7 +271,75 @@ export async function getPost(
   const res = await callBeehiiv<{ data: BeehiivPost }>(
     apiKey,
     `/publications/${publicationId}/posts/${postId}`,
-    { expand }
+    { query: { expand } }
   );
   return res.data;
+}
+
+// ─── webhooks (Sprint 15 Wave 1) ──────────────────────────
+
+/**
+ * Beehiiv webhook event types we care about. Beehiiv exposes more (e.g.
+ * subscription.created) but Sprint 15 Wave 1 only subscribes to post.sent
+ * — the moment a published issue lands. Subscriptions / opens / clicks
+ * are out of scope for the Bed.
+ */
+export type BeehiivWebhookEvent = 'post.sent';
+
+export type BeehiivWebhook = {
+  id: string;
+  url: string;
+  event_types: BeehiivWebhookEvent[];
+  description?: string | null;
+  /**
+   * Returned ONLY on creation. We mirror it to
+   * connector_accounts.metadata.webhookSecret immediately and never round-
+   * trip it through Beehiiv again — they wouldn't return it on subsequent
+   * GETs even if we asked.
+   */
+  signing_secret?: string;
+  status?: string;
+};
+
+/**
+ * Subscribe to events for a publication. We keep the request body
+ * minimal and let Beehiiv pick a signing secret — that secret comes
+ * back on this single response and is the only thing we ever store.
+ */
+export async function createWebhook(
+  apiKey: string,
+  publicationId: string,
+  body: {
+    url: string;
+    event_types: BeehiivWebhookEvent[];
+    description?: string;
+  }
+): Promise<BeehiivWebhook> {
+  const res = await callBeehiiv<{ data: BeehiivWebhook }>(
+    apiKey,
+    `/publications/${publicationId}/webhooks`,
+    { method: 'POST', body }
+  );
+  return res.data;
+}
+
+/**
+ * Idempotent revoke. 404 from Beehiiv (already deleted) is mapped to a
+ * silent success so a half-failed Disconnect can be retried cleanly.
+ */
+export async function deleteWebhook(
+  apiKey: string,
+  publicationId: string,
+  webhookId: string
+): Promise<void> {
+  try {
+    await callBeehiiv<void>(
+      apiKey,
+      `/publications/${publicationId}/webhooks/${webhookId}`,
+      { method: 'DELETE' }
+    );
+  } catch (err) {
+    if (err instanceof BeehiivError && err.status === 404) return;
+    throw err;
+  }
 }

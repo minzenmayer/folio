@@ -39,6 +39,13 @@ import { listPublications, BeehiivError } from '@/lib/beehiiv';
 // handler at /api/cron/beehiiv-sync can drive sync without going through
 // this 'use server' module's user-scoped surface.
 import { runSync } from '@/lib/beehiiv-sync';
+// Sprint 15 Wave 1: real-time push. After the initial sync we provision
+// a Beehiiv webhook so future post.sent events land via the dispatcher
+// at /api/webhooks/beehiiv. Disconnect revokes it. The cron stays as a
+// backstop in case a delivery is missed.
+import { beehiivConnector } from '@/lib/connectors/beehiiv';
+import { buildWebhookUrl } from '@/lib/connectors/registry';
+import type { WebhookMetadata } from '@/lib/connectors/types';
 
 const PROVIDER = 'beehiiv';
 
@@ -120,15 +127,25 @@ export async function connectBeehiiv(input: unknown): Promise<ActionResult> {
 
   // 2) Upsert the connector_accounts row. We always overwrite the
   //    encrypted secret on connect (re-connect with a fresh key works).
+  //    We preserve any existing webhook metadata so we can revoke it
+  //    cleanly below before provisioning a fresh webhook with the new key.
+  const existing = await loadAccount(user.id);
+  const previousMeta = (existing?.metadata ?? {}) as WebhookMetadata & {
+    publicationId?: string;
+  };
+
   const encrypted = encryptSecret(apiKey);
-  const metadata = {
+  const metadata: Record<string, unknown> = {
     publicationId: pub.id,
     publication_name: pub.name,
     publication_url: pub.url ?? null,
     organization_name: pub.organization_name ?? null,
+    // Webhook fields are filled in below; null them now so a reconnect
+    // doesn't leave a stale id pointing at a webhook we already deleted.
+    webhookId: null,
+    webhookSecret: null,
   };
 
-  const existing = await loadAccount(user.id);
   let accountId: string;
   if (existing) {
     await db
@@ -157,7 +174,24 @@ export async function connectBeehiiv(input: unknown): Promise<ActionResult> {
     accountId = row.id;
   }
 
-  // 3) Kick off the first sync immediately so the user sees a populated
+  // 3) If we're reconnecting and the old account had a webhook on file,
+  //    revoke it before provisioning a fresh one. Best-effort — Beehiiv
+  //    rejecting the old key is fine, the upstream webhook will start
+  //    failing its own deliveries against the new secret and Beehiiv
+  //    will eventually disable it.
+  if (existing && previousMeta.webhookId && previousMeta.publicationId) {
+    try {
+      await beehiivConnector.revokeWebhook?.({
+        account: { ...existing, metadata: previousMeta },
+        apiKey,
+        webhookId: previousMeta.webhookId,
+      });
+    } catch (err) {
+      console.warn('[connectBeehiiv] revoke previous webhook failed', err);
+    }
+  }
+
+  // 4) Kick off the first sync immediately so the user sees a populated
   //    archive right after connecting. Errors here don't unwind the
   //    connection — the user can retry sync from the card.
   try {
@@ -165,6 +199,40 @@ export async function connectBeehiiv(input: unknown): Promise<ActionResult> {
   } catch (err) {
     console.warn('[connectBeehiiv] initial sync failed', err);
     // Sync writes its own status to the row — nothing to do here.
+  }
+
+  // 5) Provision the real-time webhook. Failures here are logged but
+  //    don't unwind the connection — the daily cron is the backstop.
+  try {
+    const [refreshed] = await db
+      .select()
+      .from(connectorAccounts)
+      .where(eq(connectorAccounts.id, accountId))
+      .limit(1);
+    if (refreshed) {
+      const provisioned = await beehiivConnector.provisionWebhook?.({
+        account: refreshed,
+        apiKey,
+        callbackUrl: buildWebhookUrl(PROVIDER, accountId),
+      });
+      if (provisioned) {
+        await db
+          .update(connectorAccounts)
+          .set({
+            metadata: {
+              ...metadata,
+              webhookId: provisioned.webhookId,
+              webhookSecret: provisioned.webhookSecret,
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(connectorAccounts.id, accountId));
+      }
+    }
+  } catch (err) {
+    console.warn('[connectBeehiiv] webhook provision failed', err);
+    // No status mutation — connector stays 'connected'. Cron picks up
+    // the slack until the user reconnects (or we fix the upstream).
   }
 
   revalidatePath('/studio/settings/connectors');
@@ -243,11 +311,40 @@ export async function disconnectBeehiiv(): Promise<ActionResult> {
     return { ok: true, message: 'Beehiiv was not connected.' };
   }
 
+  // Revoke the upstream webhook BEFORE zeroing the encrypted secret —
+  // we need the API key to make the DELETE call. Best-effort: a failure
+  // here doesn't block the user from disconnecting locally. The next
+  // delivery from Beehiiv will hit our dispatcher with a 410 ("Account
+  // is no longer connected") and Beehiiv will eventually disable the
+  // subscription on its own.
+  const meta = (account.metadata ?? {}) as WebhookMetadata & {
+    publicationId?: string;
+  };
+  if (account.encryptedSecret && meta.webhookId) {
+    try {
+      const apiKey = decryptSecret(account.encryptedSecret);
+      await beehiivConnector.revokeWebhook?.({
+        account,
+        apiKey,
+        webhookId: meta.webhookId,
+      });
+    } catch (err) {
+      console.warn('[disconnectBeehiiv] revoke webhook failed', err);
+    }
+  }
+
+  // Strip the webhook fields when we soft-delete the row so a future
+  // reconnect doesn't think there's a live webhook to revoke.
+  const cleanedMetadata: Record<string, unknown> = { ...meta };
+  delete cleanedMetadata.webhookId;
+  delete cleanedMetadata.webhookSecret;
+
   await db
     .update(connectorAccounts)
     .set({
       status: 'disconnected',
       encryptedSecret: null,
+      metadata: cleanedMetadata,
       updatedAt: new Date(),
     })
     .where(eq(connectorAccounts.id, account.id));

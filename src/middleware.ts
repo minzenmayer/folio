@@ -1,6 +1,9 @@
 // Folio · Clerk middleware
 // All routes are protected by default; the public list is the exception.
-// /api/webhooks/clerk MUST be public — it's how Clerk reaches our server.
+// /api/webhooks/(.*) MUST be public — Clerk and connector providers
+// (Beehiiv, future Obsidian/etc.) reach our server with no Clerk session.
+// Each /api/webhooks/* handler enforces its own auth (Clerk svix signing
+// secret, per-account HMAC secrets — see src/lib/connectors).
 // /api/cron/* MUST be public — Vercel Cron has no Clerk session; the
 // route handler enforces auth via the CRON_SECRET bearer token instead.
 
@@ -11,7 +14,7 @@ const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
   '/sign-up(.*)',
-  '/api/webhooks/clerk',
+  '/api/webhooks/(.*)',
   '/api/cron/(.*)',
 ]);
 
