@@ -1,4 +1,4 @@
-// Folio · Shared studio server actions
+// Thoughtbed · Shared studio server actions
 //
 // Sprint 7 shipped two pieces of plumbing that belong to no single room:
 //
@@ -9,33 +9,43 @@
 //
 //   • findSimilar({ text, kinds, limit }) — top-N rows across captures /
 //     ideas / drafts ordered by cosine distance to the query embedding.
-//     The retrieval primitive that the Related panel and Sprint 8's
-//     AssistantRailLive both consume.
+//     The retrieval primitive that the Related panel and the garden rail
+//     both consume.
 //
-// Sprint 9 adds the generative half:
+// Sprint 9 added the generative half:
 //
 //   • reflect({ draftId }) — loads the draft, runs findSimilar on its text,
 //     hands draft + grounding hits to Claude (via @ai-sdk/anthropic), and
 //     returns a 2-3 sentence reflection in the user's own voice. Failures
 //     return as a typed { ok: false } variant rather than throwing, so the
-//     Assistant rail can render a graceful error state.
+//     garden rail can render a graceful error state.
 //
-// All three actions are strictly user-scoped. The vector queries use
-// pgvector's <=> cosine-distance operator with HNSW indexes
-// (idx_*_embedding); reflect() pays for one extra embedding round-trip
-// (via findSimilar) which is cheap enough at Haiku-tier costs to ignore.
+// Sprint 10 (Thoughtbed pivot) adds the writing-first dispatcher:
+//
+//   • composeNew({ text, mode }) — the home composer's submit handler. By
+//     mode, creates a Draft (Tiptap doc starting with the text), an Idea
+//     (first line = title, rest = essence), or plants a Capture (paste in
+//     the Inbox). Best-effort embeds inline so the new row participates in
+//     retrieval immediately.
+//
+// All actions are strictly user-scoped. The vector queries use pgvector's
+// <=> cosine-distance operator with HNSW indexes (idx_*_embedding);
+// reflect() pays for one extra embedding round-trip (via findSimilar)
+// which is cheap enough at Haiku-tier costs to ignore.
 
 'use server';
 
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { db, captures, ideas, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
 import { generateReflection } from '@/lib/llm';
 
-// ─── shared helpers ───────────────────────────────────
+// ─── shared helpers ───────────────────────────────
 
 // Mirror of ideaEmbedSource from /studio/ideas/actions.ts — kept here so the
 // backfill computes embeddings the same way the save path does. If the save
@@ -89,7 +99,7 @@ function vectorLiteral(vec: number[]): string {
   return `[${vec.join(',')}]`;
 }
 
-// ─── backfillEmbeddings ─────────────────────────────────
+// ─── backfillEmbeddings ──────────────────────────────────────────────
 
 export type BackfillKind = 'captures' | 'ideas' | 'drafts' | 'all';
 
@@ -215,7 +225,7 @@ export async function backfillEmbeddings(
   return result;
 }
 
-// ─── findSimilar ─────────────────────────────────
+// ─── findSimilar ────────────────────────────────────────────────
 
 export type SimilarKind = 'capture' | 'idea' | 'draft';
 
@@ -376,7 +386,7 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
   return all.slice(0, data.limit);
 }
 
-// ─── reflect — Sprint 9 generative Assistant ─────────────────────────
+// ─── reflect — Sprint 9 generative Assistant ──────────────────────────────────
 
 // Below this length the reflection isn't worth running — Claude needs at
 // least a sentence or two to anchor on. Mirrors the MIN_QUERY_CHARS in
@@ -491,4 +501,132 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
     const message = err instanceof Error ? err.message : 'reflection failed';
     return { ok: false, reason: 'error', message };
   }
+}
+
+// ─── composeNew — Sprint 10 writing-first dispatcher ─────────────────────
+
+const composeSchema = z.object({
+  text: z.string().min(1).max(20000),
+  mode: z.enum(['draft', 'idea', 'plant']).default('draft'),
+});
+
+/**
+ * Single submit handler for the /studio home composer. Branches on mode
+ * into the right create path:
+ *
+ *   draft → new Tiptap doc with the text as a paragraph; redirect into
+ *           /studio/page/[id] to keep writing.
+ *   idea  → first line as title, rest as essence; redirect into
+ *           /studio/ideas/[id] for the orbit view.
+ *   plant → quick capture into the Inbox; redirect to /studio/inbox so
+ *           the user sees the seed land alongside others.
+ *
+ * Each branch best-effort embeds the row inline (same pattern as the
+ * individual create actions) so the new content participates in
+ * findSimilar / reflect immediately. Failures log but never block.
+ */
+export async function composeNew(input: unknown) {
+  const user = await requireUser();
+  const { text, mode } = composeSchema.parse(input);
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    redirect('/studio');
+  }
+
+  if (mode === 'draft') {
+    // Build a minimal Tiptap doc with one paragraph holding the text.
+    // The user keeps typing in the editor from here.
+    const initialDoc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: trimmed }],
+        },
+      ],
+    };
+
+    const [draft] = await db
+      .insert(drafts)
+      .values({
+        userId: user.id,
+        title: null,
+        contentJson: initialDoc,
+      })
+      .returning();
+
+    try {
+      const embedding = await embedText(trimmed);
+      await db
+        .update(drafts)
+        .set({ embedding })
+        .where(and(eq(drafts.id, draft.id), eq(drafts.userId, user.id)));
+    } catch (err) {
+      console.warn('[composeNew] draft embed failed', err);
+    }
+
+    revalidatePath('/studio');
+    revalidatePath('/studio/page');
+    redirect(`/studio/page/${draft.id}`);
+  }
+
+  if (mode === 'idea') {
+    // First line becomes the title. Anything after the first newline
+    // becomes the essence. Both are bounded by the existing column
+    // limits (title 280, essence 2000).
+    const lines = trimmed.split('\n');
+    const title = (lines[0] ?? trimmed).trim().slice(0, 280);
+    const restText = lines.slice(1).join('\n').trim();
+    const essence = restText.length > 0 ? restText.slice(0, 2000) : null;
+
+    const [idea] = await db
+      .insert(ideas)
+      .values({
+        userId: user.id,
+        title,
+        essence,
+        origin: 'noticed',
+        maturity: 'seed',
+        energy: 'active',
+        lastVisitedAt: new Date(),
+        lastEvolvedAt: new Date(),
+      })
+      .returning();
+
+    try {
+      const sourceText = essence ? `${title}\n\n${essence}` : title;
+      const embedding = await embedText(sourceText);
+      await db
+        .update(ideas)
+        .set({ embedding })
+        .where(and(eq(ideas.id, idea.id), eq(ideas.userId, user.id)));
+    } catch (err) {
+      console.warn('[composeNew] idea embed failed', err);
+    }
+
+    revalidatePath('/studio');
+    revalidatePath('/studio/ideas');
+    redirect(`/studio/ideas/${idea.id}`);
+  }
+
+  // mode === 'plant' — quick paste into the Inbox.
+  let captureEmbedding: number[] | undefined;
+  try {
+    captureEmbedding = await embedText(trimmed);
+  } catch (err) {
+    console.warn('[composeNew] capture embed failed', err);
+  }
+
+  await db.insert(captures).values({
+    userId: user.id,
+    type: 'paste',
+    body: trimmed,
+    capturedVia: 'paste',
+    status: 'inbox',
+    embedding: captureEmbedding,
+  });
+
+  revalidatePath('/studio');
+  revalidatePath('/studio/inbox');
+  redirect('/studio/inbox');
 }
