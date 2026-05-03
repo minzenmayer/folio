@@ -39,6 +39,7 @@ import {
   type NewExtractedIdea,
 } from '@/db';
 import { embedText } from '@/lib/embed';
+import { cleanText, type CleanableKind } from '@/lib/clean-text';
 
 // ─── model + prompt ───────────────────────────────────────
 
@@ -111,7 +112,7 @@ export type Idea = {
  * Anthropic doesn't block a vault import).
  */
 export async function extractIdeas(source: IdeaSource): Promise<Idea[]> {
-  const trimmed = stripBoilerplate(source.text).slice(0, MAX_SOURCE_CHARS);
+  const trimmed = stripBoilerplate(source.text, source.kind).slice(0, MAX_SOURCE_CHARS);
   if (trimmed.trim().length < 200) {
     // Sources too short to mean something coherent. Don't burn an LLM call.
     return [];
@@ -445,29 +446,20 @@ function formatScalar(v: unknown): string {
 }
 
 // ─── boilerplate strip + signal calibration ───────────
+//
+// Sprint 15 Wave 3 layer 1: the pattern set + dispatch lives in
+// src/lib/clean-text.ts so the rail's snippet projection (in
+// findSimilar) can apply the same cleaning before showing source
+// text to the LLM during synthesis. Keeping stripBoilerplate as a
+// thin wrapper preserves the existing call sites in this module
+// (extractIdeas dispatches off source.kind, which matches
+// CleanableKind exactly).
 
-const NEWSLETTER_BOILERPLATE_PATTERNS: RegExp[] = [
-  // common opening
-  /^\s*Hey,?\s+(?:friends|all|everyone|y'all|folks|reader)[\s\S]{0,300}?(?=\n\n)/im,
-  /^\s*(?:Hi|Hey|Hello),?\s+[A-Z][a-z]+!?[\s\S]{0,250}?(?=\n\n)/im,
-  // sign-offs
-  /\n+(?:Until next time|Talk soon|Catch you|Cheers|Take care|Yours,?|Onward,?|Best,?|—\s*[A-Z])[\s\S]+$/im,
-  // unsubscribe / view in browser
-  /\b(?:Unsubscribe|View in browser|Manage preferences|Forwarded[\s\S]+?\?)\b[\s\S]*$/im,
-];
-
-/**
- * V0 boilerplate strip — Wave 3 will replace this with a more thorough
- * pre-embed cleaning pass (rule-based + first-ingest LLM marking). For
- * now we cut the most obvious newsletter chrome so the LLM gets cleaner
- * input to extract from.
- */
-function stripBoilerplate(text: string): string {
-  let out = text;
-  for (const re of NEWSLETTER_BOILERPLATE_PATTERNS) {
-    out = out.replace(re, '');
-  }
-  return out.trim();
+function stripBoilerplate(
+  text: string,
+  kind: CleanableKind = 'newsletter_issue'
+): string {
+  return cleanText(kind, text);
 }
 
 /**

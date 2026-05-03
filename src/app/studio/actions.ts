@@ -76,6 +76,9 @@ import {
   SIMILAR_KINDS_FOR_ZOD,
   type SimilarKind,
 } from '@/lib/retrieval-kinds';
+// Sprint 15 Wave 3 layer 1: clean source text before showing it to the
+// LLM as snippet context. The same rules drive extractIdeas during sync.
+import { cleanText } from '@/lib/clean-text';
 // Sprint 15 Wave 2: extractIdeas backfill across already-ingested sources
 // (newsletter issues now; obsidian notes after the user connects). Surfaced
 // as a button on /studio/knowledge so it's a manual one-shot rather than
@@ -483,10 +486,10 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
         .limit(perKindLimit)
         .then((rows) =>
           rows.map((r): SimilarHit => {
-            const body = (r.bodyText ?? '').trim();
+            const cleaned = cleanText('newsletter_issue', r.bodyText ?? '');
             const snippet =
-              body.length > 0
-                ? body.slice(0, 200) + (body.length > 200 ? '…' : '')
+              cleaned.length > 0
+                ? cleaned.slice(0, 200) + (cleaned.length > 200 ? '…' : '')
                 : null;
             return {
               kind: 'newsletter_issue',
@@ -523,10 +526,10 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
         .limit(perKindLimit)
         .then((rows) =>
           rows.map((r): SimilarHit => {
-            const body = (r.bodyText ?? '').trim();
+            const cleaned = cleanText('obsidian_note', r.bodyText ?? '');
             const snippet =
-              body.length > 0
-                ? body.slice(0, 200) + (body.length > 200 ? '…' : '')
+              cleaned.length > 0
+                ? cleaned.slice(0, 200) + (cleaned.length > 200 ? '…' : '')
                 : null;
             return {
               kind: 'obsidian_note',
