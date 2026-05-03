@@ -28,10 +28,15 @@
 //     by more than SHADOW_TOLERANCE_MS, surface a "Recover unsaved changes"
 //     banner with Recover / Discard buttons. Cleared on every successful
 //     save and on Reload-other-version.
+//
+// S6 wave 3+4 hook:
+//   · Optional `onEditorReady` callback exposes the live Tiptap editor
+//     instance to the parent (EditorPane), which forwards it to DraftMeta
+//     for exports and HistoryModal for restore-set-content.
 
 'use client';
 
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -67,9 +72,6 @@ type ShadowEntry = {
 
 const DEBOUNCE_MS = 1000;
 const MAX_RETRIES = 3;
-// A shadow has to be this much newer than the server's updatedAt before we
-// assume it represents real unsaved work. Smaller deltas are typically the
-// result of clock drift between writes and server-side timestamps.
 const SHADOW_TOLERANCE_MS = 1000;
 
 function shadowKey(draftId: string): string {
@@ -94,8 +96,6 @@ function readShadow(draftId: string): ShadowEntry | null {
       return parsed as ShadowEntry;
     }
   } catch (err) {
-    // Either localStorage is disabled (private mode in some browsers) or
-    // the entry is corrupt. Either way, fall back to no shadow.
     console.warn('[DraftEditor] shadow read failed', err);
   }
   return null;
@@ -107,7 +107,6 @@ function writeShadow(draftId: string, doc: unknown, version: number) {
     const entry: ShadowEntry = { doc, savedAt: Date.now(), version };
     window.localStorage.setItem(shadowKey(draftId), JSON.stringify(entry));
   } catch (err) {
-    // Quota exceeded, disabled storage, etc. Non-fatal — autosave still works.
     console.warn('[DraftEditor] shadow write failed', err);
   }
 }
@@ -117,7 +116,7 @@ function clearShadow(draftId: string) {
   try {
     window.localStorage.removeItem(shadowKey(draftId));
   } catch {
-    // Ignore — write paths already log; a failed clear is harmless.
+    // Ignore.
   }
 }
 
@@ -140,58 +139,42 @@ export function DraftEditor({
   initialContent,
   initialVersion,
   initialUpdatedAt,
+  onEditorReady,
 }: {
   draftId: string;
-  // Tiptap/ProseMirror JSON. Shape isn't strictly typed by Tiptap's React API;
-  // we round-trip it as-is.
   initialContent: unknown;
-  // Optimistic-concurrency token for this draft. Bumped after every save.
   initialVersion: number;
-  // ISO string of the draft's updated_at on the server. Compared against the
-  // localStorage shadow's savedAt to decide whether to surface recovery.
   initialUpdatedAt: string;
+  // Optional callback the parent (EditorPane) uses to acquire the Tiptap
+  // editor instance. Lets siblings (DraftMeta, HistoryModal) act on the
+  // editor — exports, history-restore — without prop drilling or context.
+  onEditorReady?: (editor: Editor | null) => void;
 }) {
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' });
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [recovery, setRecovery] = useState<RecoveryState | null>(null);
 
-  // The latest doc we've seen but not yet saved. Coalesces fast typing into
-  // a single network call.
   const pendingDocRef = useRef<unknown | null>(null);
-  // Debounce timer id for the typing-quiet-beat.
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Backoff timer id for retries after save failures.
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // True while a save POST is mid-flight.
   const inFlightRef = useRef(false);
-  // Latest version we know the server has accepted. Bumped after each
-  // successful save; reset on conflict resolution.
   const versionRef = useRef<number>(initialVersion);
-  // Mirror of conflict state so closures inside flushSave see latest value
-  // without re-binding on every render.
   const conflictRef = useRef<ConflictState | null>(null);
   useEffect(() => {
     conflictRef.current = conflict;
   }, [conflict]);
-  // navigator.onLine cache. Refs (not state) so flushSave's stable closure
-  // can read the latest value.
   const onlineRef = useRef(true);
-  // Consecutive save failures since the last success. Resets on success and
-  // on user-initiated fresh attempts (Keep-mine, reconnect).
   const retryCountRef = useRef(0);
 
   const router = useRouter();
 
-  // Single save-and-coalesce loop. Always reads latest pendingDocRef so it
-  // sends the freshest document, even if multiple beats fired during flight.
   const flushSave = useCallback(async () => {
-    if (inFlightRef.current) return; // already saving; the in-flight call will re-check
-    if (conflictRef.current) return; // suspended until user resolves
-    if (!onlineRef.current) return; // wait for reconnect; queue stays in pendingDocRef
+    if (inFlightRef.current) return;
+    if (conflictRef.current) return;
+    if (!onlineRef.current) return;
     const doc = pendingDocRef.current;
     if (doc === null) return;
 
-    // Cancel any pending retry — this fresh attempt supersedes it.
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
@@ -209,15 +192,9 @@ export function DraftEditor({
       });
 
       if (!result.ok) {
-        // Concurrent edit detected (the only failure variant). Don't bump
-        // versionRef; surface the banner and stash the user's local doc back
-        // into pendingDocRef so "Keep mine" can flush it after they resolve.
-        // Narrowing note: a single `!result.ok` is necessary AND sufficient
-        // for TS to narrow `result` to the conflict variant in this branch
-        // and to the success variant after the return. Adding a redundant
-        // `&& result.conflict` collapses the post-return narrowing back to
-        // the union (TS doesn't simplify "ok || !conflict") and breaks the
-        // success path's `result.version` access. Keep it as the single test.
+        // Single-test narrowing for the discriminated union; see S6 wave 1
+        // bug fix commit. `&& result.conflict` would break the success-path
+        // narrowing after the early return.
         pendingDocRef.current = doc;
         setConflict({
           currentDoc: result.currentDoc,
@@ -229,9 +206,6 @@ export function DraftEditor({
         return;
       }
 
-      // Success — bump our token, clear retry state, drop the shadow (the
-      // server now matches), surface the timestamp, refresh server components
-      // so the rail title and <title> stay in sync.
       versionRef.current = result.version;
       retryCountRef.current = 0;
       clearShadow(draftId);
@@ -242,16 +216,12 @@ export function DraftEditor({
       router.refresh();
     } catch (err) {
       console.error('[DraftEditor] save failed', err);
-      // Restore the doc so retry / next typing beat picks it up. Without
-      // this, a failed save would silently drop the user's most recent edit.
       if (pendingDocRef.current === null) {
         pendingDocRef.current = doc;
       }
 
       const message = err instanceof Error ? err.message : 'Save failed';
 
-      // If we went offline mid-save, the online-event listener will retry on
-      // reconnect — surface "offline" rather than a hard failure.
       if (!onlineRef.current) {
         setStatus({ kind: 'offline' });
         return;
@@ -259,9 +229,6 @@ export function DraftEditor({
 
       const attempt = retryCountRef.current + 1;
       if (attempt > MAX_RETRIES) {
-        // Give up on the active retry chain; the next typing beat (or
-        // explicit Cmd/Ctrl+S) will start a fresh attempt with a clean
-        // counter. Keep the shadow — local data is still in localStorage.
         retryCountRef.current = 0;
         setStatus({ kind: 'failed', message });
         return;
@@ -276,8 +243,6 @@ export function DraftEditor({
       }, delay);
     } finally {
       inFlightRef.current = false;
-      // If more typing happened while we were saving, run again — but only
-      // if we're online, not in a conflict, and not waiting on a retry.
       if (
         pendingDocRef.current !== null &&
         !conflictRef.current &&
@@ -292,18 +257,12 @@ export function DraftEditor({
   const scheduleSave = useCallback(
     (doc: unknown) => {
       pendingDocRef.current = doc;
-      // Always write the shadow — local snapshot survives crashes/refreshes
-      // even if the network's down or the save is still pending.
       writeShadow(draftId, doc, versionRef.current);
 
       if (conflictRef.current) {
-        // Autosave is suspended until the user resolves the banner. We still
-        // capture their typing into pendingDocRef so "Keep mine" picks up
-        // the latest, but skip the debounce timer.
         return;
       }
       if (!onlineRef.current) {
-        // Queue locally; will flush on reconnect.
         setStatus({ kind: 'offline' });
         return;
       }
@@ -329,8 +288,6 @@ export function DraftEditor({
 
   const editor = useEditor({
     extensions: [StarterKit],
-    // Avoid the SSR/CSR mismatch warning Tiptap emits in Next 15 — render only
-    // after mount.
     immediatelyRender: false,
     content: initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     onUpdate: ({ editor: ed }) => {
@@ -362,21 +319,26 @@ export function DraftEditor({
     return () => window.removeEventListener('keydown', onKey);
   }, [forceSave]);
 
-  // Lock the editor while the recovery banner is up. If the user types into
-  // the (still-visible) server content before deciding, their typing would
-  // race the recovery doc and create ambiguity around Discard ("am I
-  // dropping the original unsaved work, or the typing I just did?"). Making
-  // the editor read-only forces a clean choice.
+  // Lock the editor while the recovery banner is up. See S6 wave 2 commit
+  // for the full rationale.
   useEffect(() => {
     if (!editor) return;
     editor.setEditable(!recovery);
   }, [editor, recovery]);
 
-  // Online/offline detection — adjusts the save loop's behavior in place.
+  // Expose the editor instance to the parent so siblings (DraftMeta,
+  // HistoryModal) can call getJSON / getHTML / setContent without prop
+  // drilling. Cleaned up on unmount so the parent doesn't hold a dead ref.
+  useEffect(() => {
+    if (!onEditorReady) return;
+    onEditorReady(editor ?? null);
+    return () => onEditorReady(null);
+  }, [editor, onEditorReady]);
+
+  // Online/offline detection.
   useEffect(() => {
     function onOnline() {
       onlineRef.current = true;
-      // Reset retry chain — being offline is "fresh slate" for the next try.
       retryCountRef.current = 0;
       if (
         pendingDocRef.current !== null &&
@@ -385,14 +347,11 @@ export function DraftEditor({
       ) {
         flushSave();
       } else {
-        // Just clear the offline label if it was showing.
         setStatus((prev) => (prev.kind === 'offline' ? { kind: 'idle' } : prev));
       }
     }
     function onOffline() {
       onlineRef.current = false;
-      // Cancel timers — they'd just bail anyway, but cleaner not to keep
-      // them around firing every second.
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -413,36 +372,27 @@ export function DraftEditor({
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-    // flushSave is stable enough; we want once-on-mount, once-on-unmount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Shadow recovery — runs once on mount. If the local shadow's savedAt
-  // beats the server's updatedAt by more than SHADOW_TOLERANCE_MS, the user
-  // has unsaved changes from a previous session that never made it to the
-  // server. Surface the banner; let them choose Recover or Discard.
+  // Shadow recovery on mount.
   useEffect(() => {
     const shadow = readShadow(draftId);
     if (!shadow) return;
     const serverTime = new Date(initialUpdatedAt).getTime();
     if (Number.isNaN(serverTime)) {
-      // Defensive — initialUpdatedAt should always be a valid ISO from the
-      // server, but if something's off, drop the shadow rather than risk a
-      // false-positive recovery.
       clearShadow(draftId);
       return;
     }
     if (shadow.savedAt > serverTime + SHADOW_TOLERANCE_MS) {
       setRecovery({ doc: shadow.doc, savedAt: shadow.savedAt });
     } else {
-      // Shadow is stale (server caught up or is ahead) — silently clear.
       clearShadow(draftId);
     }
-    // Once-on-mount only; draftId/initialUpdatedAt don't change for a given mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // On unmount: flush whatever's pending so navigating away doesn't lose work.
+  // Unmount cleanup.
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -452,19 +402,12 @@ export function DraftEditor({
         !conflictRef.current &&
         onlineRef.current
       ) {
-        // Best-effort: this is a fire-and-forget save during unmount.
-        // Skip if a conflict is unresolved (saving with a known-stale
-        // version would just produce the same conflict) or if we're offline
-        // (the shadow has the data; next mount will surface recovery).
         void flushSave();
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Conflict resolution ───────────────────────
-  // Reload: take the server's version, replace editor content, drop pending
-  // and shadow (the local copy is now stale).
   const handleReload = useCallback(() => {
     if (!conflict || !editor) return;
     editor.commands.setContent(conflict.currentDoc as any, false);
@@ -477,9 +420,6 @@ export function DraftEditor({
     router.refresh();
   }, [conflict, editor, router, draftId]);
 
-  // Keep mine: rebase onto the server's latest version, then push our doc.
-  // This overwrites the other session's changes — by design, since the user
-  // explicitly chose to. The rebase prevents an infinite conflict loop.
   const handleKeepMine = useCallback(() => {
     if (!conflict || !editor) return;
     versionRef.current = conflict.currentVersion;
@@ -490,9 +430,6 @@ export function DraftEditor({
     flushSave();
   }, [conflict, editor, flushSave]);
 
-  // ─── Recovery resolution ───────────────────────
-  // Recover: load the shadow's content into the editor, mark dirty, and
-  // immediately flush. The successful save will clear the shadow.
   const handleRecover = useCallback(() => {
     if (!recovery || !editor) return;
     editor.commands.setContent(recovery.doc as any, false);
@@ -502,7 +439,6 @@ export function DraftEditor({
     flushSave();
   }, [recovery, editor, flushSave]);
 
-  // Discard: drop the shadow and let the editor stay on the server's content.
   const handleDiscard = useCallback(() => {
     clearShadow(draftId);
     setRecovery(null);
@@ -510,7 +446,6 @@ export function DraftEditor({
 
   return (
     <div className="relative">
-      {/* Save indicator — top-right corner of the editor pane, mono + faint */}
       <div
         aria-live="polite"
         className="absolute -top-7 right-0 font-mono text-[10px] tracking-[0.16em] uppercase text-tag pointer-events-none"
@@ -518,9 +453,6 @@ export function DraftEditor({
         <SaveIndicator status={status} />
       </div>
 
-      {/* Recovery takes priority over conflict — if both exist, resolve
-          recovery first (the user's local work) before deciding what to do
-          about the server's competing version. */}
       {recovery && !conflict && (
         <RecoveryBanner
           recovery={recovery}

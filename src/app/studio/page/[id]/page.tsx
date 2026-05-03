@@ -1,6 +1,7 @@
 // Folio · /studio/page/[id] — editor for a single draft
-// Three-pane layout. Loads the draft server-side, hydrates the Tiptap
-// component on the client.
+// Three-pane layout. Loads the draft server-side, hands its data to
+// <EditorPane>, which is the client wrapper that owns the live Tiptap
+// editor instance and orchestrates DraftMeta + DraftEditor + HistoryModal.
 
 import type { Metadata } from 'next';
 import { auth } from '@clerk/nextjs/server';
@@ -10,8 +11,7 @@ import { db, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { DraftsRail } from '../DraftsRail';
 import { AssistantRail } from '../AssistantRail';
-import { DraftEditor } from '../DraftEditor';
-import { DraftMeta } from './DraftMeta';
+import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
 
@@ -45,20 +45,14 @@ export default async function DraftEditorPage({ params }: { params: Params }) {
 
       <section className="px-[7%] py-12 md:py-14 overflow-y-auto">
         <div className="max-w-[68ch] mx-auto">
-          <DraftMeta
+          <EditorPane
+            draftId={draft.id}
+            initialContent={draft.contentJson}
+            initialVersion={draft.version}
+            initialUpdatedAt={draft.updatedAt.toISOString()}
             title={draft.title}
             updatedAt={draft.updatedAt}
-            draftId={draft.id}
           />
-
-          <div className="mt-10">
-            <DraftEditor
-              draftId={draft.id}
-              initialContent={draft.contentJson}
-              initialVersion={draft.version}
-              initialUpdatedAt={draft.updatedAt.toISOString()}
-            />
-          </div>
         </div>
       </section>
 
