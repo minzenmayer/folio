@@ -29,7 +29,7 @@ export const users = pgTable('users', {
 
 // ─────────────────────────────────────────────
 // IDEAS — the foundational primitive
-// ────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const ideas = pgTable(
   'ideas',
   {
@@ -79,7 +79,7 @@ export const ideas = pgTable(
   })
 );
 
-// ─────────────────────────────────────────────
+// ──────────────────────────────────────────────
 // CAPTURES — raw material; the bank's content
 // ─────────────────────────────────────────────
 export const captures = pgTable(
@@ -250,6 +250,10 @@ export const drafts = pgTable(
     ideaId: uuid('idea_id').references(() => ideas.id, {
       onDelete: 'set null',
     }),
+
+    // Optimistic-concurrency token. Bumped on every successful update.
+    // updateDraft gates the WHERE on this; mismatch = concurrent edit.
+    version: integer('version').notNull().default(1),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

@@ -129,13 +129,14 @@ CREATE TABLE IF NOT EXISTS assistant_offers (
   created_at timestamptz DEFAULT now()
 );
 
--- ─── DRAFTS ───  (Sprint 5: The Page)
+-- ─── DRAFTS ───  (Sprint 5: The Page; version added in Sprint 6)
 CREATE TABLE IF NOT EXISTS drafts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title text,
   content_json jsonb NOT NULL,
   idea_id uuid REFERENCES ideas(id) ON DELETE SET NULL,
+  version integer NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
