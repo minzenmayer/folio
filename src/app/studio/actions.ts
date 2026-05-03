@@ -465,12 +465,36 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
   }
 
   if (wanted.has('newsletter_issue')) {
+    // Sprint 15 Wave 3 layer 2: signal-boosted ranking + noise floor.
+    // - Boost is a correlated subquery over extracted_ideas attached to
+    //   this issue. We weight depth more than breadth (0.3 vs 0.2) per
+    //   the brief, since depth captures "this source actually develops
+    //   the idea" while breadth is whether the idea recurs across the
+    //   bed (which findSimilar doesn't observe directly).
+    // - Floor: skip results whose source has NO extracted_ideas AND
+    //   raw cosine similarity is below 0.55. That kills the noise floor
+    //   without losing the long tail of "no idea but very close" matches.
+    const signalBoostSql = sql<number>`COALESCE(
+      (SELECT MAX(0.3 * ${extractedIdeas.depthSignal} + 0.2 * ${extractedIdeas.breadthSignal})
+       FROM ${extractedIdeas}
+       WHERE ${extractedIdeas.newsletterIssueId} = ${newsletterIssues.id}),
+      0
+    )`;
+    const signalFloorSql = sql`(
+      (1 - (${newsletterIssues.embedding} <=> ${lit}::vector)) >= 0.55
+      OR EXISTS (
+        SELECT 1 FROM ${extractedIdeas}
+        WHERE ${extractedIdeas.newsletterIssueId} = ${newsletterIssues.id}
+      )
+    )`;
     const issueWhere = data.excludeNewsletterIssueId
       ? sql`${newsletterIssues.userId} = ${user.id}
             AND ${newsletterIssues.embedding} IS NOT NULL
-            AND ${newsletterIssues.id} != ${data.excludeNewsletterIssueId}`
+            AND ${newsletterIssues.id} != ${data.excludeNewsletterIssueId}
+            AND ${signalFloorSql}`
       : sql`${newsletterIssues.userId} = ${user.id}
-            AND ${newsletterIssues.embedding} IS NOT NULL`;
+            AND ${newsletterIssues.embedding} IS NOT NULL
+            AND ${signalFloorSql}`;
 
     promises.push(
       db
@@ -479,10 +503,15 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
           title: newsletterIssues.title,
           bodyText: newsletterIssues.bodyText,
           distance: sql<number>`${newsletterIssues.embedding} <=> ${lit}::vector`,
+          boost: signalBoostSql,
         })
         .from(newsletterIssues)
         .where(issueWhere)
-        .orderBy(sql`${newsletterIssues.embedding} <=> ${lit}::vector`)
+        // ORDER BY (distance - boost) ASC ranks high-signal close-cosine
+        // matches first. Equivalent to (similarity + boost) DESC.
+        .orderBy(
+          sql`(${newsletterIssues.embedding} <=> ${lit}::vector) - ${signalBoostSql}`
+        )
         .limit(perKindLimit)
         .then((rows) =>
           rows.map((r): SimilarHit => {
@@ -496,7 +525,10 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
               id: r.id,
               title: r.title,
               snippet,
-              similarity: 1 - Number(r.distance),
+              // similarity surfaces the boosted score so the rail's
+              // sort order matches what the user sees. Raw cosine is
+              // recoverable as similarity - boost if needed for debug.
+              similarity: 1 - Number(r.distance) + Number(r.boost ?? 0),
             };
           })
         )
@@ -504,12 +536,29 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
   }
 
   if (wanted.has('obsidian_note')) {
+    // Sprint 15 Wave 3 layer 2: same signal-boost + noise-floor pattern
+    // as newsletter_issue above. See that branch for rationale.
+    const signalBoostSql = sql<number>`COALESCE(
+      (SELECT MAX(0.3 * ${extractedIdeas.depthSignal} + 0.2 * ${extractedIdeas.breadthSignal})
+       FROM ${extractedIdeas}
+       WHERE ${extractedIdeas.obsidianNoteId} = ${obsidianNotes.id}),
+      0
+    )`;
+    const signalFloorSql = sql`(
+      (1 - (${obsidianNotes.embedding} <=> ${lit}::vector)) >= 0.55
+      OR EXISTS (
+        SELECT 1 FROM ${extractedIdeas}
+        WHERE ${extractedIdeas.obsidianNoteId} = ${obsidianNotes.id}
+      )
+    )`;
     const noteWhere = data.excludeObsidianNoteId
       ? sql`${obsidianNotes.userId} = ${user.id}
             AND ${obsidianNotes.embedding} IS NOT NULL
-            AND ${obsidianNotes.id} != ${data.excludeObsidianNoteId}`
+            AND ${obsidianNotes.id} != ${data.excludeObsidianNoteId}
+            AND ${signalFloorSql}`
       : sql`${obsidianNotes.userId} = ${user.id}
-            AND ${obsidianNotes.embedding} IS NOT NULL`;
+            AND ${obsidianNotes.embedding} IS NOT NULL
+            AND ${signalFloorSql}`;
 
     promises.push(
       db
@@ -519,10 +568,13 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
           path: obsidianNotes.path,
           bodyText: obsidianNotes.bodyText,
           distance: sql<number>`${obsidianNotes.embedding} <=> ${lit}::vector`,
+          boost: signalBoostSql,
         })
         .from(obsidianNotes)
         .where(noteWhere)
-        .orderBy(sql`${obsidianNotes.embedding} <=> ${lit}::vector`)
+        .orderBy(
+          sql`(${obsidianNotes.embedding} <=> ${lit}::vector) - ${signalBoostSql}`
+        )
         .limit(perKindLimit)
         .then((rows) =>
           rows.map((r): SimilarHit => {
@@ -539,7 +591,7 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
               // straight rather than the path.
               title: r.title,
               snippet,
-              similarity: 1 - Number(r.distance),
+              similarity: 1 - Number(r.distance) + Number(r.boost ?? 0),
             };
           })
         )
