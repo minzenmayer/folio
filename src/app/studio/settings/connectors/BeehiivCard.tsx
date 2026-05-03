@@ -1,4 +1,4 @@
-// Thoughtbed · BeehiivCard (Sprint 13 Wave 1)
+// Thoughtbed · BeehiivCard (Sprint 13 Wave 1, Sprint 14 brand pivot)
 //
 // Stateful client card for the Beehiiv connector. Three states drive the
 // rendered shape:
@@ -88,7 +88,7 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
   function runDisconnect() {
     if (
       !window.confirm(
-        'Disconnect Beehiiv? Your API key will be removed. Past issues stay in your bed.'
+        'Disconnect Beehiiv? Your API key will be removed. Past issues stay in your space.'
       )
     ) {
       return;
@@ -112,18 +112,18 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
     status.connected && status.account.lastSyncStatus === 'auth_failed';
 
   return (
-    <li className="rounded-panel bg-paper border border-rule p-6 flex flex-col gap-3 transition-shadow hover:shadow-soft">
+    <li className="rounded-panel bg-paper border border-rule p-6 flex flex-col gap-3">
       <div className="flex items-center gap-3">
         <span
-          className="w-10 h-10 rounded-soft bg-paper-2 flex items-center justify-center font-mono text-[16px] text-accent font-bold"
+          className="w-10 h-10 rounded-soft bg-paper-2 flex items-center justify-center font-mono text-[12px] font-semibold text-tag"
           aria-hidden
         >
-          ✉
+          BH
         </span>
         <div className="flex-1 min-w-0">
-          <h2 className="font-serif text-[20px] text-ink leading-[1.2] truncate">
+          <h3 className="font-sans text-[16px] font-semibold text-ink leading-tight truncate">
             Beehiiv
-          </h2>
+          </h3>
           {status.connected && status.account.publicationName && (
             <div className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag truncate">
               {status.account.publicationName}
@@ -135,30 +135,30 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
             !status.connected
               ? 'text-tag bg-paper-2'
               : showError
-                ? 'text-accent bg-accent-soft'
-                : 'text-accent-2 bg-accent-soft/60'
+                ? 'text-ink bg-accent-soft'
+                : 'text-bg bg-accent-2'
           }`}
         >
           {!status.connected
-            ? 'soon'
+            ? 'idle'
             : showError
               ? 'error'
               : 'connected'}
         </span>
       </div>
 
-      <p className="font-serif text-[14px] leading-[1.55] text-ink-soft">
-        Pulls in your published newsletter issues as seeds. Voice training
-        data in your own approved words.
+      <p className="font-sans text-[13.5px] leading-[1.55] text-ink-soft">
+        Sync your published newsletter issues. Voice training data in your
+        own approved words.
       </p>
 
       {/* Connected state — issue count + last sync */}
       {status.connected && !showForm && (
         <div className="font-mono text-[11px] text-tag tracking-[0.04em] mt-1">
           {status.account.issueCount}{' '}
-          {status.account.issueCount === 1 ? 'issue' : 'issues'} in your bed
+          {status.account.issueCount === 1 ? 'issue' : 'issues'} synced
           {' · '}
-          last synced {SOFT_TIMEAGO(status.account.lastSyncAt)}
+          last sync {SOFT_TIMEAGO(status.account.lastSyncAt)}
         </div>
       )}
 
@@ -166,19 +166,19 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
       {status.connected &&
         status.account.lastSyncError &&
         status.account.lastSyncStatus !== 'ok' && (
-          <p className="font-serif italic text-[13px] text-accent leading-[1.5]">
+          <p className="font-sans text-[12.5px] text-ink leading-[1.5]">
             {status.account.lastSyncError}
           </p>
         )}
 
       {/* Inline result/error banner from latest action */}
       {actionMessage && !actionError && (
-        <p className="font-serif italic text-[13px] text-accent-2 leading-[1.5]">
+        <p className="font-sans text-[12.5px] text-accent-2 leading-[1.5]">
           {actionMessage}
         </p>
       )}
       {actionError && (
-        <p className="font-serif italic text-[13px] text-accent leading-[1.5]">
+        <p className="font-sans text-[12.5px] text-ink leading-[1.5]">
           {actionError}
         </p>
       )}
@@ -190,7 +190,7 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
             <button
               type="button"
               onClick={() => setShowForm(true)}
-              className="font-sans text-[12px] font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-accent transition-colors"
+              className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft transition-colors"
             >
               Connect
             </button>
@@ -216,15 +216,15 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
             type="button"
             onClick={runSync}
             disabled={pending}
-            className="font-sans text-[12px] font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {pending ? 'Syncing…' : '↻ Sync now'}
+            {pending ? 'Syncing…' : 'Sync now'}
           </button>
           <button
             type="button"
             onClick={() => setShowForm(true)}
             disabled={pending}
-            className="font-sans text-[12px] font-medium rounded-soft px-3 py-2 border border-rule text-ink-soft hover:border-accent hover:text-accent transition-colors disabled:opacity-50"
+            className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-3 py-2 border border-rule text-ink-soft hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50"
           >
             Reconnect
           </button>
@@ -232,7 +232,7 @@ export function BeehiivCard({ initialStatus }: { initialStatus: Snapshot }) {
             type="button"
             onClick={runDisconnect}
             disabled={pending}
-            className="ml-auto font-sans text-[12px] text-tag hover:text-accent transition-colors disabled:opacity-50"
+            className="ml-auto font-sans text-[12px] text-tag hover:text-ink transition-colors disabled:opacity-50"
           >
             Disconnect
           </button>
@@ -275,11 +275,11 @@ function ConnectForm({
     <form onSubmit={onSubmit} className="flex flex-col gap-2">
       <label
         htmlFor="beehiiv-api-key"
-        className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold"
+        className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium"
       >
-        ▸ Beehiiv API key
+        Beehiiv API key
       </label>
-      <p className="font-serif italic text-[12px] text-tag leading-[1.5]">
+      <p className="font-sans text-[12px] text-tag leading-[1.5]">
         Generate one in Beehiiv → Settings → Integrations → API. Only the
         key is stored, encrypted at rest.
       </p>
@@ -290,13 +290,13 @@ function ConnectForm({
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
         placeholder="Bh_…"
-        className="bg-paper-2 border border-rule rounded-soft px-3 py-2 font-mono text-[13px] text-ink placeholder:text-tag/80 focus:outline-none focus:border-accent"
+        className="bg-paper-2 border border-rule rounded-soft px-3 py-2 font-mono text-[13px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
       />
       <div className="flex items-center gap-2">
         <button
           type="submit"
           disabled={pending || apiKey.trim().length === 0}
-          className="font-sans text-[12px] font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {pending ? 'Connecting…' : 'Connect & sync'}
         </button>
@@ -304,7 +304,7 @@ function ConnectForm({
           type="button"
           onClick={onCancel}
           disabled={pending}
-          className="font-sans text-[12px] text-tag hover:text-accent transition-colors disabled:opacity-50"
+          className="font-sans text-[12px] text-tag hover:text-ink transition-colors disabled:opacity-50"
         >
           Cancel
         </button>

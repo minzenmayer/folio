@@ -1,13 +1,7 @@
 // Thoughtbed · Knowledge
-// Where the user wires up the inputs that make the bed know who they are:
-// LinkedIn, newsletter archive, RSS feeds, URLs, file uploads. Combined with
-// VoiceID they form the user's content-and-voice profile, which the garden
-// rail and Reflect both draw on for tone alignment.
-//
-// Sprint 10 ships this as a deliberate placeholder — the Inbox + Garden are
-// already the primary input loops. Sprint 11+ will bring up the actual
-// connectors (OAuth into LinkedIn, RSS pull, etc.) with the same care the
-// rest of the studio takes around privacy and voice.
+// Sprint 14 brand pivot: monochrome restyle, drop garden vocabulary.
+// Note that real connector setup lives in Settings (the modal); this
+// page is a placeholder for now and points to the modal.
 
 import Link from 'next/link';
 import { auth } from '@clerk/nextjs/server';
@@ -15,51 +9,45 @@ import { redirect } from 'next/navigation';
 
 const SOURCES = [
   {
+    id: 'beehiiv',
+    label: 'Beehiiv',
+    blurb:
+      'Your published newsletter issues. Voice training data in your own approved words.',
+    state: 'live',
+  },
+  {
     id: 'linkedin',
     label: 'LinkedIn',
     blurb:
-      'Posts, comments, and articles you\'ve already published. Voice training data, in your own words.',
-    glyph: 'in',
+      'Posts, comments, articles. Voice training data, in your own words.',
     state: 'soon',
   },
   {
-    id: 'newsletter',
-    label: 'Newsletter archive',
+    id: 'obsidian',
+    label: 'Obsidian',
     blurb:
-      'Your existing issues. The bed reads what you\'ve already approved as yours and tunes Reflect to match.',
-    glyph: '✉',
+      'Sync your Markdown vault. Each note becomes a capture Thoughtbed can connect, surface, and reflect against.',
     state: 'soon',
   },
   {
-    id: 'rss',
-    label: 'RSS / external newsletters',
+    id: 'gdrive',
+    label: 'Google Drive',
     blurb:
-      'Other writers you read. Captures land as seeds, attributed to source. Voice stays separate from yours.',
-    glyph: '⎁',
+      'Selected docs land as captures. Pick which folders Thoughtbed reads — nothing automatic.',
     state: 'soon',
   },
   {
-    id: 'urls',
-    label: 'URL fetch',
+    id: 'gmail',
+    label: 'Gmail',
     blurb:
-      'Drop a link, the bed pulls the readable content as a capture. Source URL preserved.',
-    glyph: '↗',
-    state: 'soon',
-  },
-  {
-    id: 'uploads',
-    label: 'File uploads',
-    blurb:
-      'PDFs, .md, .txt. Anything the bed should read alongside what\'s already there.',
-    glyph: '▭',
+      'Subscribed newsletters land in the Inbox; you triage. Other email stays untouched.',
     state: 'soon',
   },
   {
     id: 'voiceid',
-    label: 'VoiceID',
+    label: 'Voice ID',
     blurb:
-      'Your distinct rhythm, vocabulary, and shape — modeled from what you\'ve already written. The garden writes from this, never around it.',
-    glyph: '◉',
+      'Your distinct rhythm, vocabulary, and shape — modeled from what you have already written. Reflection writes from this, never around it.',
     state: 'soon',
   },
 ];
@@ -70,65 +58,65 @@ export default async function KnowledgePage() {
 
   return (
     <section>
-      <div className="max-w-[800px] mx-auto px-[7%] py-12 md:py-16">
-        <div className="mb-10">
-          <div className="font-mono text-[12px] tracking-[0.22em] uppercase text-accent font-bold mb-4">
-            ▸ Knowledge
-          </div>
-          <h1 className="font-serif font-normal text-[clamp(36px,5vw,56px)] leading-[1.05] tracking-tightest text-ink mb-3">
-            What the bed reads,{' '}
-            <em className="italic font-light text-accent">besides you.</em>
+      <div className="max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
+        <div className="mb-8">
+          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
+            Knowledge
           </h1>
-          <p className="font-serif font-light text-[18px] leading-[1.5] text-ink-soft max-w-[60ch]">
-            The Inbox is the primary loop — anything you paste, plant, or
-            highlight lands there. Knowledge is everything else: data sources
-            that flow in automatically so the bed knows your voice, your
-            archive, and the writers you read.
+          <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[60ch]">
+            The Inbox is the primary loop — anything you paste lands there.
+            Knowledge is everything else: data sources that flow in
+            automatically so Thoughtbed knows your voice, your archive, and
+            the writers you read.
           </p>
         </div>
 
-        <div className="grid sm:grid-cols-2 gap-3 mb-12">
+        <ul className="grid sm:grid-cols-2 gap-3 mb-10">
           {SOURCES.map((src) => (
-            <div
+            <li
               key={src.id}
-              className="border border-rule rounded-card bg-paper/60 px-5 py-5 transition-shadow hover:shadow-soft"
+              className="border border-rule rounded-card bg-paper px-5 py-5"
             >
-              <div className="flex items-baseline gap-2 mb-2">
-                <span
-                  className="font-mono text-[12px] text-accent font-bold w-7 text-center"
-                  aria-hidden
-                >
-                  {src.glyph}
-                </span>
-                <h3 className="font-serif text-[18px] text-ink leading-[1.2] flex-1">
+              <div className="flex items-baseline gap-3 mb-2">
+                <h3 className="font-sans text-[16px] font-semibold text-ink leading-[1.3] flex-1">
                   {src.label}
                 </h3>
-                <span className="font-mono text-[9px] tracking-[0.22em] uppercase text-tag bg-paper-2 border border-rule rounded-full px-2 py-0.5">
+                <span
+                  className={`font-mono text-[9px] tracking-[0.22em] uppercase rounded-full px-2 py-0.5 ${
+                    src.state === 'live'
+                      ? 'bg-ink text-bg'
+                      : 'text-tag bg-paper-2 border border-rule'
+                  }`}
+                >
                   {src.state}
                 </span>
               </div>
-              <p className="font-serif text-[14px] leading-[1.55] text-ink-soft pl-9">
+              <p className="font-sans text-[13.5px] leading-[1.55] text-ink-soft">
                 {src.blurb}
               </p>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
 
-        <div className="border-t border-rule pt-8">
-          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-3">
-            ▸ For now
-          </div>
-          <p className="font-serif italic text-[16px] text-ink-soft leading-[1.6] max-w-[60ch]">
-            Use the{' '}
+        <div className="border-t border-rule pt-6">
+          <p className="font-sans text-[14px] text-ink-soft leading-[1.6] max-w-[60ch]">
+            Manage connectors in{' '}
+            <Link
+              href="/studio?settings=connectors"
+              scroll={false}
+              className="text-ink underline underline-offset-4 decoration-rule-strong hover:decoration-ink"
+            >
+              Settings
+            </Link>
+            . Use the{' '}
             <Link
               href="/studio/inbox"
-              className="text-accent hover:underline underline-offset-4 not-italic"
+              className="text-ink underline underline-offset-4 decoration-rule-strong hover:decoration-ink"
             >
               Inbox
             </Link>{' '}
-            to plant manually. Anything you paste in becomes a seed the
-            garden can connect, surface, and reflect against. The connectors
-            above light up as we ship them.
+            to capture manually. Anything you paste in becomes a capture
+            Thoughtbed can connect, surface, and reflect against.
           </p>
         </div>
       </div>
