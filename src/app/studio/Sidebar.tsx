@@ -3,6 +3,12 @@
 // Sprint 11: replaces the studio top nav with a Ghostbase-style left
 // sidebar. Persistent across every authed surface, sticky on the left.
 //
+// Sprint 12: aesthetic refresh — rounded inner pills for nav items with a
+// subtler bg-paper-2 active state (no rectangular stripe). The brand block
+// loses its bottom rule in favour of whitespace. The "+ New writing" CTA
+// drops the heavy mono-uppercase tracking and lands as sentence-case.
+// Settings now links to /studio/settings/connectors (was a no-op).
+//
 // Sections (top → bottom):
 //   1. Brand block — Thoughtbed wordmark + "[name]'s bed" workspace label
 //   2. + New writing — full-width prominent CTA → /studio (the composer)
@@ -10,7 +16,7 @@
 //   4. Recent — drafts + ideas mixed, grouped by Today / Last 7 days / Older.
 //      The active draft / idea is highlighted so the sidebar doubles as
 //      navigation history.
-//   5. Footer — Settings + Help (placeholder) + Clerk UserButton
+//   5. Footer — Settings (connectors page) + Help (placeholder) + UserButton
 //
 // Implementation: this is a client component so it can read usePathname()
 // for the active-state highlight. The parent layout (server) does the
@@ -97,13 +103,18 @@ export function Sidebar({
     return pathname === item.href || pathname.startsWith(item.href + '/');
   }
 
+  // Settings is active for /studio/settings and any sub-route (currently
+  // /connectors; Sprint 13+ may add /voice, /privacy, etc.).
+  const settingsActive = pathname.startsWith('/studio/settings');
+
   return (
     <aside
-      className="hidden md:flex w-[260px] shrink-0 border-r border-rule bg-paper/40 flex-col h-screen sticky top-0"
+      className="hidden md:flex w-[260px] shrink-0 bg-paper/40 flex-col h-screen sticky top-0"
       aria-label="Thoughtbed navigation"
     >
-      {/* Brand block — wordmark + workspace label */}
-      <div className="px-5 pt-5 pb-4 border-b border-rule">
+      {/* Brand block — wordmark + workspace label. No bottom rule;
+          we rely on whitespace + the bg-paper/40 wash to delineate. */}
+      <div className="px-5 pt-6 pb-5">
         <Link
           href="/studio"
           className="font-serif italic text-[20px] text-ink font-medium hover:text-accent transition-colors block"
@@ -116,25 +127,26 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* + New writing — the big primary CTA */}
-      <div className="px-4 py-3 border-b border-rule">
+      {/* + New writing — primary CTA, sentence-case + soft radius */}
+      <div className="px-4 pb-3">
         <Link
           href="/studio"
-          className="block w-full text-center font-sans text-[11px] tracking-[0.22em] uppercase font-bold rounded-[3px] px-3 py-2.5 bg-ink text-bg hover:bg-accent transition-colors"
+          className="block w-full text-center font-sans text-[13px] font-medium rounded-card px-3 py-2.5 bg-ink text-bg hover:bg-accent transition-colors shadow-soft"
         >
           + New writing
         </Link>
       </div>
 
-      {/* Nav — Write / Inbox / Garden / Knowledge */}
-      <nav className="px-3 py-3" aria-label="Sections">
+      {/* Nav — Write / Inbox / Garden / Knowledge.
+          Rounded inner pills, bg-paper-2 active state. */}
+      <nav className="px-3 pt-2 pb-3" aria-label="Sections">
         {NAV_ITEMS.map((item) => {
           const active = isNavActive(item);
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 rounded-[3px] px-3 py-2 mb-0.5 font-sans text-[14px] transition-colors ${
+              className={`flex items-center gap-3 rounded-soft px-3 py-2 mb-0.5 font-sans text-[14px] transition-colors ${
                 active
                   ? 'bg-paper-2 text-ink font-medium'
                   : 'text-ink-soft hover:bg-paper hover:text-ink'
@@ -154,10 +166,8 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="border-t border-rule" />
-
       {/* Recent — drafts + ideas, bucketed by recency */}
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      <div className="flex-1 overflow-y-auto px-3 pt-2 pb-3">
         {recents.length === 0 ? (
           <p className="px-3 font-serif italic text-[12px] text-tag leading-[1.5]">
             Nothing yet. Plant a seed or start a draft to see your bed grow.
@@ -183,24 +193,28 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Footer — settings + help icons + user button */}
-      <div className="border-t border-rule px-3 py-3 flex items-center justify-between gap-2">
+      {/* Footer — settings (connectors) + help icons + user button */}
+      <div className="px-3 py-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Settings (coming soon)"
-            title="Settings — coming soon"
-            className="w-8 h-8 rounded-[3px] flex items-center justify-center text-tag hover:text-accent hover:bg-paper transition-colors"
+          <Link
+            href="/studio/settings/connectors"
+            aria-label="Settings"
+            title="Settings"
+            className={`w-8 h-8 rounded-soft flex items-center justify-center transition-colors ${
+              settingsActive
+                ? 'bg-paper-2 text-accent'
+                : 'text-tag hover:text-accent hover:bg-paper'
+            }`}
           >
             <span className="font-mono text-[14px]" aria-hidden>
               ⚙
             </span>
-          </button>
+          </Link>
           <button
             type="button"
             aria-label="Help (coming soon)"
             title="Help — coming soon"
-            className="w-8 h-8 rounded-[3px] flex items-center justify-center text-tag hover:text-accent hover:bg-paper transition-colors"
+            className="w-8 h-8 rounded-soft flex items-center justify-center text-tag hover:text-accent hover:bg-paper transition-colors"
           >
             <span className="font-mono text-[14px]" aria-hidden>
               ?
@@ -242,7 +256,7 @@ function RecentGroup({
             <li key={`${item.kind}-${item.id}`}>
               <Link
                 href={item.href}
-                className={`flex items-baseline gap-2.5 px-3 py-1.5 rounded-[3px] transition-colors ${
+                className={`flex items-baseline gap-2.5 px-3 py-1.5 rounded-soft transition-colors ${
                   active ? 'bg-paper-2' : 'hover:bg-paper'
                 }`}
                 aria-current={active ? 'page' : undefined}
