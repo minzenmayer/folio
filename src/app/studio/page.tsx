@@ -1,8 +1,14 @@
 // Thoughtbed · Studio home — writing-first
+//
 // Sprint 10: the authed homepage IS the writing surface. Greeting + a
 // composer that branches into Draft / Idea / Plant by mode, and below
 // it your recent ideas + drafts as a dense list — your bank of past
 // issues, kept one click away.
+//
+// Sprint 12: the composer's modes shift to intent-driven (Newsletter /
+// LinkedIn / Ideas / Self-pilot); the home defaults to Newsletter mode.
+// The greeting copy updates to match. The rest is aesthetic — rounded
+// cards, gentler borders, sentence-case where natural.
 //
 // The legacy "dashboard with two CTAs" is gone. Most days the user
 // has something to say; we honour that as the default.
@@ -104,13 +110,13 @@ export default async function StudioHome() {
           </h1>
           <p className="font-serif font-light text-[clamp(17px,1.8vw,21px)] leading-[1.5] text-ink-soft max-w-[56ch]">
             {isEmpty
-              ? 'Drop in a thought to get started — anything you don\'t want to lose. The bed accepts seeds, drafts, and full ideas.'
-              : 'What are you working on? Type below to start a new draft, idea, or plant a seed.'}
+              ? 'Drop in a topic to get started. Newsletter is the default; switch modes if you\'re writing for LinkedIn, exploring ideas, or just want a blank page.'
+              : 'What are you writing today? Pick a mode below, type your topic, and the page opens.'}
           </p>
         </div>
 
-        {/* The composer — Sprint 10's writing-first heart */}
-        <Composer initialMode="draft" />
+        {/* The composer — Sprint 12 intent-driven modes */}
+        <Composer initialMode="newsletter" />
 
         {/* Recent ideas + drafts — the bank of past issues */}
         {(recentDrafts.length > 0 || recentIdeas.length > 0) && (
@@ -126,12 +132,12 @@ export default async function StudioHome() {
                     all →
                   </Link>
                 </div>
-                <ul className="border-t border-rule">
+                <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
                   {recentDrafts.map((d) => (
-                    <li key={d.id} className="border-b border-rule">
+                    <li key={d.id}>
                       <Link
                         href={`/studio/page/${d.id}`}
-                        className="flex items-baseline gap-3 py-3 px-1 hover:bg-paper/50 transition-colors group"
+                        className="flex items-baseline gap-3 py-3 px-4 hover:bg-paper-2 transition-colors group"
                       >
                         <span className="font-mono text-accent" aria-hidden>
                           ✎
@@ -162,12 +168,12 @@ export default async function StudioHome() {
                     garden →
                   </Link>
                 </div>
-                <ul className="border-t border-rule">
+                <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
                   {recentIdeas.map((i) => (
-                    <li key={i.id} className="border-b border-rule">
+                    <li key={i.id}>
                       <Link
                         href={`/studio/ideas/${i.id}`}
-                        className="flex items-baseline gap-3 py-3 px-1 hover:bg-paper/50 transition-colors group"
+                        className="flex items-baseline gap-3 py-3 px-4 hover:bg-paper-2 transition-colors group"
                       >
                         <span className="font-mono text-accent" aria-hidden>
                           ▸
@@ -189,7 +195,7 @@ export default async function StudioHome() {
 
         {/* Inbox callout — keep it discoverable when something's pending */}
         {inboxCount > 0 && (
-          <div className="mt-10 border border-rule rounded-[3px] bg-paper px-5 py-4 flex items-center gap-3">
+          <div className="mt-10 rounded-card bg-paper border border-rule px-5 py-4 flex items-center gap-3 shadow-soft">
             <span className="font-mono text-accent" aria-hidden>
               "
             </span>
