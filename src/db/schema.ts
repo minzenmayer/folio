@@ -16,9 +16,9 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // USERS — managed by Clerk; we mirror just the ID + minimal profile
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   clerkId: text('clerk_id').notNull().unique(),
@@ -27,9 +27,9 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // IDEAS — the foundational primitive
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const ideas = pgTable(
   'ideas',
   {
@@ -89,9 +89,9 @@ export const ideas = pgTable(
   })
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // CAPTURES — raw material; the bank's content
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const captures = pgTable(
   'captures',
   {
@@ -136,9 +136,9 @@ export const captures = pgTable(
   })
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // ARTIFACTS — built things
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const artifacts = pgTable('artifacts', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id')
@@ -167,9 +167,9 @@ export const artifacts = pgTable('artifacts', {
   embedding: vector('embedding', { dimensions: 1536 }),
 });
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // THREADS — journal entries on an idea
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const threads = pgTable('threads', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id')
@@ -198,9 +198,9 @@ export const threadEntries = pgTable('thread_entries', {
   embedding: vector('embedding', { dimensions: 1536 }),
 });
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // IDEA EDGES — typed relationships between ideas
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const ideaEdges = pgTable('idea_edges', {
   id: uuid('id').primaryKey().defaultRandom(),
   fromIdea: uuid('from_idea')
@@ -217,10 +217,10 @@ export const ideaEdges = pgTable('idea_edges', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // ASSISTANT_OFFERS — log of what the Assistant suggested
 // Used to tune retrieval over time and track acceptance
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const assistantOffers = pgTable('assistant_offers', {
   id: uuid('id').primaryKey().defaultRandom(),
   artifactId: uuid('artifact_id').references(() => artifacts.id, {
@@ -236,11 +236,11 @@ export const assistantOffers = pgTable('assistant_offers', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // DRAFTS — Sprint 5: The Page
 // In-progress writing surfaces. Tiptap doc serialized as ProseMirror JSON.
 // May mature into an idea + artifact later; nullable ideaId reflects that.
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const drafts = pgTable(
   'drafts',
   {
@@ -289,12 +289,12 @@ export const drafts = pgTable(
   })
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // DRAFT VERSIONS — Sprint 6: history trail for The Page
 // Every successful save snapshots into here, with a 30s coalesce window
 // (an autosave row younger than 30s gets overwritten in place rather than
 // duplicated). Restoring a version creates a new row with source='restore'.
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export const draftVersions = pgTable(
   'draft_versions',
   {
@@ -321,9 +321,122 @@ export const draftVersions = pgTable(
   })
 );
 
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// CONNECTOR_ACCOUNTS — Sprint 13: per-(user, provider) integration record
+// Generic across providers. The plaintext API key never lives here —
+// `encryptedSecret` holds AES-256-GCM ciphertext (see src/lib/crypto.ts).
+// On Disconnect we zero the secret but keep the row for status tracking
+// and so newsletter_issues stay reachable through the FK chain.
+// ─────────────────────────────────────────────
+export const connectorAccounts = pgTable(
+  'connector_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    provider: text('provider').notNull(),
+    // 'beehiiv' | 'obsidian' | 'linkedin' | 'gdrive' | 'gmail'
+
+    status: text('status').notNull().default('pending'),
+    // 'pending' | 'connected' | 'error' | 'disconnected'
+
+    encryptedSecret: text('encrypted_secret'),
+    // base64(iv || authTag || ciphertext) — see src/lib/crypto.ts
+
+    metadata: jsonb('metadata').default({}),
+    // beehiiv: { publicationId, publication_name, webhook_id?, plan_tier? }
+
+    lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    lastSyncStatus: text('last_sync_status'),
+    // 'ok' | 'partial' | 'rate_limited' | 'auth_failed' | 'error'
+    lastSyncError: text('last_sync_error'),
+    lastSyncCount: integer('last_sync_count'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userProviderIdx: index('idx_connector_accounts_user_provider').on(
+      table.userId,
+      table.provider
+    ),
+  })
+);
+
+// ─────────────────────────────────────────────
+// NEWSLETTER_ISSUES — Sprint 13: published Beehiiv issues, ingested via
+// /api/cron + manual sync. Mirrors a Beehiiv post with the bits the bed
+// cares about (title, body_html, body_text, publish_date, audience). The
+// embedding column lets findSimilar surface past issues alongside captures,
+// ideas, and drafts so the user's own published voice resonates while
+// they're writing.
+// ─────────────────────────────────────────────
+export const newsletterIssues = pgTable(
+  'newsletter_issues',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    connectorAccountId: uuid('connector_account_id')
+      .notNull()
+      .references(() => connectorAccounts.id, { onDelete: 'cascade' }),
+
+    externalId: text('external_id').notNull(),
+    // Beehiiv post id (e.g. 'post_abc123...'). Unique per user — upsert key.
+
+    publicationId: text('publication_id').notNull(),
+    title: text('title').notNull(),
+    subtitle: text('subtitle'),
+    slug: text('slug'),
+    webUrl: text('web_url'),
+
+    audience: text('audience'),
+    // 'free' | 'premium' | 'all'
+
+    status: text('status'),
+    // mirrors Beehiiv: 'draft' | 'confirmed' | 'archived'
+
+    publishDate: timestamp('publish_date', { withTimezone: true }),
+
+    bodyHtml: text('body_html'),
+    bodyText: text('body_text'),
+
+    contentTags: text('content_tags').array().default(sql`'{}'`),
+    wordCount: integer('word_count'),
+
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    raw: jsonb('raw'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userPublishIdx: index('idx_newsletter_issues_user_publish').on(
+      table.userId,
+      table.publishDate
+    ),
+    embeddingIdx: index('idx_newsletter_issues_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
+);
+
+// ─────────────────────────────────────────────
 // Type exports for inference
-// ──────────────────────────────────────────────
+// ─────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
 export type Idea = typeof ideas.$inferSelect;
 export type Capture = typeof captures.$inferSelect;
@@ -334,6 +447,8 @@ export type IdeaEdge = typeof ideaEdges.$inferSelect;
 export type AssistantOffer = typeof assistantOffers.$inferSelect;
 export type Draft = typeof drafts.$inferSelect;
 export type DraftVersion = typeof draftVersions.$inferSelect;
+export type ConnectorAccount = typeof connectorAccounts.$inferSelect;
+export type NewsletterIssue = typeof newsletterIssues.$inferSelect;
 
 export type NewUser = typeof users.$inferInsert;
 export type NewIdea = typeof ideas.$inferInsert;
@@ -341,3 +456,5 @@ export type NewCapture = typeof captures.$inferInsert;
 export type NewArtifact = typeof artifacts.$inferInsert;
 export type NewDraft = typeof drafts.$inferInsert;
 export type NewDraftVersion = typeof draftVersions.$inferInsert;
+export type NewConnectorAccount = typeof connectorAccounts.$inferInsert;
+export type NewNewsletterIssue = typeof newsletterIssues.$inferInsert;
