@@ -9,6 +9,7 @@ import { db, captures, ideas } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
+import { BackfillButton } from './BackfillButton';
 
 export default async function StudioHome() {
   // Auth check at top so redirect() fires before any RSC streaming begins.
@@ -156,6 +157,10 @@ export default async function StudioHome() {
             </div>
           </div>
         )}
+
+        {/* Sprint 7 maintenance — backfill embeddings for pre-existing rows.
+            Always rendered (admin-style); no-op when nothing's pending. */}
+        <BackfillButton />
 
         {/* Roadmap (only shown when bank is empty) */}
         {isEmpty && (
