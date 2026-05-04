@@ -70,11 +70,23 @@ export class ApifyError extends Error {
  * "set APIFY_API_TOKEN in Vercel" rather than a generic 500.
  */
 export function getApifyToken(): string {
-  const token = process.env.APIFY_API_TOKEN;
-  if (!token) {
+  const raw = process.env.APIFY_API_TOKEN;
+  if (!raw) {
     throw new ApifyError(
       500,
       'APIFY_API_TOKEN is not set on the server. Add it to the Vercel project env vars and redeploy.'
+    );
+  }
+  // Defensive cleanup: a paste-fumbled env var can land with newlines or
+  // the same value repeated. Either makes the Authorization header
+  // invalid downstream ("is an invalid header value"). Strip whitespace
+  // and take only the first whitespace-delimited token; reject if what
+  // remains doesn't look like an Apify token.
+  const token = raw.trim().split(/\s+/)[0];
+  if (!/^apify_api_[A-Za-z0-9]+$/.test(token)) {
+    throw new ApifyError(
+      500,
+      'APIFY_API_TOKEN env var looks malformed (expected single value starting with apify_api_). Re-paste once into Vercel env vars.'
     );
   }
   return token;
