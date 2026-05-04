@@ -13,11 +13,8 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import type { Editor } from '@tiptap/react';
-import {
-  deleteDraft,
-  publishDraftToBeehiiv,
-  type PublishToBeehiivResult,
-} from '../actions';
+import { deleteDraft, publishDraftToBeehiiv } from '../actions';
+import type { PublishToBeehiivResult } from '../publish-types';
 import {
   tiptapJsonToMarkdown,
   tiptapJsonToText,

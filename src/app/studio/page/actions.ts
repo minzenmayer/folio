@@ -23,18 +23,13 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { eq, and, desc } from 'drizzle-orm';
-// Sprint 15 Wave 4 / Phase 6: outbound Beehiiv publishing.
-import {
-  db as _db_phase6,
-  drafts as _drafts_phase6,
-  connectorAccounts as _connectorAccounts_phase6,
-} from '@/db';
-import { requireUser as _requireUser_phase6 } from '@/lib/auth';
-import { decryptSecret as _decryptSecret_phase6 } from '@/lib/crypto';
-import { createPost as _createBeehiivPost_phase6 } from '@/lib/beehiiv';
-import { tiptapJsonToHtml as _tiptapJsonToHtml_phase6 } from '@/lib/exports';
 import { z } from 'zod';
-import { db, drafts, draftVersions } from '@/db';
+// Sprint 15 Wave 4 / Phase 6: outbound Beehiiv publishing imports.
+import { db, drafts, draftVersions, connectorAccounts } from '@/db';
+import { decryptSecret } from '@/lib/crypto';
+import { createPost as createBeehiivPost } from '@/lib/beehiiv';
+import { tiptapJsonToHtml } from '@/lib/exports';
+import type { PublishToBeehiivResult } from './publish-types';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
@@ -475,73 +470,55 @@ export async function restoreDraftVersion(
 
 // ─── publishDraftToBeehiiv (Sprint 15 Wave 4 / Phase 6) ───────
 // Outbound: take a draft, send it to Beehiiv as a new draft post. The
-// user reviews + sends inside Beehiiv — we never auto-send. First
-// outbound publishing surface; LinkedIn comes after (Phase 7-8).
+// user reviews + sends inside Beehiiv — we never auto-send.
 //
-// Failure modes return as { ok: false } so the menu UI can render a
-// quiet error state without throwing.
+// PublishToBeehiivResult lives in ./publish-types.ts (separate module)
+// because Next.js's RSC compiler confuses type discriminators exported
+// from 'use server' files with client references at runtime.
 
 const publishToBeehiivSchema = z.object({
   draftId: z.string().uuid(),
 });
 
-export type PublishToBeehiivResult =
-  | {
-      ok: true;
-      postId: string;
-      // Web URL on Beehiiv's side. May be null until the post is sent /
-      // published; in draft state Beehiiv usually returns null here.
-      postUrl: string | null;
-      // Title we sent (for the toast / banner copy).
-      title: string;
-    }
-  | {
-      ok: false;
-      reason:
-        | 'no_connector'
-        | 'connector_error'
-        | 'no_publication'
-        | 'empty_draft'
-        | 'api_error';
-      message: string;
-    };
+// Re-export the type so existing imports from '../actions' keep working.
+export type { PublishToBeehiivResult };
 
 export async function publishDraftToBeehiiv(
   input: unknown
 ): Promise<PublishToBeehiivResult> {
-  const user = await _requireUser_phase6();
+  const user = await requireUser();
   const { draftId } = publishToBeehiivSchema.parse(input);
 
   // Load the draft (own-or-throw).
-  const [draft] = await _db_phase6
+  const [draft] = await db
     .select({
-      id: _drafts_phase6.id,
-      contentJson: _drafts_phase6.contentJson,
-      title: _drafts_phase6.title,
+      id: drafts.id,
+      contentJson: drafts.contentJson,
+      title: drafts.title,
     })
-    .from(_drafts_phase6)
+    .from(drafts)
     .where(
       and(
-        eq(_drafts_phase6.id, draftId),
-        eq(_drafts_phase6.userId, user.id)
+        eq(drafts.id, draftId),
+        eq(drafts.userId, user.id)
       )
     )
     .limit(1);
   if (!draft) throw new Error('Draft not found');
 
   // Find the user's connected Beehiiv account.
-  const [account] = await _db_phase6
+  const [account] = await db
     .select({
-      id: _connectorAccounts_phase6.id,
-      status: _connectorAccounts_phase6.status,
-      encryptedSecret: _connectorAccounts_phase6.encryptedSecret,
-      metadata: _connectorAccounts_phase6.metadata,
+      id: connectorAccounts.id,
+      status: connectorAccounts.status,
+      encryptedSecret: connectorAccounts.encryptedSecret,
+      metadata: connectorAccounts.metadata,
     })
-    .from(_connectorAccounts_phase6)
+    .from(connectorAccounts)
     .where(
       and(
-        eq(_connectorAccounts_phase6.userId, user.id),
-        eq(_connectorAccounts_phase6.provider, 'beehiiv')
+        eq(connectorAccounts.userId, user.id),
+        eq(connectorAccounts.provider, 'beehiiv')
       )
     )
     .limit(1);
@@ -583,7 +560,7 @@ export async function publishDraftToBeehiiv(
   }
   let apiKey: string;
   try {
-    apiKey = _decryptSecret_phase6(account.encryptedSecret);
+    apiKey = decryptSecret(account.encryptedSecret);
   } catch (err) {
     console.error('[publishDraftToBeehiiv] decrypt failed', err);
     return {
@@ -596,7 +573,7 @@ export async function publishDraftToBeehiiv(
   // Convert Tiptap JSON → HTML, stripping the first H1 (Beehiiv takes
   // title separately). Use the draft's stored title for the post title;
   // fall back to a generic if absent.
-  const bodyHtml = _tiptapJsonToHtml_phase6(draft.contentJson, {
+  const bodyHtml = tiptapJsonToHtml(draft.contentJson, {
     stripFirstH1: true,
   });
   if (!bodyHtml.trim()) {
@@ -610,7 +587,7 @@ export async function publishDraftToBeehiiv(
   const title = (draft.title ?? '').trim() || 'Untitled draft';
 
   try {
-    const created = await _createBeehiivPost_phase6(
+    const created = await createBeehiivPost(
       apiKey,
       meta.publicationId,
       {
