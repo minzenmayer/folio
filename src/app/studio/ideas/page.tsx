@@ -1,10 +1,10 @@
-// Thoughtbed · Library — ideas list (was "The Garden" before Sprint 14).
+// Thoughtbed · Garden — ideas list.
 // The route stays /studio/ideas (matches DB tables + server actions);
-// the surface label is now "Library" to match Ghostbase.
+// the sidebar + header label is "Garden" — Phase 11 brand alignment.
 
 import Link from 'next/link';
 import { eq, sql, desc } from 'drizzle-orm';
-import { db, ideas, captures } from '@/db';
+import { db, ideas, captures, extractedIdeas } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { NewIdeaForm } from './NewIdeaForm';
 
@@ -34,8 +34,17 @@ export default async function IdeasPage() {
         WHERE ${captures.ideaId} = ${ideas.id}
         AND ${captures.status} = 'attached'
       )`,
+      // Direction B (2026-05-04): if this idea was promoted from an
+      // extracted_ideas row, surface the source kind so the card can
+      // render a "from your newsletter / vault / LinkedIn" line.
+      sourceExtractedIdeaId: ideas.sourceExtractedIdeaId,
+      sourceKind: extractedIdeas.sourceKind,
     })
     .from(ideas)
+    .leftJoin(
+      extractedIdeas,
+      eq(ideas.sourceExtractedIdeaId, extractedIdeas.id)
+    )
     .where(eq(ideas.userId, user.id))
     .orderBy(desc(ideas.lastVisitedAt));
 
@@ -44,7 +53,7 @@ export default async function IdeasPage() {
       <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
         <div className="mb-8">
           <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
-            Library
+            Garden
           </h1>
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {rows.length === 0
@@ -92,9 +101,23 @@ export default async function IdeasPage() {
                         {idea.essence}
                       </p>
                     )}
-                    <div className="font-mono text-[10px] text-tag tracking-[0.04em]">
-                      {idea.attached}{' '}
-                      {idea.attached === 1 ? 'capture' : 'captures'} attached
+                    <div className="font-mono text-[10px] text-tag tracking-[0.04em] flex items-center gap-3 flex-wrap">
+                      <span>
+                        {idea.attached}{' '}
+                        {idea.attached === 1 ? 'capture' : 'captures'} attached
+                      </span>
+                      {idea.sourceExtractedIdeaId && idea.sourceKind && (
+                        <span className="text-tag/70">
+                          · promoted from{' '}
+                          {idea.sourceKind === 'newsletter_issue'
+                            ? 'your newsletter'
+                            : idea.sourceKind === 'obsidian_note'
+                              ? 'vault'
+                              : idea.sourceKind === 'linkedin_post'
+                                ? 'LinkedIn'
+                                : 'a source'}
+                        </span>
+                      )}
                     </div>
                   </Link>
                 </li>

@@ -74,6 +74,14 @@ export const ideas = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
     lastVisitedAt: timestamp('last_visited_at', { withTimezone: true }),
     lastEvolvedAt: timestamp('last_evolved_at', { withTimezone: true }),
+
+    // Direction B (2026-05-04): when this idea was promoted from an
+    // extracted_ideas row, link back so the Garden card can render
+    // "from <source>" + click-through. Nullable for hand-authored ideas.
+    sourceExtractedIdeaId: uuid('source_extracted_idea_id').references(
+      () => extractedIdeas.id,
+      { onDelete: 'set null' }
+    ),
   },
   (table) => ({
     userVisitedIdx: index('idx_ideas_user_visited').on(
@@ -625,6 +633,17 @@ export const extractedIdeas = pgTable(
 
     sourceRef: jsonb('source_ref').notNull().default({}),
 
+    // Direction B (2026-05-04): triage flow.
+    // 'pending' (default) — fresh extraction, awaiting user attention.
+    // 'promoted' — user moved this into the Garden as a hand-curated idea.
+    //              The matching ideas row carries source_extracted_idea_id.
+    // 'dismissed' — user explicitly hid; never resurface.
+    // 'snoozed' — hide until snooze_until <= now(); the default Insights
+    //             query unhides it automatically when ripe.
+    triageStatus: text('triage_status').notNull().default('pending'),
+    triagedAt: timestamp('triaged_at', { withTimezone: true }),
+    snoozeUntil: timestamp('snooze_until', { withTimezone: true }),
+
     embedding: vector('embedding', { dimensions: 1536 }),
 
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -664,6 +683,10 @@ export const extractedIdeas = pgTable(
     embeddingIdx: index('idx_extracted_ideas_embedding').using(
       'hnsw',
       table.embedding.op('vector_cosine_ops')
+    ),
+    userTriageIdx: index('idx_extracted_ideas_user_triage').on(
+      table.userId,
+      table.triageStatus
     ),
   })
 );
