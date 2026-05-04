@@ -28,6 +28,11 @@ import { z } from 'zod';
 import { db, drafts, draftVersions, connectorAccounts } from '@/db';
 import { decryptSecret } from '@/lib/crypto';
 import { createPost as createBeehiivPost } from '@/lib/beehiiv';
+import type {
+  UpdateDraftResult,
+  DraftVersionRow,
+  RestoreDraftResult,
+} from './action-types';
 import { tiptapJsonToHtml } from '@/lib/exports';
 import type { PublishToBeehiivResult } from './publish-types';
 import { requireUser } from '@/lib/auth';
@@ -218,22 +223,6 @@ const updateDraftSchema = z.object({
   contentJson: z.unknown(),
 });
 
-export type UpdateDraftResult =
-  | {
-      ok: true;
-      savedAt: string;
-      title: string | null;
-      version: number;
-    }
-  | {
-      ok: false;
-      conflict: true;
-      currentDoc: unknown;
-      currentVersion: number;
-      currentTitle: string | null;
-      currentUpdatedAt: string;
-    };
-
 export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
   const user = await requireUser();
   const data = updateDraftSchema.parse(input);
@@ -346,13 +335,6 @@ export async function listDrafts() {
 // snapshots. Limit 50 — a deeper history would mean a different UX.
 const listDraftVersionsSchema = z.object({ draftId: z.string().uuid() });
 
-export type DraftVersionRow = {
-  id: string;
-  source: string;
-  createdAt: string;
-  contentJson: unknown;
-};
-
 export async function listDraftVersions(
   input: unknown
 ): Promise<DraftVersionRow[]> {
@@ -395,13 +377,6 @@ const restoreDraftVersionSchema = z.object({
   draftId: z.string().uuid(),
   versionId: z.string().uuid(),
 });
-
-export type RestoreDraftResult = {
-  savedAt: string;
-  title: string | null;
-  version: number;
-  content: unknown;
-};
 
 export async function restoreDraftVersion(
   input: unknown
@@ -481,6 +456,11 @@ const publishToBeehiivSchema = z.object({
 });
 
 // Re-export the type so existing imports from '../actions' keep working.
+export type {
+  UpdateDraftResult,
+  DraftVersionRow,
+  RestoreDraftResult,
+} from './action-types';
 export type { PublishToBeehiivResult };
 
 export async function publishDraftToBeehiiv(
