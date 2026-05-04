@@ -25,9 +25,30 @@ import {
   newsletterIssues,
   obsidianNotes,
   linkedinPosts,
+  gmailMessages,
 } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { InsightRow } from './InsightRow';
+import { GmailMessageRow } from './GmailMessageRow';
+
+type Tab = 'ideas' | 'gmail';
+
+function parseTab(raw: string | string[] | undefined): Tab {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return v === 'gmail' ? 'gmail' : 'ideas';
+}
+
+function gmailHrefFor(view: View): string {
+  return view === 'pending'
+    ? '/studio/insights?tab=gmail'
+    : `/studio/insights?tab=gmail&view=${view}`;
+}
+
+function ideasHrefFor(view: View): string {
+  return view === 'pending'
+    ? '/studio/insights'
+    : `/studio/insights?view=${view}`;
+}
 
 type View = 'pending' | 'promoted' | 'dismissed' | 'all';
 
@@ -47,19 +68,97 @@ function parseView(raw: string | string[] | undefined): View {
 export default async function InsightsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string | string[] }>;
+  searchParams: Promise<{ view?: string | string[]; tab?: string | string[] }>;
 }) {
   const user = await requireUser();
-  const { view: viewParam } = await searchParams;
-  const view = parseView(viewParam);
+  const params = await searchParams;
+  const tab = parseTab(params.tab);
+  const view = parseView(params.view);
 
-  // Build the WHERE clause per view.
-  //   · pending: triage_status = 'pending'
-  //              OR (triage_status = 'snoozed' AND snooze_until <= now())
-  //   · promoted: triage_status = 'promoted'
-  //   · dismissed: triage_status = 'dismissed'
-  //   · all: every row owned by user
-  const userScope = eq(extractedIdeas.userId, user.id);
+  // Cheap counts for the tab nav badges. The full per-status chip
+  // counts for the active tab live inside the body components.
+  const [{ ideasPending = 0 } = {}] = (await db
+    .select({
+      ideasPending: sql<number>`SUM(CASE WHEN ${extractedIdeas.triageStatus} = 'pending' THEN 1 ELSE 0 END)::int`,
+    })
+    .from(extractedIdeas)
+    .where(eq(extractedIdeas.userId, user.id))) as Array<{ ideasPending: number | null }>;
+
+  const [{ gmailPending = 0 } = {}] = (await db
+    .select({
+      gmailPending: sql<number>`SUM(CASE WHEN ${gmailMessages.status} = 'pending' THEN 1 ELSE 0 END)::int`,
+    })
+    .from(gmailMessages)
+    .where(eq(gmailMessages.userId, user.id))) as Array<{ gmailPending: number | null }>;
+
+  return (
+    <section>
+      <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
+        <div className="mb-8">
+          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
+            Insights
+          </h1>
+          <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[60ch]">
+            Claims the system pulled out of your sources. Triage the
+            queue: <strong className="text-ink">promote</strong> the ones that hit (they grow into Ideas
+            in the Garden), <strong className="text-ink">dismiss</strong> the ones that don&rsquo;t, <strong className="text-ink">snooze</strong> the
+            maybes for 30 days. The system learns your taste over time.
+          </p>
+        </div>
+
+        {/* Phase 13: tab switcher between auto-extracted ideas (default)
+            and Gmail-detected newsletter messages awaiting triage. */}
+        <nav
+          className="flex items-center gap-2 mb-6 border-b border-rule"
+          aria-label="Insights tabs"
+        >
+          <Link
+            href={ideasHrefFor(view)}
+            className={`font-mono text-[11px] tracking-[0.18em] uppercase px-3 py-2 border-b-2 -mb-px transition-colors ${
+              tab === 'ideas'
+                ? 'border-ink text-ink'
+                : 'border-transparent text-ink-soft hover:text-ink'
+            }`}
+          >
+            Ideas
+            <span className="ml-1.5 opacity-60 normal-case tracking-normal text-[10px]">
+              {Number(ideasPending ?? 0)}
+            </span>
+          </Link>
+          <Link
+            href={gmailHrefFor(view)}
+            className={`font-mono text-[11px] tracking-[0.18em] uppercase px-3 py-2 border-b-2 -mb-px transition-colors ${
+              tab === 'gmail'
+                ? 'border-ink text-ink'
+                : 'border-transparent text-ink-soft hover:text-ink'
+            }`}
+          >
+            Gmail
+            <span className="ml-1.5 opacity-60 normal-case tracking-normal text-[10px]">
+              {Number(gmailPending ?? 0)}
+            </span>
+          </Link>
+        </nav>
+
+        {tab === 'gmail' ? (
+          <GmailTabBody userId={user.id} view={view} />
+        ) : (
+          <IdeasTabBody userId={user.id} view={view} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── IdeasTabBody — original triage flow over extracted_ideas ───
+async function IdeasTabBody({
+  userId,
+  view,
+}: {
+  userId: string;
+  view: View;
+}) {
+  const userScope = eq(extractedIdeas.userId, userId);
   const whereByView =
     view === 'pending'
       ? and(
@@ -117,24 +216,18 @@ export default async function InsightsPage({
     )
     .limit(200);
 
-  // Counts for the filter chips. Cheap because we already have the
-  // index on (user_id, triage_status).
   const counts = await db
     .select({
       status: extractedIdeas.triageStatus,
       n: sql<number>`count(*)::int`,
     })
     .from(extractedIdeas)
-    .where(eq(extractedIdeas.userId, user.id))
+    .where(eq(extractedIdeas.userId, userId))
     .groupBy(extractedIdeas.triageStatus);
-
   const countMap: Record<string, number> = Object.fromEntries(
     counts.map((c) => [c.status, Number(c.n)])
   );
-  const total = Object.values(countMap).reduce((a, b) => a + b, 0);
-  // The "pending" chip surfaces both pending + ripe-snoozed; we approximate
-  // with raw 'pending' count because counting the snoozed-but-ripe
-  // subset would need a second query for almost no UX value.
+  const total = Object.values(countMap).reduce((a, b) => a + Number(b), 0);
   const chipCounts: Record<View, number> = {
     pending: countMap['pending'] ?? 0,
     promoted: countMap['promoted'] ?? 0,
@@ -143,64 +236,161 @@ export default async function InsightsPage({
   };
 
   return (
-    <section>
-      <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
-        <div className="mb-8">
-          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
-            Insights
-          </h1>
-          <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[60ch]">
-            Claims the system pulled out of your sources. Triage the
-            queue: <strong className="text-ink">promote</strong> the ones that hit (they grow into Ideas
-            in the Garden), <strong className="text-ink">dismiss</strong> the ones that don&rsquo;t, <strong className="text-ink">snooze</strong> the
-            maybes for 30 days. The system learns your taste over time.
+    <>
+      <nav
+        className="flex items-center gap-2 mb-8 flex-wrap"
+        aria-label="Filter insights by triage state"
+      >
+        {(['pending', 'promoted', 'dismissed', 'all'] as View[]).map((v) => {
+          const active = view === v;
+          const href = ideasHrefFor(v);
+          return (
+            <Link
+              key={v}
+              href={href}
+              className={`font-mono text-[10px] tracking-[0.18em] uppercase rounded-full px-3 py-1.5 border transition-colors ${
+                active
+                  ? 'bg-ink text-bg border-ink'
+                  : 'bg-paper text-ink-soft border-rule hover:text-ink hover:border-ink'
+              }`}
+            >
+              {VIEW_LABEL[v]}
+              <span className="ml-1.5 opacity-70">{chipCounts[v]}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {rows.length === 0 ? (
+        <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper">
+          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-2">
+            {view === 'pending' ? 'Inbox zero' : 'Empty'}
+          </div>
+          <p className="font-sans text-[14px] text-tag">
+            {view === 'pending'
+              ? 'No insights waiting. New claims arrive as your sources sync.'
+              : `Nothing in ${VIEW_LABEL[view].toLowerCase()}.`}
           </p>
         </div>
+      ) : (
+        <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
+          {rows.map((row) => (
+            <InsightRow key={row.id} row={row} view={view} />
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
 
-        {/* Filter chips */}
-        <nav
-          className="flex items-center gap-2 mb-8 flex-wrap"
-          aria-label="Filter insights by triage state"
-        >
-          {(['pending', 'promoted', 'dismissed', 'all'] as View[]).map((v) => {
-            const active = view === v;
-            const href = v === 'pending' ? '/studio/insights' : `/studio/insights?view=${v}`;
-            return (
-              <Link
-                key={v}
-                href={href}
-                className={`font-mono text-[10px] tracking-[0.18em] uppercase rounded-full px-3 py-1.5 border transition-colors ${
-                  active
-                    ? 'bg-ink text-bg border-ink'
-                    : 'bg-paper text-ink-soft border-rule hover:text-ink hover:border-ink'
-                }`}
-              >
-                {VIEW_LABEL[v]}
-                <span className="ml-1.5 opacity-70">{chipCounts[v]}</span>
-              </Link>
-            );
-          })}
-        </nav>
+// ─── GmailTabBody — Phase 13 triage queue for gmail_messages ───
+async function GmailTabBody({
+  userId,
+  view,
+}: {
+  userId: string;
+  view: View;
+}) {
+  // Per-status counts for the chips. Same shape as IdeasTabBody.
+  const counts = await db
+    .select({
+      status: gmailMessages.status,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(gmailMessages)
+    .where(eq(gmailMessages.userId, userId))
+    .groupBy(gmailMessages.status);
+  const countMap: Record<string, number> = Object.fromEntries(
+    counts.map((c) => [c.status, Number(c.n)])
+  );
+  const total = Object.values(countMap).reduce((a, b) => a + Number(b), 0);
+  const chipCounts: Record<View, number> = {
+    pending: countMap['pending'] ?? 0,
+    promoted: countMap['promoted'] ?? 0,
+    dismissed: countMap['dismissed'] ?? 0,
+    all: total,
+  };
+  const userScope = eq(gmailMessages.userId, userId);
+  const whereByView =
+    view === 'pending'
+      ? and(
+          userScope,
+          or(
+            eq(gmailMessages.status, 'pending'),
+            and(
+              eq(gmailMessages.status, 'snoozed'),
+              or(
+                isNull(gmailMessages.snoozeUntil),
+                lte(gmailMessages.snoozeUntil, sql`now()`)
+              )
+            )
+          )
+        )
+      : view === 'all'
+        ? userScope
+        : and(userScope, eq(gmailMessages.status, view));
 
-        {rows.length === 0 ? (
-          <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper">
-            <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-2">
-              {view === 'pending' ? 'Inbox zero' : 'Empty'}
-            </div>
-            <p className="font-sans text-[14px] text-tag">
-              {view === 'pending'
-                ? 'No insights waiting. New claims arrive as your sources sync.'
-                : `Nothing in ${VIEW_LABEL[view].toLowerCase()}.`}
-            </p>
+  const rows = await db
+    .select({
+      id: gmailMessages.id,
+      subject: gmailMessages.subject,
+      fromAddress: gmailMessages.fromAddress,
+      fromName: gmailMessages.fromName,
+      snippet: gmailMessages.snippet,
+      bodyText: gmailMessages.bodyText,
+      newsletterKind: gmailMessages.newsletterKind,
+      status: gmailMessages.status,
+      postedAt: gmailMessages.postedAt,
+    })
+    .from(gmailMessages)
+    .where(whereByView)
+    .orderBy(desc(gmailMessages.postedAt))
+    .limit(200);
+
+  return (
+    <>
+      <nav
+        className="flex items-center gap-2 mb-8 flex-wrap"
+        aria-label="Filter Gmail messages by triage state"
+      >
+        {(['pending', 'promoted', 'dismissed', 'all'] as View[]).map((v) => {
+          const active = view === v;
+          const href = gmailHrefFor(v);
+          return (
+            <Link
+              key={v}
+              href={href}
+              className={`font-mono text-[10px] tracking-[0.18em] uppercase rounded-full px-3 py-1.5 border transition-colors ${
+                active
+                  ? 'bg-ink text-bg border-ink'
+                  : 'bg-paper text-ink-soft border-rule hover:text-ink hover:border-ink'
+              }`}
+            >
+              {VIEW_LABEL[v]}
+              <span className="ml-1.5 opacity-70">{chipCounts[v]}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {rows.length === 0 ? (
+        <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper">
+          <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-2">
+            {view === 'pending' ? 'No newsletters waiting' : 'Empty'}
           </div>
-        ) : (
-          <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
-            {rows.map((row) => (
-              <InsightRow key={row.id} row={row} view={view} />
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
+          <p className="font-sans text-[14px] text-tag">
+            {view === 'pending'
+              ? 'Connect Gmail in Settings → Connectors and your subscribed newsletters will land here for triage.'
+              : `Nothing in ${VIEW_LABEL[view].toLowerCase()}.`}
+          </p>
+        </div>
+      ) : (
+        <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
+          {rows.map((row) => (
+            <GmailMessageRow key={row.id} row={row} />
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
