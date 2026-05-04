@@ -54,6 +54,14 @@ const NAV_ITEMS: Array<{
     matches: (p) => p.startsWith('/studio/ideas'),
   },
   {
+    // Sprint 15 Wave 4 / Phase 7: browse view for extracted_ideas (the
+    // curated layer extractIdeas() pulls out of newsletters + vault
+    // notes during sync). Library = hand-authored. Insights = curated
+    // by the system from your sources.
+    label: 'Insights',
+    href: '/studio/insights',
+  },
+  {
     label: 'Knowledge',
     href: '/studio/knowledge',
   },
