@@ -380,3 +380,159 @@ export function safeFilename(title: string | null, fallback: string): string {
     .toLowerCase()
     .slice(0, 80);
 }
+
+
+// ─── tiptapJsonToHtml (Sprint 15 Wave 4 / Phase 6) ──────────────
+// Mirror of tiptapJsonToMarkdown's shape, but emits HTML for use by
+// outbound publishers (Beehiiv body_content, future LinkedIn body, etc.).
+// Covers the starter-kit node + mark types this app's editor produces.
+//
+// The optional `stripFirstH1` flag drops the first heading-level-1 from
+// the rendered output — useful when the publisher takes the title in a
+// separate field (Beehiiv does), so the title doesn't render twice.
+
+export function tiptapJsonToHtml(
+  doc: unknown,
+  opts: { stripFirstH1?: boolean } = {}
+): string {
+  if (!doc || typeof doc !== 'object') return '';
+  const root = doc as TiptapNode;
+  const out: string[] = [];
+  let firstH1Stripped = false;
+  for (const node of root.content || []) {
+    if (
+      opts.stripFirstH1 &&
+      !firstH1Stripped &&
+      node.type === 'heading' &&
+      (node.attrs?.level as number | undefined) === 1
+    ) {
+      firstH1Stripped = true;
+      continue;
+    }
+    renderHtmlBlock(node, out);
+  }
+  return out.join('').trim();
+}
+
+type TiptapNode = {
+  type?: string;
+  text?: string;
+  attrs?: Record<string, unknown>;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+  content?: TiptapNode[];
+};
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function renderHtmlBlock(node: TiptapNode, out: string[]): void {
+  switch (node.type) {
+    case 'paragraph':
+      out.push('<p>');
+      out.push(renderHtmlInline(node.content || []));
+      out.push('</p>');
+      return;
+    case 'heading': {
+      const lvl = Math.min(
+        Math.max((node.attrs?.level as number | undefined) ?? 1, 1),
+        6
+      );
+      out.push(`<h${lvl}>`);
+      out.push(renderHtmlInline(node.content || []));
+      out.push(`</h${lvl}>`);
+      return;
+    }
+    case 'bulletList':
+      out.push('<ul>');
+      for (const item of node.content || []) renderHtmlBlock(item, out);
+      out.push('</ul>');
+      return;
+    case 'orderedList': {
+      const start = (node.attrs?.start as number | undefined) ?? 1;
+      out.push(start === 1 ? '<ol>' : `<ol start="${start}">`);
+      for (const item of node.content || []) renderHtmlBlock(item, out);
+      out.push('</ol>');
+      return;
+    }
+    case 'listItem':
+      out.push('<li>');
+      for (const child of node.content || []) {
+        // Tiptap wraps list-item content in paragraphs; for HTML output
+        // we want the inline content directly inside <li> for cleaner
+        // markup (most email/web renderers handle either, but flat is
+        // safer cross-client).
+        if (child.type === 'paragraph') {
+          out.push(renderHtmlInline(child.content || []));
+        } else {
+          renderHtmlBlock(child, out);
+        }
+      }
+      out.push('</li>');
+      return;
+    case 'blockquote':
+      out.push('<blockquote>');
+      for (const child of node.content || []) renderHtmlBlock(child, out);
+      out.push('</blockquote>');
+      return;
+    case 'codeBlock':
+      out.push('<pre><code>');
+      out.push(escapeHtml(extractTextContent(node)));
+      out.push('</code></pre>');
+      return;
+    case 'horizontalRule':
+      out.push('<hr />');
+      return;
+    case 'hardBreak':
+      out.push('<br />');
+      return;
+    default:
+      // Unknown block: serialize text content as a plain paragraph so
+      // we never lose user content even if the parser meets a node we
+      // didn't anticipate.
+      const text = extractTextContent(node);
+      if (text) out.push(`<p>${escapeHtml(text)}</p>`);
+      return;
+  }
+}
+
+function renderHtmlInline(nodes: TiptapNode[]): string {
+  const out: string[] = [];
+  for (const node of nodes) {
+    if (node.type === 'hardBreak') {
+      out.push('<br />');
+      continue;
+    }
+    if (node.type !== 'text' || typeof node.text !== 'string') continue;
+    let chunk = escapeHtml(node.text);
+    // Apply marks innermost-first: bold/italic/strike/code/link.
+    for (const mark of node.marks || []) {
+      switch (mark.type) {
+        case 'bold':
+          chunk = `<strong>${chunk}</strong>`;
+          break;
+        case 'italic':
+          chunk = `<em>${chunk}</em>`;
+          break;
+        case 'strike':
+          chunk = `<s>${chunk}</s>`;
+          break;
+        case 'code':
+          chunk = `<code>${chunk}</code>`;
+          break;
+        case 'link': {
+          const href = String(mark.attrs?.href ?? '');
+          chunk = `<a href="${escapeAttr(href)}">${chunk}</a>`;
+          break;
+        }
+      }
+    }
+    out.push(chunk);
+  }
+  return out.join('');
+}
+
+function extractTextContent(node: TiptapNode): string {
+  if (typeof node.text === 'string') return node.text;
+  return (node.content || []).map(extractTextContent).join('');
+}

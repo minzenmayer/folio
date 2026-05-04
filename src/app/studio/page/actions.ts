@@ -23,6 +23,16 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { eq, and, desc } from 'drizzle-orm';
+// Sprint 15 Wave 4 / Phase 6: outbound Beehiiv publishing.
+import {
+  db as _db_phase6,
+  drafts as _drafts_phase6,
+  connectorAccounts as _connectorAccounts_phase6,
+} from '@/db';
+import { requireUser as _requireUser_phase6 } from '@/lib/auth';
+import { decryptSecret as _decryptSecret_phase6 } from '@/lib/crypto';
+import { createPost as _createBeehiivPost_phase6 } from '@/lib/beehiiv';
+import { tiptapJsonToHtml as _tiptapJsonToHtml_phase6 } from '@/lib/exports';
 import { z } from 'zod';
 import { db, drafts, draftVersions } from '@/db';
 import { requireUser } from '@/lib/auth';
@@ -460,4 +470,166 @@ export async function restoreDraftVersion(
     version: newVersion,
     content: version.contentJson,
   };
+}
+
+
+// ─── publishDraftToBeehiiv (Sprint 15 Wave 4 / Phase 6) ───────
+// Outbound: take a draft, send it to Beehiiv as a new draft post. The
+// user reviews + sends inside Beehiiv — we never auto-send. First
+// outbound publishing surface; LinkedIn comes after (Phase 7-8).
+//
+// Failure modes return as { ok: false } so the menu UI can render a
+// quiet error state without throwing.
+
+const publishToBeehiivSchema = z.object({
+  draftId: z.string().uuid(),
+});
+
+export type PublishToBeehiivResult =
+  | {
+      ok: true;
+      postId: string;
+      // Web URL on Beehiiv's side. May be null until the post is sent /
+      // published; in draft state Beehiiv usually returns null here.
+      postUrl: string | null;
+      // Title we sent (for the toast / banner copy).
+      title: string;
+    }
+  | {
+      ok: false;
+      reason:
+        | 'no_connector'
+        | 'connector_error'
+        | 'no_publication'
+        | 'empty_draft'
+        | 'api_error';
+      message: string;
+    };
+
+export async function publishDraftToBeehiiv(
+  input: unknown
+): Promise<PublishToBeehiivResult> {
+  const user = await _requireUser_phase6();
+  const { draftId } = publishToBeehiivSchema.parse(input);
+
+  // Load the draft (own-or-throw).
+  const [draft] = await _db_phase6
+    .select({
+      id: _drafts_phase6.id,
+      contentJson: _drafts_phase6.contentJson,
+      title: _drafts_phase6.title,
+    })
+    .from(_drafts_phase6)
+    .where(
+      and(
+        eq(_drafts_phase6.id, draftId),
+        eq(_drafts_phase6.userId, user.id)
+      )
+    )
+    .limit(1);
+  if (!draft) throw new Error('Draft not found');
+
+  // Find the user's connected Beehiiv account.
+  const [account] = await _db_phase6
+    .select({
+      id: _connectorAccounts_phase6.id,
+      status: _connectorAccounts_phase6.status,
+      encryptedSecret: _connectorAccounts_phase6.encryptedSecret,
+      metadata: _connectorAccounts_phase6.metadata,
+    })
+    .from(_connectorAccounts_phase6)
+    .where(
+      and(
+        eq(_connectorAccounts_phase6.userId, user.id),
+        eq(_connectorAccounts_phase6.provider, 'beehiiv')
+      )
+    )
+    .limit(1);
+
+  if (!account) {
+    return {
+      ok: false,
+      reason: 'no_connector',
+      message: 'Connect Beehiiv first (Settings → Connectors).',
+    };
+  }
+  if (account.status !== 'connected') {
+    return {
+      ok: false,
+      reason: 'connector_error',
+      message:
+        'Beehiiv connection is not active. Reconnect in Settings → Connectors.',
+    };
+  }
+
+  const meta = (account.metadata ?? {}) as {
+    publicationId?: string;
+  };
+  if (!meta.publicationId) {
+    return {
+      ok: false,
+      reason: 'no_publication',
+      message:
+        'Beehiiv account has no publication on file. Reconnect in Settings → Connectors.',
+    };
+  }
+
+  if (!account.encryptedSecret) {
+    return {
+      ok: false,
+      reason: 'connector_error',
+      message: 'Beehiiv API key is missing. Reconnect.',
+    };
+  }
+  let apiKey: string;
+  try {
+    apiKey = _decryptSecret_phase6(account.encryptedSecret);
+  } catch (err) {
+    console.error('[publishDraftToBeehiiv] decrypt failed', err);
+    return {
+      ok: false,
+      reason: 'connector_error',
+      message: 'Could not decrypt Beehiiv key. Reconnect.',
+    };
+  }
+
+  // Convert Tiptap JSON → HTML, stripping the first H1 (Beehiiv takes
+  // title separately). Use the draft's stored title for the post title;
+  // fall back to a generic if absent.
+  const bodyHtml = _tiptapJsonToHtml_phase6(draft.contentJson, {
+    stripFirstH1: true,
+  });
+  if (!bodyHtml.trim()) {
+    return {
+      ok: false,
+      reason: 'empty_draft',
+      message: 'Draft is empty — nothing to publish.',
+    };
+  }
+
+  const title = (draft.title ?? '').trim() || 'Untitled draft';
+
+  try {
+    const created = await _createBeehiivPost_phase6(
+      apiKey,
+      meta.publicationId,
+      {
+        title,
+        bodyHtml,
+        audience: 'all',
+        status: 'draft', // never auto-send
+      }
+    );
+    return {
+      ok: true,
+      postId: created.id,
+      postUrl: created.web_url ?? null,
+      title,
+    };
+  } catch (err) {
+    console.error('[publishDraftToBeehiiv] api error', err);
+    const message =
+      err instanceof Error ? err.message : 'Beehiiv publish failed';
+    return { ok: false, reason: 'api_error', message };
+  }
 }

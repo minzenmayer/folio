@@ -13,7 +13,11 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import type { Editor } from '@tiptap/react';
-import { deleteDraft } from '../actions';
+import {
+  deleteDraft,
+  publishDraftToBeehiiv,
+  type PublishToBeehiivResult,
+} from '../actions';
 import {
   tiptapJsonToMarkdown,
   tiptapJsonToText,
@@ -43,6 +47,10 @@ export function DraftMeta({
   const [menuOpen, setMenuOpen] = useState(false);
   const [copyFlash, setCopyFlash] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
+  // Sprint 15 Wave 4 / Phase 6: Beehiiv outbound publish state.
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] =
+    useState<PublishToBeehiivResult | null>(null);
 
   const handleDelete = () => {
     if (!confirming) {
@@ -53,6 +61,22 @@ export function DraftMeta({
     startTransition(async () => {
       await deleteDraft({ draftId });
     });
+  };
+
+  // Sprint 15 Wave 4 / Phase 6: publish current draft to Beehiiv as a
+  // draft post. Beehiiv-side review and send happens in their UI; we
+  // never auto-send.
+  const handlePublishToBeehiiv = async () => {
+    setMenuOpen(false);
+    setPublishing(true);
+    setPublishResult(null);
+    try {
+      const result = await publishDraftToBeehiiv({ draftId });
+      setPublishResult(result);
+      setTimeout(() => setPublishResult(null), 8000);
+    } finally {
+      setPublishing(false);
+    }
   };
 
   useEffect(() => {
@@ -161,6 +185,27 @@ export function DraftMeta({
           </span>
         )}
 
+        {publishResult?.ok && (
+          <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-accent">
+            · drafted on beehiiv
+            {publishResult.postUrl && (
+              <a
+                className="ml-2 underline underline-offset-2 hover:text-ink"
+                href={publishResult.postUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                open ↗
+              </a>
+            )}
+          </span>
+        )}
+        {publishResult && !publishResult.ok && (
+          <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag">
+            · {publishResult.message}
+          </span>
+        )}
+
         <div ref={menuWrapRef} className="relative">
           <button
             type="button"
@@ -199,6 +244,12 @@ export function DraftMeta({
               />
               <MenuDivider />
               <MenuItem onClick={showHistory} label="Show history" />
+              <MenuDivider />
+              <MenuItem
+                onClick={handlePublishToBeehiiv}
+                disabled={publishing}
+                label={publishing ? 'Publishing…' : 'Publish to Beehiiv'}
+              />
             </div>
           )}
         </div>

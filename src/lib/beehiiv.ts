@@ -343,3 +343,60 @@ export async function deleteWebhook(
     throw err;
   }
 }
+
+
+// ─── createPost (Sprint 15 Wave 4 / Phase 6) ──────────────────
+// Beehiiv outbound: create a new post in the publication. Default status
+// is 'draft' so an accidental click never blasts an unfinished thought
+// to subscribers. The user reviews + sends inside Beehiiv.
+//
+// Endpoint: POST /v2/publications/{publicationId}/posts
+// Docs: https://developers.beehiiv.com/api-reference/posts/create
+//
+// Beehiiv's content-richness here is limited compared to their editor —
+// the API takes html in body_content. Tiptap → HTML conversion lives in
+// src/lib/exports.ts:tiptapJsonToHtml. The H1 is stripped at convert
+// time because Beehiiv takes the title in a separate field.
+
+export type BeehiivCreatePostInput = {
+  title: string;
+  subtitle?: string;
+  bodyHtml: string;
+  audience?: 'free' | 'premium' | 'all';
+  // 'draft' | 'confirmed' (Beehiiv's post-status terminology). Default
+  // 'draft' — never auto-send from this codepath.
+  status?: 'draft' | 'confirmed';
+};
+
+export type BeehiivCreatedPost = {
+  id: string;
+  title: string;
+  status: string;
+  web_url: string | null;
+};
+
+export async function createPost(
+  apiKey: string,
+  publicationId: string,
+  input: BeehiivCreatePostInput
+): Promise<BeehiivCreatedPost> {
+  const body: Record<string, unknown> = {
+    title: input.title,
+    body_content: input.bodyHtml,
+    audience: input.audience ?? 'all',
+    status: input.status ?? 'draft',
+  };
+  if (input.subtitle) body.subtitle = input.subtitle;
+
+  const res = await callBeehiiv<{ data: BeehiivCreatedPost }>(
+    apiKey,
+    `/v2/publications/${encodeURIComponent(publicationId)}/posts`,
+    {
+      method: 'POST',
+      // callBeehiiv stringifies the body and sets Content-Type when
+      // body is present; pass the object directly.
+      body,
+    }
+  );
+  return res.data;
+}
