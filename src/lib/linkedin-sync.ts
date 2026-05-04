@@ -450,9 +450,14 @@ export function deriveTitleFromBody(body: string): string {
 export function cleanLinkedinPostText(content: string): string {
   if (!content) return '';
   return content
-    .replace(/ | /g, '\n')
-    .replace(/ /g, ' ')
-    .replace(/\s*…see more$/i, '')
+    // U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR) — used
+    // as raw chars in a regex literal they're treated as line
+    // terminators by the parser and break the build (SWC). Encode them.
+    .replace(/[\u2028\u2029]/g, '\n')
+    // U+00A0 (NON-BREAKING SPACE) — LinkedIn loves these in pasted copy.
+    .replace(/\u00a0/g, ' ')
+    // U+2026 (HORIZONTAL ELLIPSIS) plus the ASCII-dotted variant.
+    .replace(/\s*\u2026see more$/i, '')
     .replace(/\s*\.\.\.see more$/i, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
