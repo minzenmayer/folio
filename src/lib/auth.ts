@@ -13,6 +13,7 @@ export async function requireUser(): Promise<User> {
     redirect('/sign-in');
   }
 
+  // Fast path: row already mirrored.
   const [existing] = await db
     .select()
     .from(users)
@@ -22,6 +23,15 @@ export async function requireUser(): Promise<User> {
   if (existing) return existing;
 
   // Webhook hasn't fired yet — mirror inline.
+  //
+  // Phase 11.1 fix (2026-05-04): the prior naive INSERT ... RETURNING
+  // here raced with /api/webhooks/clerk. On the very first sign-in via
+  // Clerk Production, the webhook's user.created handler could land
+  // between our SELECT and our INSERT, exploding on the
+  // users_clerk_id_key unique constraint and 500'ing /studio. Switching
+  // to an upsert lets the loser of the race fall through cleanly. The
+  // SET clause refreshes email/name from Clerk on every miss too, which
+  // keeps the mirror eventually-consistent without a separate sync job.
   const clerk = await currentUser();
   if (!clerk) {
     redirect('/sign-in');
@@ -34,6 +44,10 @@ export async function requireUser(): Promise<User> {
   const [created] = await db
     .insert(users)
     .values({ clerkId, email, name })
+    .onConflictDoUpdate({
+      target: users.clerkId,
+      set: { email, name },
+    })
     .returning();
 
   return created;
