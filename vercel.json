@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/obsidian-sync",
       "schedule": "30 8 * * *"
+    },
+    {
+      "path": "/api/cron/linkedin-sync",
+      "schedule": "0 9 * * *"
     }
   ]
 }

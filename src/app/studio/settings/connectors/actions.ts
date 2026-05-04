@@ -54,6 +54,17 @@ import type { WebhookMetadata } from '@/lib/connectors/types';
 import { obsidianConnector, parseRepoUrl } from '@/lib/connectors/obsidian';
 import { getRepo, GitHubError } from '@/lib/obsidian';
 import { runSync as runObsidianSync } from '@/lib/obsidian-sync';
+// Phase 12 (2026-05-04): LinkedIn inbound via Apify scraping. No webhook
+// path — scraping is polled on a cron + a manual "Sync now" button. The
+// connector_accounts row holds metadata.profileUrl; the platform-level
+// APIFY_API_TOKEN env var authenticates the scrape.
+import { sql } from 'drizzle-orm';
+import { linkedinPosts } from '@/db';
+import { getApifyToken, ApifyError } from '@/lib/apify';
+import {
+  startSync as startLinkedinSync,
+  pollAndFinalize as pollAndFinalizeLinkedin,
+} from '@/lib/linkedin-sync';
 
 const PROVIDER = 'beehiiv';
 const OBSIDIAN_PROVIDER = 'obsidian';
@@ -802,4 +813,264 @@ async function loadObsidianAccount(
     )
     .limit(1);
   return row;
+}
+
+// ─── LinkedIn (Phase 12, 2026-05-04) ──────────────────────────────────
+//
+// Inbound-only via Apify scraping. The user gives us their public
+// LinkedIn profile URL; we store it on connector_accounts.metadata and
+// kick off Apify runs. The platform-level APIFY_API_TOKEN env var
+// authenticates every call (single-tenant for now; per-user later).
+//
+// Server-action surface mirrors the Beehiiv shape:
+//
+//   · connectLinkedin({ profileUrl })  → upsert + start first scrape
+//   · syncLinkedin()                   → kick a fresh run
+//   · pollLinkedin()                   → drain pending run if SUCCEEDED
+//   · disconnectLinkedin()             → soft delete
+//   · getLinkedinStatus()              → for the UI card to render
+//
+// The full ingest is async — connectLinkedin returns within seconds
+// (just kicked the run); the LinkedinCard polls pollLinkedin every 30s
+// to see when results land.
+
+const LINKEDIN_PROVIDER = 'linkedin';
+
+const linkedinConnectSchema = z.object({
+  profileUrl: z
+    .string()
+    .url()
+    .refine((u) => /linkedin\.com\/in\//i.test(u), {
+      message:
+        'Profile URL must be a personal LinkedIn URL like https://www.linkedin.com/in/yourhandle/',
+    }),
+});
+
+export type LinkedinStatus =
+  | { kind: 'disconnected' }
+  | {
+      kind: 'connected';
+      profileUrl: string;
+      lastSyncAt: string | null;
+      lastSyncStatus: string | null;
+      lastSyncError: string | null;
+      lastSyncCount: number | null;
+      // Set when a poll-and-finalize is still pending — the UI card
+      // shows "Sync in progress (Xs)".
+      pendingRunId: string | null;
+      pendingStartedAt: string | null;
+      lastRunItemCount: number | null;
+      postsSynced: number;
+    };
+
+async function getLinkedinAccount(userId: string) {
+  const [account] = await db
+    .select()
+    .from(connectorAccounts)
+    .where(
+      and(
+        eq(connectorAccounts.userId, userId),
+        eq(connectorAccounts.provider, LINKEDIN_PROVIDER)
+      )
+    )
+    .limit(1);
+  return account ?? null;
+}
+
+export async function connectLinkedin(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const parsed = linkedinConnectSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message:
+        parsed.error.errors[0]?.message ?? 'Profile URL looks invalid.',
+    };
+  }
+  const { profileUrl } = parsed.data;
+
+  // Validate the platform Apify token early so the user gets a clean
+  // error instead of a generic 500 when the env var is missing.
+  try {
+    getApifyToken();
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'config_missing',
+      message:
+        err instanceof ApifyError
+          ? err.message
+          : 'Server is missing APIFY_API_TOKEN.',
+    };
+  }
+
+  // Upsert the connector_accounts row.
+  const existing = await getLinkedinAccount(user.id);
+
+  let accountId: string;
+  if (existing) {
+    accountId = existing.id;
+    await db
+      .update(connectorAccounts)
+      .set({
+        status: 'connected',
+        metadata: {
+          ...(existing.metadata as Record<string, unknown>),
+          profileUrl,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(connectorAccounts.id, accountId));
+  } else {
+    const [created] = await db
+      .insert(connectorAccounts)
+      .values({
+        userId: user.id,
+        provider: LINKEDIN_PROVIDER,
+        status: 'connected',
+        metadata: { profileUrl },
+      })
+      .returning({ id: connectorAccounts.id });
+    accountId = created.id;
+  }
+
+  // Kick the first scrape. Run is async; the UI polls.
+  try {
+    await startLinkedinSync(user.id, accountId, profileUrl);
+  } catch (err) {
+    // Connection itself succeeded; only the run kickoff failed. Surface
+    // the error but leave the account row in place so the user can
+    // retry via the Sync button.
+    return {
+      ok: false,
+      reason: 'sync_kickoff_failed',
+      message: (err as Error).message?.slice(0, 300) ?? 'Apify start failed.',
+    };
+  }
+
+  revalidatePath('/studio/knowledge');
+  revalidatePath('/studio');
+
+  return { ok: true };
+}
+
+export async function syncLinkedin(): Promise<ActionResult> {
+  const user = await requireUser();
+  const account = await getLinkedinAccount(user.id);
+  if (!account || account.status !== 'connected') {
+    return {
+      ok: false,
+      reason: 'not_connected',
+      message: 'LinkedIn is not connected yet.',
+    };
+  }
+
+  const meta = (account.metadata ?? {}) as { profileUrl?: string };
+  if (!meta.profileUrl) {
+    return {
+      ok: false,
+      reason: 'missing_profile_url',
+      message:
+        'No LinkedIn profile URL on file. Reconnect to set it.',
+    };
+  }
+
+  try {
+    await startLinkedinSync(user.id, account.id, meta.profileUrl);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'sync_kickoff_failed',
+      message: (err as Error).message?.slice(0, 300),
+    };
+  }
+
+  revalidatePath('/studio/knowledge');
+  return { ok: true };
+}
+
+/**
+ * Poll the in-flight Apify run and finalize if it's done. The UI card
+ * calls this every 30s while there's a pendingRunId on the status.
+ */
+export async function pollLinkedin(): Promise<ActionResult> {
+  const user = await requireUser();
+  const account = await getLinkedinAccount(user.id);
+  if (!account) {
+    return { ok: false, reason: 'not_connected', message: 'No LinkedIn account.' };
+  }
+
+  try {
+    await pollAndFinalizeLinkedin(user.id, account.id);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'poll_failed',
+      message: (err as Error).message?.slice(0, 300),
+    };
+  }
+
+  revalidatePath('/studio/knowledge');
+  return { ok: true };
+}
+
+export async function disconnectLinkedin(): Promise<ActionResult> {
+  const user = await requireUser();
+  const account = await getLinkedinAccount(user.id);
+  if (!account) return { ok: true }; // already gone
+
+  // Soft delete: status='disconnected', clear the in-flight run id so
+  // a future reconnect gets a clean slate. We deliberately keep
+  // linkedin_posts rows so a reconnect doesn't re-pay for the same
+  // archive — same pattern as Beehiiv.
+  await db
+    .update(connectorAccounts)
+    .set({
+      status: 'disconnected',
+      metadata: {
+        ...(account.metadata as Record<string, unknown>),
+        apifyRunId: undefined,
+        apifyDatasetId: undefined,
+        apifyRunStartedAt: undefined,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(connectorAccounts.id, account.id));
+
+  revalidatePath('/studio/knowledge');
+  return { ok: true };
+}
+
+export async function getLinkedinStatus(): Promise<LinkedinStatus> {
+  const user = await requireUser();
+  const account = await getLinkedinAccount(user.id);
+  if (!account || account.status !== 'connected') {
+    return { kind: 'disconnected' };
+  }
+
+  const meta = (account.metadata ?? {}) as {
+    profileUrl?: string;
+    apifyRunId?: string;
+    apifyRunStartedAt?: string;
+    lastRunItemCount?: number;
+  };
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(linkedinPosts)
+    .where(eq(linkedinPosts.userId, user.id));
+
+  return {
+    kind: 'connected',
+    profileUrl: meta.profileUrl ?? '',
+    lastSyncAt: account.lastSyncAt?.toISOString() ?? null,
+    lastSyncStatus: account.lastSyncStatus ?? null,
+    lastSyncError: account.lastSyncError ?? null,
+    lastSyncCount: account.lastSyncCount ?? null,
+    pendingRunId: meta.apifyRunId ?? null,
+    pendingStartedAt: meta.apifyRunStartedAt ?? null,
+    lastRunItemCount: meta.lastRunItemCount ?? null,
+    postsSynced: Number(count ?? 0),
+  };
 }

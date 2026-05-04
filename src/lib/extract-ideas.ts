@@ -70,7 +70,7 @@ const llmOutputSchema = z.object({
 // ─── public types ─────────────────────────────────────────
 
 export type IdeaSource = {
-  kind: 'newsletter_issue' | 'obsidian_note';
+  kind: 'newsletter_issue' | 'obsidian_note' | 'linkedin_post';
   id: string;
   title: string;
   text: string;
@@ -722,4 +722,72 @@ export async function backfillObsidianIdeas(
   }
 
   return { scanned: notes.length, extracted, failed, hasMore };
+}
+
+/**
+ * Extract ideas from one LinkedIn post. Same shape as the newsletter +
+ * Obsidian variants: clear-then-insert by source row id, embed each
+ * extracted idea best-effort, never block the parent sync on a flaky
+ * Anthropic call.
+ *
+ * Phase 12: LinkedIn posts are short (typically 100-2000 words) but
+ * dense — Payton's voice training corpus. extractIdeas() runs the
+ * standard prompt + calibrate pipeline against them, same as a vault
+ * note. The calibrator's word-count ceilings already work fine for
+ * post-length text without special-casing.
+ */
+export async function extractIdeasFromLinkedinPost(input: {
+  userId: string;
+  postId: string;
+  title: string;
+  bodyText: string;
+  webUrl: string | null;
+  postedAt?: string | null;
+}): Promise<number> {
+  const ideas = await extractIdeas({
+    kind: 'linkedin_post',
+    id: input.postId,
+    title: input.title,
+    text: input.bodyText,
+    url: input.webUrl ?? null,
+  });
+
+  await db
+    .delete(extractedIdeas)
+    .where(
+      and(
+        eq(extractedIdeas.userId, input.userId),
+        eq(extractedIdeas.linkedinPostId, input.postId)
+      )
+    );
+
+  if (ideas.length === 0) return 0;
+
+  const rows = await Promise.all(
+    ideas.map(async (idea): Promise<NewExtractedIdea> => {
+      let embedding: number[] | undefined;
+      try {
+        const text = `${idea.title}\n\n${idea.claim}${idea.evidence ? '\n\n' + idea.evidence : ''}`;
+        embedding = await embedText(text);
+      } catch (err) {
+        console.warn('[extract:linkedin] embed failed', input.postId, err);
+      }
+      return {
+        userId: input.userId,
+        sourceKind: 'linkedin_post',
+        linkedinPostId: input.postId,
+        title: idea.title,
+        claim: idea.claim,
+        evidence: idea.evidence || null,
+        depthSignal: idea.depthSignal,
+        breadthSignal: idea.breadthSignal,
+        links: idea.links,
+        sourceRef: idea.sourceRef as unknown as Record<string, unknown>,
+        embedding,
+      };
+    })
+  );
+
+  await db.insert(extractedIdeas).values(rows);
+  return rows.length;
 }

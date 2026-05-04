@@ -66,6 +66,9 @@ import {
   // Sprint 15 Wave 3: vault notes + curated idea layer in the retrieval pool.
   obsidianNotes,
   extractedIdeas,
+  // Phase 12 (2026-05-04): LinkedIn post archive (Apify-scraped) joins
+  // the retrieval pool alongside vault notes and newsletter issues.
+  linkedinPosts,
 } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
@@ -603,6 +606,69 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
               // frontmatter / H1 / filename fallback), so we surface it
               // straight rather than the path.
               title: r.title,
+              snippet,
+              similarity: 1 - Number(r.distance) + Number(r.boost ?? 0),
+            };
+          })
+        )
+    );
+  }
+
+  if (wanted.has('linkedin_post')) {
+    // Phase 12: LinkedIn posts use the same signal-boost + noise-floor
+    // pattern as obsidian_note above (post body has its own embedding;
+    // extracted_ideas attached to the post lift the rank when present).
+    const signalBoostSql = sql<number>`COALESCE(
+      (SELECT MAX(0.3 * ${extractedIdeas.depthSignal} + 0.2 * ${extractedIdeas.breadthSignal})
+       FROM ${extractedIdeas}
+       WHERE ${extractedIdeas.linkedinPostId} = ${linkedinPosts.id}),
+      0
+    )`;
+    const signalFloorSql = sql`(
+      (1 - (${linkedinPosts.embedding} <=> ${lit}::vector)) >= 0.55
+      OR EXISTS (
+        SELECT 1 FROM ${extractedIdeas}
+        WHERE ${extractedIdeas.linkedinPostId} = ${linkedinPosts.id}
+      )
+    )`;
+    const postWhere = sql`${linkedinPosts.userId} = ${user.id}
+            AND ${linkedinPosts.embedding} IS NOT NULL
+            AND ${signalFloorSql}`;
+
+    promises.push(
+      db
+        .select({
+          id: linkedinPosts.id,
+          authorName: linkedinPosts.authorName,
+          bodyClean: linkedinPosts.bodyClean,
+          linkedinUrl: linkedinPosts.linkedinUrl,
+          distance: sql<number>`${linkedinPosts.embedding} <=> ${lit}::vector`,
+          boost: signalBoostSql,
+        })
+        .from(linkedinPosts)
+        .where(postWhere)
+        .orderBy(
+          sql`(${linkedinPosts.embedding} <=> ${lit}::vector) - ${signalBoostSql}`
+        )
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map((r): SimilarHit => {
+            // Title fallback: first line of body_clean (LinkedIn posts
+            // don't have explicit titles). Snippet is body_clean.
+            const body = r.bodyClean ?? '';
+            const firstLine = body.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+            const title =
+              firstLine.length > 80
+                ? firstLine.slice(0, 77).trimEnd() + '…'
+                : firstLine || '(LinkedIn post)';
+            const snippet =
+              body.length > 0
+                ? body.slice(0, 200) + (body.length > 200 ? '…' : '')
+                : null;
+            return {
+              kind: 'linkedin_post',
+              id: r.id,
+              title,
               snippet,
               similarity: 1 - Number(r.distance) + Number(r.boost ?? 0),
             };

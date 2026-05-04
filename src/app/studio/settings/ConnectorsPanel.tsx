@@ -16,11 +16,14 @@ import {
   BeehiivCard,
 } from './connectors/BeehiivCard';
 import { ObsidianCard } from './connectors/ObsidianCard';
+import { LinkedinCard } from './connectors/LinkedinCard';
 import {
   getBeehiivStatus,
   getObsidianStatus,
+  getLinkedinStatus,
   type BeehiivStatus,
   type ObsidianStatus,
+  type LinkedinStatus,
 } from './connectors/actions';
 
 type ConnectorCard = {
@@ -31,13 +34,6 @@ type ConnectorCard = {
 };
 
 const SOON_CONNECTORS: ConnectorCard[] = [
-  {
-    id: 'linkedin',
-    name: 'LinkedIn',
-    glyph: 'in',
-    blurb:
-      'Your posts and comments. Voice and style training, kept private to your own space.',
-  },
   {
     id: 'gdrive',
     name: 'Google Drive',
@@ -58,6 +54,8 @@ export function ConnectorsPanel() {
   const [status, setStatus] = useState<BeehiivStatus | null>(null);
   const [obsidianStatus, setObsidianStatus] =
     useState<ObsidianStatus | null>(null);
+  const [linkedinStatus, setLinkedinStatus] =
+    useState<LinkedinStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,6 +71,14 @@ export function ConnectorsPanel() {
     getObsidianStatus()
       .then((s) => {
         if (!cancelled) setObsidianStatus(s);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setErr(e instanceof Error ? e.message : 'Failed to load status');
+      });
+    getLinkedinStatus()
+      .then((s) => {
+        if (!cancelled) setLinkedinStatus(s);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -125,6 +131,30 @@ export function ConnectorsPanel() {
               <div className="flex-1">
                 <h3 className="font-sans text-[16px] font-semibold text-ink leading-tight">
                   Obsidian
+                </h3>
+              </div>
+            </div>
+            <p className="font-sans text-[13px] text-tag">
+              {err ? err : 'Loading…'}
+            </p>
+          </li>
+        )}
+
+        {/* Phase 12: Live LinkedIn card. Same skeleton pattern. */}
+        {linkedinStatus ? (
+          <LinkedinCard initialStatus={linkedinStatus} />
+        ) : (
+          <li className="rounded-panel bg-paper border border-rule p-6 flex flex-col gap-3 min-h-[180px]">
+            <div className="flex items-center gap-3">
+              <span
+                className="w-10 h-10 rounded-soft bg-paper-2 flex items-center justify-center font-mono text-[14px] text-tag"
+                aria-hidden
+              >
+                in
+              </span>
+              <div className="flex-1">
+                <h3 className="font-sans text-[16px] font-semibold text-ink leading-tight">
+                  LinkedIn
                 </h3>
               </div>
             </div>

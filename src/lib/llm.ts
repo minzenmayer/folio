@@ -130,7 +130,9 @@ export async function generateReflection({
                       ? `vault note: ${h.title}`
                       : h.kind === 'extracted_idea' && h.title
                         ? `extracted idea: ${h.title}`
-                        : h.kind;
+                        : h.kind === 'linkedin_post' && h.title
+                          ? `your LinkedIn post: ${h.title}`
+                          : h.kind;
 
             const ideaName = h.ideaTitle?.trim();
             const ideaClaim = h.ideaClaim?.trim();

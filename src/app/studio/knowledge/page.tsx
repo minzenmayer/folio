@@ -19,8 +19,8 @@ const SOURCES = [
     id: 'linkedin',
     label: 'LinkedIn',
     blurb:
-      'Posts, comments, articles. Voice training data, in your own words.',
-    state: 'soon',
+      'Your published LinkedIn posts. Scraped from your public profile via Apify — no LinkedIn login required.',
+    state: 'live',
   },
   {
     id: 'obsidian',

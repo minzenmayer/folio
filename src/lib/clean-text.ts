@@ -25,7 +25,7 @@
 //   - Stripping "## Related Files" sections — those carry breadth
 //     signal that calibrateSignals() reads in extract-ideas. Leaving in.
 
-export type CleanableKind = 'newsletter_issue' | 'obsidian_note';
+export type CleanableKind = 'newsletter_issue' | 'obsidian_note' | 'linkedin_post';
 
 // ─── Newsletter patterns ─────────────────────────────────────
 
@@ -86,10 +86,18 @@ export const OBSIDIAN_BOILERPLATE_PATTERNS: RegExp[] = [
  */
 export function cleanText(kind: CleanableKind, text: string): string {
   if (!text) return '';
+  // Phase 12: LinkedIn posts have their own quirks (the "...see more"
+  // truncation marker, LinkedIn's hashtag/mention encoding) but we
+  // already handle those at the linkedin-sync layer in
+  // cleanLinkedinPostText(). Here we just pass through with the
+  // collapse-blank-lines fallback below — no false-positive boilerplate
+  // strips against post bodies.
   const patterns =
     kind === 'newsletter_issue'
       ? NEWSLETTER_BOILERPLATE_PATTERNS
-      : OBSIDIAN_BOILERPLATE_PATTERNS;
+      : kind === 'obsidian_note'
+        ? OBSIDIAN_BOILERPLATE_PATTERNS
+        : ([] as RegExp[]);
   let out = text;
   for (const re of patterns) {
     out = out.replace(re, '');

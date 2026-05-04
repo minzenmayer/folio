@@ -14,6 +14,7 @@ import {
   vector,
   index,
   check,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -347,7 +348,8 @@ export const connectorAccounts = pgTable(
     // base64(iv || authTag || ciphertext) — see src/lib/crypto.ts
 
     metadata: jsonb('metadata').default({}),
-    // beehiiv: { publicationId, publication_name, webhook_id?, plan_tier? }
+    // beehiiv:  { publicationId, publication_name, webhook_id?, plan_tier? }
+    // linkedin: { profileUrl, lastApifyRunId?, lastApifyDatasetId? }
 
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
     lastSyncStatus: text('last_sync_status'),
@@ -502,6 +504,79 @@ export const obsidianNotes = pgTable(
 );
 
 // ────────────────────────────────────────────
+// LINKEDIN_POSTS — Phase 12 (2026-05-04)
+// ────────────────────────────────────────────
+// Mirrors obsidian_notes: per-user table of source documents that get
+// embedded + idea-extracted on every sync. Populated by
+// src/lib/linkedin-sync.ts which calls the Apify
+// harvestapi/linkedin-profile-posts actor against the user's profile
+// URL. Idempotent on (user_id, external_id) — the LinkedIn URN.
+// See drizzle/0007_linkedin.sql for the matching SQL migration.
+// ────────────────────────────────────────────
+export const linkedinPosts = pgTable(
+  'linkedin_posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    connectorAccountId: uuid('connector_account_id')
+      .notNull()
+      .references(() => connectorAccounts.id, { onDelete: 'cascade' }),
+
+    externalId: text('external_id').notNull(),
+    linkedinUrl: text('linkedin_url').notNull(),
+
+    content: text('content'),
+    bodyClean: text('body_clean'),
+
+    postedAt: timestamp('posted_at', { withTimezone: true }).notNull(),
+
+    postType: text('post_type').notNull().default('post'),
+
+    authorId: text('author_id'),
+    authorHandle: text('author_handle'),
+    authorName: text('author_name'),
+
+    imageUrls: text('image_urls').array().default(sql`'{}'`),
+
+    reactionCount: integer('reaction_count'),
+    commentCount: integer('comment_count'),
+    shareCount: integer('share_count'),
+
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    raw: jsonb('raw'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userExternalUnique: uniqueIndex('linkedin_posts_user_external_unique').on(
+      table.userId,
+      table.externalId
+    ),
+    userAccountIdx: index('idx_linkedin_posts_user_account').on(
+      table.userId,
+      table.connectorAccountId
+    ),
+    userPostedAtIdx: index('idx_linkedin_posts_user_posted_at').on(
+      table.userId,
+      table.postedAt
+    ),
+    embeddingIdx: index('idx_linkedin_posts_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
+);
+
+
+// ────────────────────────────────────────────
 // EXTRACTED_IDEAS — Sprint 15 Wave 2: the unit of meaning extractIdeas()
 // pulls out of a source. Each row is one Idea with title/claim/evidence +
 // depth/breadth signals. Wave 3's retrieval ranking will boost matches by
@@ -522,7 +597,7 @@ export const extractedIdeas = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
 
-    // 'newsletter_issue' | 'obsidian_note' (extend as new providers land).
+    // 'newsletter_issue' | 'obsidian_note' | 'linkedin_post'
     sourceKind: text('source_kind').notNull(),
     newsletterIssueId: uuid('newsletter_issue_id').references(
       () => newsletterIssues.id,
@@ -530,6 +605,12 @@ export const extractedIdeas = pgTable(
     ),
     obsidianNoteId: uuid('obsidian_note_id').references(
       () => obsidianNotes.id,
+      { onDelete: 'cascade' }
+    ),
+    // Phase 12: third source kind. Same XOR pattern — exactly one of
+    // newsletter_issue_id, obsidian_note_id, linkedin_post_id is set.
+    linkedinPostId: uuid('linkedin_post_id').references(
+      () => linkedinPosts.id,
       { onDelete: 'cascade' }
     ),
 
@@ -556,9 +637,11 @@ export const extractedIdeas = pgTable(
   (table) => ({
     sourceXor: check(
       'extracted_ideas_source_xor',
-      sql`(${table.sourceKind} = 'newsletter_issue' AND ${table.newsletterIssueId} IS NOT NULL AND ${table.obsidianNoteId} IS NULL)
+      sql`(${table.sourceKind} = 'newsletter_issue' AND ${table.newsletterIssueId} IS NOT NULL AND ${table.obsidianNoteId} IS NULL  AND ${table.linkedinPostId} IS NULL)
           OR
-          (${table.sourceKind} = 'obsidian_note' AND ${table.obsidianNoteId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL)`
+          (${table.sourceKind} = 'obsidian_note'    AND ${table.obsidianNoteId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.linkedinPostId} IS NULL)
+          OR
+          (${table.sourceKind} = 'linkedin_post'    AND ${table.linkedinPostId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.obsidianNoteId} IS NULL)`
     ),
     userKindIdx: index('idx_extracted_ideas_user_kind').on(
       table.userId,
@@ -570,6 +653,9 @@ export const extractedIdeas = pgTable(
     obsidianSourceIdx: index('idx_extracted_ideas_obsidian_source')
       .on(table.obsidianNoteId)
       .where(sql`${table.obsidianNoteId} IS NOT NULL`),
+    linkedinSourceIdx: index('idx_extracted_ideas_linkedin_source')
+      .on(table.linkedinPostId)
+      .where(sql`${table.linkedinPostId} IS NOT NULL`),
     signalsIdx: index('idx_extracted_ideas_signals').on(
       table.userId,
       table.depthSignal,
@@ -609,4 +695,6 @@ export type NewDraftVersion = typeof draftVersions.$inferInsert;
 export type NewConnectorAccount = typeof connectorAccounts.$inferInsert;
 export type NewNewsletterIssue = typeof newsletterIssues.$inferInsert;
 export type NewObsidianNote = typeof obsidianNotes.$inferInsert;
+export type LinkedinPost = typeof linkedinPosts.$inferSelect;
+export type NewLinkedinPost = typeof linkedinPosts.$inferInsert;
 export type NewExtractedIdea = typeof extractedIdeas.$inferInsert;

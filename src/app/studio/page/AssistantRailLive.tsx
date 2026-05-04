@@ -39,6 +39,8 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   // Sprint 15 Wave 3 — see ideas/[id]/page.tsx for label rationale.
   obsidian_note: 'Note',
   extracted_idea: 'Lesson',
+  // Phase 12 (2026-05-04): LinkedIn post in the rail.
+  linkedin_post: 'LinkedIn',
 };
 
 export type GardenRailMode = 'newsletter' | 'linkedin' | 'self-pilot';

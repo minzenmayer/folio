@@ -18,6 +18,8 @@ export const SIMILAR_KINDS = [
   'newsletter_issue',
   // Sprint 15 Wave 3: their Obsidian vault notes.
   'obsidian_note',
+  // Phase 12 (2026-05-04): their LinkedIn post archive (Apify scrape).
+  'linkedin_post',
   // Sprint 15 Wave 3: the curated Idea layer extracted from any source.
   // Distinct from 'idea' (which is the user's hand-authored ideas table)
   // — extracted_idea is title + claim + evidence pulled from a newsletter
