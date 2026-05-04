@@ -25,7 +25,7 @@
 //   - Stripping "## Related Files" sections — those carry breadth
 //     signal that calibrateSignals() reads in extract-ideas. Leaving in.
 
-export type CleanableKind = 'newsletter_issue' | 'obsidian_note' | 'linkedin_post';
+export type CleanableKind = 'newsletter_issue' | 'obsidian_note' | 'linkedin_post' | 'gmail_message';
 
 // ─── Newsletter patterns ─────────────────────────────────────
 
@@ -93,7 +93,7 @@ export function cleanText(kind: CleanableKind, text: string): string {
   // collapse-blank-lines fallback below — no false-positive boilerplate
   // strips against post bodies.
   const patterns =
-    kind === 'newsletter_issue'
+    kind === 'newsletter_issue' || kind === 'gmail_message'
       ? NEWSLETTER_BOILERPLATE_PATTERNS
       : kind === 'obsidian_note'
         ? OBSIDIAN_BOILERPLATE_PATTERNS

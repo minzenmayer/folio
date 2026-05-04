@@ -70,7 +70,7 @@ const llmOutputSchema = z.object({
 // ─── public types ─────────────────────────────────────────
 
 export type IdeaSource = {
-  kind: 'newsletter_issue' | 'obsidian_note' | 'linkedin_post';
+  kind: 'newsletter_issue' | 'obsidian_note' | 'linkedin_post' | 'gmail_message';
   id: string;
   title: string;
   text: string;
@@ -791,3 +791,71 @@ export async function extractIdeasFromLinkedinPost(input: {
   await db.insert(extractedIdeas).values(rows);
   return rows.length;
 }
+
+
+// ─── Phase 13: gmail_message variant ───────────────────────
+//
+// Same shape as extractIdeasFromLinkedinPost. Triggered from the triage
+// promote action — only promoted Gmail messages get ideas extracted.
+//
+// Note: gmail_message_id on extracted_ideas was added by
+// drizzle/0009_gmail.sql (Phase 13). The XOR check on extracted_ideas
+// gates the four source kinds; this writer sets gmailMessageId AND
+// sourceKind='gmail_message' to satisfy it.
+
+export async function extractIdeasFromGmailMessage(input: {
+  userId: string;
+  messageId: string;
+  title: string;
+  bodyText: string;
+  webUrl: string | null;
+  postedAt?: string | null;
+}): Promise<number> {
+  const ideas = await extractIdeas({
+    kind: 'gmail_message',
+    id: input.messageId,
+    title: input.title,
+    text: input.bodyText,
+    url: input.webUrl ?? null,
+  });
+
+  await db
+    .delete(extractedIdeas)
+    .where(
+      and(
+        eq(extractedIdeas.userId, input.userId),
+        eq(extractedIdeas.gmailMessageId, input.messageId)
+      )
+    );
+
+  if (ideas.length === 0) return 0;
+
+  const rows = await Promise.all(
+    ideas.map(async (idea): Promise<NewExtractedIdea> => {
+      let embedding: number[] | undefined;
+      try {
+        const text = `${idea.title}\n\n${idea.claim}${idea.evidence ? '\n\n' + idea.evidence : ''}`;
+        embedding = await embedText(text);
+      } catch (err) {
+        console.warn('[extract:gmail] embed failed', input.messageId, err);
+      }
+      return {
+        userId: input.userId,
+        sourceKind: 'gmail_message',
+        gmailMessageId: input.messageId,
+        title: idea.title,
+        claim: idea.claim,
+        evidence: idea.evidence || null,
+        depthSignal: idea.depthSignal,
+        breadthSignal: idea.breadthSignal,
+        links: idea.links,
+        sourceRef: idea.sourceRef as unknown as Record<string, unknown>,
+        embedding,
+      };
+    })
+  );
+
+  await db.insert(extractedIdeas).values(rows);
+  return rows.length;
+}
+

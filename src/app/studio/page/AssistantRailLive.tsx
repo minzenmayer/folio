@@ -41,6 +41,8 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   extracted_idea: 'Lesson',
   // Phase 12 (2026-05-04): LinkedIn post in the rail.
   linkedin_post: 'LinkedIn',
+  // Phase 13 (2026-05-04): a newsletter you read in Gmail (promoted-only).
+  gmail_message: 'Newsletter',
 };
 
 export type GardenRailMode = 'newsletter' | 'linkedin' | 'self-pilot';

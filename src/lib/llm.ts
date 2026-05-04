@@ -132,7 +132,9 @@ export async function generateReflection({
                         ? `extracted idea: ${h.title}`
                         : h.kind === 'linkedin_post' && h.title
                           ? `your LinkedIn post: ${h.title}`
-                          : h.kind;
+                          : h.kind === 'gmail_message' && h.title
+                            ? `newsletter you read: ${h.title}`
+                            : h.kind;
 
             const ideaName = h.ideaTitle?.trim();
             const ideaClaim = h.ideaClaim?.trim();

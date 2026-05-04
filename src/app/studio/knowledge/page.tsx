@@ -40,8 +40,8 @@ const SOURCES = [
     id: 'gmail',
     label: 'Gmail',
     blurb:
-      'Subscribed newsletters land in the Inbox; you triage. Other email stays untouched.',
-    state: 'soon',
+      'Subscribed newsletters detected via OAuth (read-only). You triage which ones land in the corpus from /studio/insights — Reflect surfaces them while you write.',
+    state: 'live',
   },
   {
     id: 'voiceid',

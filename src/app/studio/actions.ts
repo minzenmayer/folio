@@ -69,6 +69,9 @@ import {
   // Phase 12 (2026-05-04): LinkedIn post archive (Apify-scraped) joins
   // the retrieval pool alongside vault notes and newsletter issues.
   linkedinPosts,
+  // Phase 13 (2026-05-04): newsletters from Gmail (OAuth, Testing mode)
+  // — only the user-promoted subset is eligible for retrieval.
+  gmailMessages,
 } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
@@ -667,6 +670,70 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
                 : null;
             return {
               kind: 'linkedin_post',
+              id: r.id,
+              title,
+              snippet,
+              similarity: 1 - Number(r.distance) + Number(r.boost ?? 0),
+            };
+          })
+        )
+    );
+  }
+
+  if (wanted.has('gmail_message')) {
+    // Phase 13: Gmail newsletter messages. Same signal-boost + noise-floor
+    // pattern as linkedin_post above. The status='promoted' filter is the
+    // critical bit — pending / dismissed / snoozed messages are NOT in the
+    // retrieval pool. Triage gates corpus membership.
+    const gmailSignalBoostSql = sql<number>`COALESCE(
+      (SELECT MAX(0.3 * ${extractedIdeas.depthSignal} + 0.2 * ${extractedIdeas.breadthSignal})
+       FROM ${extractedIdeas}
+       WHERE ${extractedIdeas.gmailMessageId} = ${gmailMessages.id}),
+      0
+    )`;
+    const gmailSignalFloorSql = sql`(
+      (1 - (${gmailMessages.embedding} <=> ${lit}::vector)) >= 0.55
+      OR EXISTS (
+        SELECT 1 FROM ${extractedIdeas}
+        WHERE ${extractedIdeas.gmailMessageId} = ${gmailMessages.id}
+      )
+    )`;
+    const gmailWhere = sql`${gmailMessages.userId} = ${user.id}
+            AND ${gmailMessages.status} = 'promoted'
+            AND ${gmailMessages.embedding} IS NOT NULL
+            AND ${gmailSignalFloorSql}`;
+
+    promises.push(
+      db
+        .select({
+          id: gmailMessages.id,
+          subject: gmailMessages.subject,
+          fromName: gmailMessages.fromName,
+          fromAddress: gmailMessages.fromAddress,
+          bodyClean: gmailMessages.bodyClean,
+          distance: sql<number>`${gmailMessages.embedding} <=> ${lit}::vector`,
+          boost: gmailSignalBoostSql,
+        })
+        .from(gmailMessages)
+        .where(gmailWhere)
+        .orderBy(
+          sql`(${gmailMessages.embedding} <=> ${lit}::vector) - ${gmailSignalBoostSql}`
+        )
+        .limit(perKindLimit)
+        .then((rows) =>
+          rows.map((r): SimilarHit => {
+            // Title: prefer the Gmail Subject; fall back to the sender's
+            // display name; final fallback is a generic label.
+            const subj = (r.subject ?? '').trim();
+            const sender = (r.fromName ?? r.fromAddress ?? '').trim();
+            const title = subj || sender || '(newsletter)';
+            const body = r.bodyClean ?? '';
+            const snippet =
+              body.length > 0
+                ? body.slice(0, 200) + (body.length > 200 ? '…' : '')
+                : null;
+            return {
+              kind: 'gmail_message',
               id: r.id,
               title,
               snippet,

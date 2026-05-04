@@ -35,6 +35,8 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   extracted_idea: 'Lesson',
   // Phase 12: LinkedIn post in idea-detail "related" panel.
   linkedin_post: 'LinkedIn',
+  // Phase 13 (2026-05-04): newsletters from Gmail.
+  gmail_message: 'Newsletter',
 };
 
 function relatedHref(hit: SimilarHit): string {
@@ -49,10 +51,12 @@ function relatedHref(hit: SimilarHit): string {
     case 'obsidian_note':
     case 'extracted_idea':
     case 'linkedin_post':
-      // Sprint 15 Wave 3 + Phase 12: no per-row detail routes for these
-      // kinds yet. Settle for routing to the connectors panel where the
-      // user manages the source. A future wave can add /studio/notes/[id],
-      // /studio/insights/[id], and /studio/linkedin/[id] surfaces.
+    case 'gmail_message':
+      // Sprint 15 Wave 3 + Phase 12 + Phase 13: no per-row detail routes
+      // for these kinds yet. Settle for routing to the connectors panel
+      // where the user manages the source. (Gmail messages also have a
+      // triage tab on /studio/insights — but only for status='pending',
+      // not promoted retrieval hits.)
       return `/studio?settings=connectors`;
   }
 }
