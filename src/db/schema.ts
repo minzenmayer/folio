@@ -585,6 +585,102 @@ export const linkedinPosts = pgTable(
 
 
 // ────────────────────────────────────────────
+// GMAIL_MESSAGES — Phase 13 (2026-05-04): subscribed-newsletter ingest via
+// Gmail OAuth (Testing mode, single test user). Each row is one Gmail
+// message we've classified as a newsletter via the detection ladder
+// (platform sender domain → List-Unsubscribe header → subject keyword
+// tiebreaker). Idempotent on (user_id, external_id) where external_id is
+// the Gmail message id.
+//
+// Triage flow: every detected message lands as status='pending'. The
+// Insights triage queue surfaces it; promote → embed + extractIdeas fire.
+// dismiss → row stays for audit trail, embedding stays null forever.
+// snooze → hide until snooze_until <= now().
+//
+// See drizzle/0009_gmail.sql for the matching SQL migration.
+// ────────────────────────────────────────────
+export const gmailMessages = pgTable(
+  'gmail_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    connectorAccountId: uuid('connector_account_id')
+      .notNull()
+      .references(() => connectorAccounts.id, { onDelete: 'cascade' }),
+
+    externalId: text('external_id').notNull(),
+    threadId: text('thread_id'),
+
+    fromAddress: text('from_address'),
+    fromName: text('from_name'),
+
+    subject: text('subject'),
+    snippet: text('snippet'),
+
+    bodyText: text('body_text'),
+    bodyHtml: text('body_html'),
+    bodyClean: text('body_clean'),
+
+    postedAt: timestamp('posted_at', { withTimezone: true }).notNull(),
+
+    // Detection-quality audit. Records WHICH heuristic flagged this
+    // message — lets us spot-check false positives later.
+    //   'detected_substack' | 'detected_beehiiv' | 'detected_mailchimp'
+    //   | 'detected_convertkit' | 'detected_ghost' | 'detected_buttondown'
+    //   | 'list_unsubscribe' | 'subject_keyword'
+    newsletterKind: text('newsletter_kind').notNull(),
+
+    // Triage state — mirrors extracted_ideas.triageStatus semantics.
+    //   'pending' (default) — fresh ingest, awaiting user attention.
+    //   'promoted' — user said "real newsletter, ingest it".
+    //   'dismissed' — user said "ignore" (audit-trail row, never embedded).
+    //   'snoozed' — hide until snooze_until <= now().
+    status: text('status').notNull().default('pending'),
+    promotedAt: timestamp('promoted_at', { withTimezone: true }),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+    snoozeUntil: timestamp('snooze_until', { withTimezone: true }),
+
+    // NULL for non-promoted rows — we only spend embed tokens on promoted
+    // messages. The HNSW index is partial (WHERE embedding IS NOT NULL).
+    embedding: vector('embedding', { dimensions: 1536 }),
+
+    raw: jsonb('raw'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userExternalUnique: uniqueIndex('gmail_messages_user_external_unique').on(
+      table.userId,
+      table.externalId
+    ),
+    userStatusIdx: index('idx_gmail_messages_user_status').on(
+      table.userId,
+      table.status
+    ),
+    userPostedAtIdx: index('idx_gmail_messages_user_posted_at').on(
+      table.userId,
+      table.postedAt
+    ),
+    userAccountIdx: index('idx_gmail_messages_user_account').on(
+      table.userId,
+      table.connectorAccountId
+    ),
+    embeddingIdx: index('idx_gmail_messages_embedding').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
+  })
+);
+
+
+// ────────────────────────────────────────────
 // EXTRACTED_IDEAS — Sprint 15 Wave 2: the unit of meaning extractIdeas()
 // pulls out of a source. Each row is one Idea with title/claim/evidence +
 // depth/breadth signals. Wave 3's retrieval ranking will boost matches by
@@ -605,7 +701,7 @@ export const extractedIdeas = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
 
-    // 'newsletter_issue' | 'obsidian_note' | 'linkedin_post'
+    // 'newsletter_issue' | 'obsidian_note' | 'linkedin_post' | 'gmail_message'
     sourceKind: text('source_kind').notNull(),
     newsletterIssueId: uuid('newsletter_issue_id').references(
       () => newsletterIssues.id,
@@ -619,6 +715,12 @@ export const extractedIdeas = pgTable(
     // newsletter_issue_id, obsidian_note_id, linkedin_post_id is set.
     linkedinPostId: uuid('linkedin_post_id').references(
       () => linkedinPosts.id,
+      { onDelete: 'cascade' }
+    ),
+    // Phase 13: fourth source kind. Same XOR pattern — exactly one of
+    // newsletter_issue_id, obsidian_note_id, linkedin_post_id, gmail_message_id is set.
+    gmailMessageId: uuid('gmail_message_id').references(
+      () => gmailMessages.id,
       { onDelete: 'cascade' }
     ),
 
@@ -656,11 +758,13 @@ export const extractedIdeas = pgTable(
   (table) => ({
     sourceXor: check(
       'extracted_ideas_source_xor',
-      sql`(${table.sourceKind} = 'newsletter_issue' AND ${table.newsletterIssueId} IS NOT NULL AND ${table.obsidianNoteId} IS NULL  AND ${table.linkedinPostId} IS NULL)
+      sql`(${table.sourceKind} = 'newsletter_issue' AND ${table.newsletterIssueId} IS NOT NULL AND ${table.obsidianNoteId} IS NULL  AND ${table.linkedinPostId} IS NULL  AND ${table.gmailMessageId} IS NULL)
           OR
-          (${table.sourceKind} = 'obsidian_note'    AND ${table.obsidianNoteId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.linkedinPostId} IS NULL)
+          (${table.sourceKind} = 'obsidian_note'    AND ${table.obsidianNoteId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.linkedinPostId} IS NULL  AND ${table.gmailMessageId} IS NULL)
           OR
-          (${table.sourceKind} = 'linkedin_post'    AND ${table.linkedinPostId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.obsidianNoteId} IS NULL)`
+          (${table.sourceKind} = 'linkedin_post'    AND ${table.linkedinPostId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.obsidianNoteId} IS NULL  AND ${table.gmailMessageId} IS NULL)
+          OR
+          (${table.sourceKind} = 'gmail_message'    AND ${table.gmailMessageId} IS NOT NULL AND ${table.newsletterIssueId} IS NULL  AND ${table.obsidianNoteId} IS NULL  AND ${table.linkedinPostId} IS NULL)`
     ),
     userKindIdx: index('idx_extracted_ideas_user_kind').on(
       table.userId,
@@ -675,6 +779,9 @@ export const extractedIdeas = pgTable(
     linkedinSourceIdx: index('idx_extracted_ideas_linkedin_source')
       .on(table.linkedinPostId)
       .where(sql`${table.linkedinPostId} IS NOT NULL`),
+    gmailSourceIdx: index('idx_extracted_ideas_gmail_source')
+      .on(table.gmailMessageId)
+      .where(sql`${table.gmailMessageId} IS NOT NULL`),
     signalsIdx: index('idx_extracted_ideas_signals').on(
       table.userId,
       table.depthSignal,
@@ -720,4 +827,6 @@ export type NewNewsletterIssue = typeof newsletterIssues.$inferInsert;
 export type NewObsidianNote = typeof obsidianNotes.$inferInsert;
 export type LinkedinPost = typeof linkedinPosts.$inferSelect;
 export type NewLinkedinPost = typeof linkedinPosts.$inferInsert;
+export type GmailMessage = typeof gmailMessages.$inferSelect;
+export type NewGmailMessage = typeof gmailMessages.$inferInsert;
 export type NewExtractedIdea = typeof extractedIdeas.$inferInsert;

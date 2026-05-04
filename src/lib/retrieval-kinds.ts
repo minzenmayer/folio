@@ -20,6 +20,9 @@ export const SIMILAR_KINDS = [
   'obsidian_note',
   // Phase 12 (2026-05-04): their LinkedIn post archive (Apify scrape).
   'linkedin_post',
+  // Phase 13 (2026-05-04): newsletters they receive in Gmail (OAuth, Testing
+  // mode). Promoted-only — a triaged subset of detected newsletter messages.
+  'gmail_message',
   // Sprint 15 Wave 3: the curated Idea layer extracted from any source.
   // Distinct from 'idea' (which is the user's hand-authored ideas table)
   // — extracted_idea is title + claim + evidence pulled from a newsletter
