@@ -31,14 +31,45 @@ export function BackfillButton() {
     });
   }
 
+  // Phase 9: chunked backfill loop. Each server-action call processes a
+  // small batch and returns; we keep calling until both kinds report
+  // hasMore=false. Tab must stay open — closing it kills the loop.
   function runIdeas() {
     setError(null);
     setEmbedResult(null);
     setIdeasResult(null);
     startTransition(async () => {
       try {
-        const res = await backfillExtractedIdeas();
-        setIdeasResult(res);
+        let aggNewsletter = { scanned: 0, extracted: 0, failed: 0, hasMore: false };
+        let aggObsidian = { scanned: 0, extracted: 0, failed: 0, hasMore: false };
+        let iterations = 0;
+        const maxIterations = 1000; // safety stop
+
+        while (iterations < maxIterations) {
+          const res = await backfillExtractedIdeas({ limit: 3 });
+          aggNewsletter = {
+            scanned: res.newsletter.scanned, // last-call scanned (total source count)
+            extracted: aggNewsletter.extracted + res.newsletter.extracted,
+            failed: aggNewsletter.failed + res.newsletter.failed,
+            hasMore: res.newsletter.hasMore,
+          };
+          aggObsidian = {
+            scanned: res.obsidian.scanned,
+            extracted: aggObsidian.extracted + res.obsidian.extracted,
+            failed: aggObsidian.failed + res.obsidian.failed,
+            hasMore: res.obsidian.hasMore,
+          };
+          // Surface running progress so the user sees it tick up.
+          setIdeasResult({
+            newsletter: aggNewsletter,
+            obsidian: aggObsidian,
+            hasMore: res.hasMore,
+          });
+          if (!res.hasMore) break;
+          iterations++;
+          // Brief pause between chunks so we don't hammer Anthropic.
+          await new Promise((r) => setTimeout(r, 300));
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'unknown error');
       }
@@ -77,14 +108,15 @@ export function BackfillButton() {
         )}
         {ideasResult && (
           <span className="font-mono text-[11px] text-tag tracking-[0.04em]">
-            extracted {ideasResult.newsletter.extracted} from{' '}
-            {ideasResult.newsletter.scanned} issues · {ideasResult.obsidian.extracted}{' '}
-            from {ideasResult.obsidian.scanned} notes
+            extracted {ideasResult.newsletter.extracted} from issues · {ideasResult.obsidian.extracted} from notes
             {ideasResult.newsletter.failed + ideasResult.obsidian.failed > 0 && (
               <span className="text-ink">
                 {' · '}
                 {ideasResult.newsletter.failed + ideasResult.obsidian.failed} failed
               </span>
+            )}
+            {ideasResult.hasMore && (
+              <span className="text-ink"> · still working…</span>
             )}
           </span>
         )}

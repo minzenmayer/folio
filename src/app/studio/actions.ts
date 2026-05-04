@@ -280,15 +280,28 @@ export async function backfillEmbeddings(
 // Subsequent issues/notes get extracted on their own write paths.
 
 export type BackfillIdeasResult = {
-  newsletter: { scanned: number; extracted: number; failed: number };
-  obsidian: { scanned: number; extracted: number; failed: number };
+  newsletter: { scanned: number; extracted: number; failed: number; hasMore: boolean };
+  obsidian: { scanned: number; extracted: number; failed: number; hasMore: boolean };
+  hasMore: boolean;
 };
 
-export async function backfillExtractedIdeas(): Promise<BackfillIdeasResult> {
+// Phase 9: chunked. Each call processes up to `limit` not-yet-extracted
+// sources from each of newsletter + obsidian (so up to 2*limit per call).
+// Returns hasMore=true if either kind still has work; the client loops.
+// Default 3 keeps a single call comfortably under Vercel Hobby's 10s
+// timeout (Anthropic Haiku is ~3-5s per call).
+export async function backfillExtractedIdeas(input?: {
+  limit?: number;
+}): Promise<BackfillIdeasResult> {
   const user = await requireUser();
-  const newsletter = await backfillNewsletterIdeas(user.id);
-  const obsidian = await backfillObsidianIdeas(user.id);
-  return { newsletter, obsidian };
+  const limit = input?.limit ?? 3;
+  const newsletter = await backfillNewsletterIdeas(user.id, { limit });
+  const obsidian = await backfillObsidianIdeas(user.id, { limit });
+  return {
+    newsletter,
+    obsidian,
+    hasMore: newsletter.hasMore || obsidian.hasMore,
+  };
 }
 
 // ─── findSimilar ──────────────────────────────────────

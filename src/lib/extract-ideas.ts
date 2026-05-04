@@ -586,11 +586,16 @@ function clamp01(n: number): number {
  * Used by /studio/knowledge BackfillButton → backfillExtractedIdeas
  * action. Per-issue failures don't unwind the sweep.
  */
-export async function backfillNewsletterIdeas(userId: string): Promise<{
+export async function backfillNewsletterIdeas(
+  userId: string,
+  options: { limit?: number } = {}
+): Promise<{
   scanned: number;
   extracted: number;
   failed: number;
+  hasMore: boolean;
 }> {
+  const limit = options.limit ?? Infinity;
   const issues = await db
     .select({
       id: newsletterIssues.id,
@@ -603,6 +608,8 @@ export async function backfillNewsletterIdeas(userId: string): Promise<{
 
   let extracted = 0;
   let failed = 0;
+  let processed = 0;
+  let hasMore = false;
 
   for (const issue of issues) {
     if (!issue.bodyText || issue.bodyText.trim().length < 200) continue;
@@ -620,6 +627,14 @@ export async function backfillNewsletterIdeas(userId: string): Promise<{
       .limit(1);
     if (hit) continue;
 
+    // Phase 9 chunked backfill: stop after `limit` newly-processed sources
+    // so the server action stays under Vercel Hobby's 10s timeout. The
+    // client (BackfillButton) loops until hasMore = false.
+    if (processed >= limit) {
+      hasMore = true;
+      break;
+    }
+
     try {
       const n = await extractIdeasFromNewsletter({
         userId,
@@ -633,17 +648,23 @@ export async function backfillNewsletterIdeas(userId: string): Promise<{
       console.warn('[backfill:newsletter] failed', issue.id, err);
       failed++;
     }
+    processed++;
   }
 
-  return { scanned: issues.length, extracted, failed };
+  return { scanned: issues.length, extracted, failed, hasMore };
 }
 
 /** Same shape but for Obsidian notes — useful after a vault re-import. */
-export async function backfillObsidianIdeas(userId: string): Promise<{
+export async function backfillObsidianIdeas(
+  userId: string,
+  options: { limit?: number } = {}
+): Promise<{
   scanned: number;
   extracted: number;
   failed: number;
+  hasMore: boolean;
 }> {
+  const limit = options.limit ?? Infinity;
   const notes = await db
     .select({
       id: obsidianNotes.id,
@@ -659,6 +680,8 @@ export async function backfillObsidianIdeas(userId: string): Promise<{
 
   let extracted = 0;
   let failed = 0;
+  let processed = 0;
+  let hasMore = false;
 
   for (const note of notes) {
     if (!note.bodyText || note.bodyText.trim().length < 200) continue;
@@ -673,6 +696,11 @@ export async function backfillObsidianIdeas(userId: string): Promise<{
       )
       .limit(1);
     if (hit) continue;
+
+    if (processed >= limit) {
+      hasMore = true;
+      break;
+    }
 
     try {
       const n = await extractIdeasFromObsidian({
@@ -690,7 +718,8 @@ export async function backfillObsidianIdeas(userId: string): Promise<{
       console.warn('[backfill:obsidian] failed', note.id, err);
       failed++;
     }
+    processed++;
   }
 
-  return { scanned: notes.length, extracted, failed };
+  return { scanned: notes.length, extracted, failed, hasMore };
 }
