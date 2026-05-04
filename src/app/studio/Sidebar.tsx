@@ -1,15 +1,25 @@
 // Thoughtbed · Sidebar
 //
 // Sprint 14 brand pivot — Ghostbase-shape navigation.
+// Phase 11 (2026-05-04): nav rename + subtitles, and the "+ New post"
+// CTA now actually creates a draft instead of plain-linking to /studio.
 //
 // Sections (top → bottom):
 //   1. Brand block — Thoughtbed wordmark + "[name]'s Space" workspace label
-//   2. + NEW POST — primary CTA (mono uppercase, the Ghostbase "NEW CHAT" pattern)
-//   3. Named nav (Write / Inbox / Library / Knowledge)
+//   2. + NEW POST — primary CTA. Submits a server-action form that
+//      creates an empty draft and redirects into it. Was previously a
+//      plain Link to /studio, which no-op'd when you were already on
+//      /studio (the reported "doesn't navigate" bug).
+//   3. Named nav (Write / Capture / Garden / Insights / Knowledge) with
+//      a 12px muted subtitle under each label.
+//        - "Inbox" → "Capture" (route /studio/inbox unchanged)
+//        - "Library" → "Garden" (route /studio/ideas unchanged — the
+//          DB tables, server actions, and call sites all keep their
+//          Sprint-3 names; only the surface label moves to garden vocab.)
 //   4. Recent — drafts + ideas mixed, grouped by Today / Last 7 days / Older
 //   5. Footer — Settings (opens overlay modal) + Help + Clerk UserButton
 //
-// Settings is now a MODAL not a route. The gear icon pushes
+// Settings is a MODAL not a route. The gear icon pushes
 // `?settings=connectors` onto the URL; the layout reads that searchParam
 // and renders <SettingsModal />. The /studio/settings/connectors route
 // still works for direct deep-links (it redirects to /studio with the
@@ -21,6 +31,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
+import { createDraft } from './page/actions';
 
 export type RecentItem = {
   kind: 'draft' | 'idea';
@@ -33,36 +44,42 @@ export type RecentItem = {
 
 const NAV_ITEMS: Array<{
   label: string;
+  subtitle: string;
   href: string;
   matches?: (pathname: string) => boolean;
 }> = [
   {
     label: 'Write',
+    subtitle: 'draft your next post',
     href: '/studio',
     // "Write" claims the home + every draft route.
     matches: (p) => p === '/studio' || p.startsWith('/studio/page'),
   },
   {
-    label: 'Inbox',
+    label: 'Capture',
+    subtitle: 'plant a new thought',
     href: '/studio/inbox',
   },
   {
-    label: 'Library',
-    href: '/studio/ideas',
+    label: 'Garden',
+    subtitle: "ideas you've planted",
     // The route stays /studio/ideas (DB tables, server actions, etc.
-    // unchanged). Sidebar label is "Library" to match Ghostbase.
+    // unchanged). Sidebar label is "Garden" to match the brand.
+    href: '/studio/ideas',
     matches: (p) => p.startsWith('/studio/ideas'),
   },
   {
     // Sprint 15 Wave 4 / Phase 7: browse view for extracted_ideas (the
     // curated layer extractIdeas() pulls out of newsletters + vault
-    // notes during sync). Library = hand-authored. Insights = curated
-    // by the system from your sources.
+    // notes during sync). Garden = hand-authored ideas. Insights =
+    // claims the system found in your sources.
     label: 'Insights',
+    subtitle: 'claims from your sources',
     href: '/studio/insights',
   },
   {
     label: 'Knowledge',
+    subtitle: 'where Thoughtbed reads',
     href: '/studio/knowledge',
   },
 ];
@@ -125,18 +142,25 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* + NEW POST — primary CTA, mono uppercase like Ghostbase NEW CHAT */}
+      {/* + NEW POST — primary CTA, mono uppercase like Ghostbase NEW CHAT.
+          Phase 11: server-action form (was a plain Link to /studio that
+          no-op'd when the user was already on /studio). Mirrors the
+          DraftsRail "+ New draft" pattern: createDraft() inserts an
+          empty draft for the authed user and redirect()s into the
+          editor at /studio/page/[id]. */}
       <div className="px-3 pb-3">
-        <Link
-          href="/studio"
-          className="block w-full text-center font-mono text-[11px] tracking-[0.2em] uppercase font-medium rounded-card border border-rule bg-paper px-3 py-3 text-ink hover:border-ink hover:bg-paper-2 transition-colors"
-        >
-          + New post
-        </Link>
+        <form action={createDraft}>
+          <button
+            type="submit"
+            className="block w-full text-center font-mono text-[11px] tracking-[0.2em] uppercase font-medium rounded-card border border-rule bg-paper px-3 py-3 text-ink hover:border-ink hover:bg-paper-2 transition-colors"
+          >
+            + New post
+          </button>
+        </form>
       </div>
 
-      {/* Nav — Write / Inbox / Library / Knowledge.
-          Pure typography pills, no glyphs (Ghostbase). */}
+      {/* Nav — Write / Capture / Garden / Insights / Knowledge.
+          Two-line pills: label on top, muted subtitle below. */}
       <nav className="px-3 pt-1 pb-3" aria-label="Sections">
         {NAV_ITEMS.map((item) => {
           const active = isNavActive(item);
@@ -144,13 +168,26 @@ export function Sidebar({
             <Link
               key={item.href}
               href={item.href}
-              className={`block rounded-soft px-3 py-2 mb-0.5 font-sans text-[14px] transition-colors ${
+              className={`block rounded-soft px-3 py-2 mb-0.5 font-sans transition-colors ${
                 active
-                  ? 'bg-paper-2 text-ink font-medium'
+                  ? 'bg-paper-2 text-ink'
                   : 'text-ink-soft hover:bg-paper-2 hover:text-ink'
               }`}
             >
-              {item.label}
+              <span
+                className={`block text-[14px] leading-[1.25] ${
+                  active ? 'font-medium' : ''
+                }`}
+              >
+                {item.label}
+              </span>
+              <span
+                className={`block text-[12px] leading-[1.3] mt-0.5 ${
+                  active ? 'text-tag' : 'text-tag/80'
+                }`}
+              >
+                {item.subtitle}
+              </span>
             </Link>
           );
         })}
