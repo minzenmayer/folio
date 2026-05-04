@@ -227,13 +227,29 @@ export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
   const user = await requireUser();
   const data = updateDraftSchema.parse(input);
 
-  const title = deriveTitle(data.contentJson);
+  // Defensive JSON round-trip on the action input.
+  //
+  // Phase 11.1 fix (2026-05-04): under Next 15.5 the action-input
+  // serializer was leaving nested objects in `safeContent` in a
+  // state where direct property access threw
+  //   "Cannot access level on the server. You cannot dot into a
+  //    temporary client reference from a server component."
+  // every time deriveTitle() walked the doc tree on its way to
+  // `node.attrs?.level === 1`. Vercel digest 1661242608, hundreds of
+  // 500s in the autosave loop. Commit 6bfa563's type-extraction fix
+  // (replicated for the three remaining inline types in 478f77f) was
+  // a partial mitigation — the actual workaround is to roundtrip the
+  // payload through JSON.stringify/parse so the server walks plain
+  // POJOs, not whatever the RSC serializer left behind.
+  const safeContent: unknown = JSON.parse(JSON.stringify(data.contentJson));
+
+  const title = deriveTitle(safeContent);
   const newVersion = data.expectedVersion + 1;
 
   const updated = await db
     .update(drafts)
     .set({
-      contentJson: data.contentJson as any,
+      contentJson: safeContent as any,
       title,
       version: newVersion,
       updatedAt: new Date(),
@@ -280,13 +296,13 @@ export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
   }
 
   // Snapshot into history. Best-effort — never blocks the save.
-  await snapshotVersion(user.id, data.draftId, data.contentJson, 'autosave');
+  await snapshotVersion(user.id, data.draftId, safeContent, 'autosave');
 
   // Re-embed the draft so it stays current in findSimilar. Best-effort.
   await patchDraftEmbedding(
     data.draftId,
     user.id,
-    draftEmbedSource(data.contentJson, title)
+    draftEmbedSource(safeContent, title)
   );
 
   revalidatePath('/studio/page');
