@@ -46,7 +46,7 @@ import { cleanText, type CleanableKind } from '@/lib/clean-text';
 const EXTRACTION_MODEL =
   process.env.ANTHROPIC_EXTRACT_MODEL ??
   process.env.ANTHROPIC_MODEL ??
-  'claude-3-5-haiku-20241022';
+  'claude-haiku-4-5-20251001';
 
 // Hard ceilings so a runaway source doesn't blow the prompt budget.
 const MAX_SOURCE_CHARS = 12_000;

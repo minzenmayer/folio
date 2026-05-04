@@ -30,7 +30,7 @@ if (!process.env.ANTHROPIC_API_KEY) {
 }
 
 const REFLECTION_MODEL =
-  process.env.ANTHROPIC_MODEL ?? 'claude-3-5-haiku-20241022';
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
 
 export type ReflectionHit = {
   index: number; // 1-based, used for [1], [2] citations in the output
