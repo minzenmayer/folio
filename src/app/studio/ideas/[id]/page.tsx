@@ -33,6 +33,8 @@ const KIND_LABEL: Record<SimilarHit['kind'], string> = {
   // convention ("**Lesson:**" markers in the heybubble slice).
   obsidian_note: 'Note',
   extracted_idea: 'Lesson',
+  // Phase 12: LinkedIn post in idea-detail "related" panel.
+  linkedin_post: 'LinkedIn',
 };
 
 function relatedHref(hit: SimilarHit): string {
@@ -46,10 +48,11 @@ function relatedHref(hit: SimilarHit): string {
     case 'newsletter_issue':
     case 'obsidian_note':
     case 'extracted_idea':
-      // Sprint 15 Wave 3: no per-row detail routes for these kinds yet.
-      // Settle for routing to the connectors panel which is where the
-      // user manages the source. A future wave can add /studio/notes/[id]
-      // and /studio/insights/[id] surfaces.
+    case 'linkedin_post':
+      // Sprint 15 Wave 3 + Phase 12: no per-row detail routes for these
+      // kinds yet. Settle for routing to the connectors panel where the
+      // user manages the source. A future wave can add /studio/notes/[id],
+      // /studio/insights/[id], and /studio/linkedin/[id] surfaces.
       return `/studio?settings=connectors`;
   }
 }
