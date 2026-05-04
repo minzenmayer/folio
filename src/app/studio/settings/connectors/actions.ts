@@ -65,9 +65,26 @@ import {
   startSync as startLinkedinSync,
   pollAndFinalize as pollAndFinalizeLinkedin,
 } from '@/lib/linkedin-sync';
+// Phase 13 (2026-05-04): Gmail OAuth connector. Read-only, polling, with
+// a triage queue for individual newsletter messages. The OAuth dance
+// happens via /api/connectors/gmail/initiate + /api/connectors/gmail/callback
+// (see those routes); this module exposes status / sync / disconnect /
+// triage actions for the GmailCard + Insights tab.
+import { gmailMessages } from '@/db';
+import {
+  kickFirstGmailSync,
+  runIncrementalGmailSync,
+  countGmailMessagesByStatus,
+  type GmailAccountMetadata,
+} from '@/lib/gmail/sync';
+import { GMAIL_OAUTH_PROVIDER } from '@/lib/gmail/oauth';
+// Idea extraction lives in @/lib/extract-ideas. We import the Gmail
+// variant lazily (inside the action body) so the heavy LLM module isn't
+// part of the actions.ts bundle when only triaging.
 
 const PROVIDER = 'beehiiv';
 const OBSIDIAN_PROVIDER = 'obsidian';
+const GMAIL_PROVIDER = GMAIL_OAUTH_PROVIDER;
 
 // ─── status types ──────────────────────────────────────
 
@@ -1073,4 +1090,254 @@ export async function getLinkedinStatus(): Promise<LinkedinStatus> {
     lastRunItemCount: meta.lastRunItemCount ?? null,
     postsSynced: Number(count ?? 0),
   };
+}
+
+
+// ─────────────────────────────────────────────────────────
+// GMAIL — Phase 13 (2026-05-04)
+//
+//   · getGmailStatus()       → for the GmailCard to render.
+//   · syncGmail()            → manual "Sync now" — runs incremental sync,
+//                              or finishes the chunked first-sync.
+//   · disconnectGmail()      → clear encryptedSecret + status='disconnected'.
+//                              Keeps gmail_messages rows for audit + reconnect.
+//   · triageGmailMessage()   → promote / dismiss / snooze a pending row.
+//                              Promote fires embed + extractIdeasFromGmail.
+//
+// The OAuth round-trip is NOT a server action — the Connect button is a
+// plain link to /api/connectors/gmail/initiate so the browser does the
+// 302s itself.
+// ─────────────────────────────────────────────────────────
+
+export type GmailStatus =
+  | { kind: 'disconnected' }
+  | {
+      kind: 'connected';
+      googleEmail: string | null;
+      lastSyncAt: string | null;
+      lastSyncStatus: string | null;
+      lastSyncError: string | null;
+      lastSyncCount: number | null;
+      syncCompletedAt: string | null;
+      firstSyncInProgress: boolean;
+      counts: {
+        pending: number;
+        promoted: number;
+        dismissed: number;
+        snoozed: number;
+        total: number;
+      };
+    };
+
+async function getGmailAccount(userId: string): Promise<ConnectorAccount | null> {
+  const [row] = await db
+    .select()
+    .from(connectorAccounts)
+    .where(
+      and(
+        eq(connectorAccounts.userId, userId),
+        eq(connectorAccounts.provider, GMAIL_PROVIDER)
+      )
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+export async function getGmailStatus(): Promise<GmailStatus> {
+  const user = await requireUser();
+  const account = await getGmailAccount(user.id);
+  if (!account || account.status !== 'connected') {
+    return { kind: 'disconnected' };
+  }
+
+  const meta = (account.metadata ?? {}) as GmailAccountMetadata;
+  const counts = await countGmailMessagesByStatus({ userId: user.id });
+
+  return {
+    kind: 'connected',
+    googleEmail: meta.googleEmail ?? null,
+    lastSyncAt: account.lastSyncAt?.toISOString() ?? null,
+    lastSyncStatus: account.lastSyncStatus ?? null,
+    lastSyncError: account.lastSyncError ?? null,
+    lastSyncCount: account.lastSyncCount ?? null,
+    syncCompletedAt: meta.syncCompletedAt ?? null,
+    // Chunked first-sync still has a pageToken parked → not yet done.
+    firstSyncInProgress:
+      !meta.syncCompletedAt && Boolean(meta.pendingPageToken ?? false),
+    counts,
+  };
+}
+
+export async function syncGmail(): Promise<ActionResult> {
+  const user = await requireUser();
+  const account = await getGmailAccount(user.id);
+  if (!account || account.status !== 'connected') {
+    return {
+      ok: false,
+      reason: 'not_connected',
+      message: 'Gmail is not connected yet.',
+    };
+  }
+
+  const meta = (account.metadata ?? {}) as GmailAccountMetadata;
+  try {
+    if (!meta.syncCompletedAt) {
+      await kickFirstGmailSync({ userId: user.id, accountId: account.id });
+    } else {
+      await runIncrementalGmailSync({ userId: user.id, accountId: account.id });
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'sync_failed',
+      message: (err as Error).message?.slice(0, 300),
+    };
+  }
+
+  revalidatePath('/studio/knowledge');
+  revalidatePath('/studio/insights');
+  return { ok: true };
+}
+
+export async function disconnectGmail(): Promise<ActionResult> {
+  const user = await requireUser();
+  const account = await getGmailAccount(user.id);
+  if (!account) return { ok: true };
+
+  // Soft delete: clear encryptedSecret (so we can never accidentally hit
+  // Google with a stale token) and set status='disconnected'. Keep
+  // gmail_messages rows + metadata.googleEmail so reconnect rehydrates.
+  await db
+    .update(connectorAccounts)
+    .set({
+      encryptedSecret: null,
+      status: 'disconnected',
+      metadata: {
+        ...((account.metadata as Record<string, unknown>) ?? {}),
+        // Reset the cursor and pagination state so reconnect starts clean.
+        lastHistoryId: null,
+        pendingPageToken: null,
+        pendingExamined: 0,
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(connectorAccounts.id, account.id));
+
+  revalidatePath('/studio/knowledge');
+  revalidatePath('/studio/insights');
+  return { ok: true };
+}
+
+// ─── triage actions ─────────────────────────────────────
+
+const triageSchema = z.object({
+  messageId: z.string().uuid(),
+  action: z.enum(['promote', 'dismiss', 'snooze']),
+  snoozeDays: z.number().int().min(1).max(365).optional(),
+});
+
+export async function triageGmailMessage(input: unknown): Promise<ActionResult> {
+  const parsed = triageSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: 'bad_input',
+      message: parsed.error.issues[0]?.message ?? 'Invalid input.',
+    };
+  }
+  const user = await requireUser();
+  const { messageId, action, snoozeDays } = parsed.data;
+
+  const [row] = await db
+    .select()
+    .from(gmailMessages)
+    .where(
+      and(
+        eq(gmailMessages.id, messageId),
+        eq(gmailMessages.userId, user.id)
+      )
+    )
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, reason: 'not_found', message: 'Message not found.' };
+  }
+
+  const now = new Date();
+
+  if (action === 'dismiss') {
+    await db
+      .update(gmailMessages)
+      .set({
+        status: 'dismissed',
+        dismissedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(gmailMessages.id, messageId));
+    revalidatePath('/studio/insights');
+    return { ok: true };
+  }
+
+  if (action === 'snooze') {
+    const days = snoozeDays ?? 30;
+    const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    await db
+      .update(gmailMessages)
+      .set({
+        status: 'snoozed',
+        snoozeUntil: until,
+        updatedAt: now,
+      })
+      .where(eq(gmailMessages.id, messageId));
+    revalidatePath('/studio/insights');
+    return { ok: true };
+  }
+
+  // action === 'promote'
+  // Lazy-import the heavy extract-ideas module so triaging dismiss/snooze
+  // doesn't pay the LLM bundle cost.
+  const [{ extractIdeasFromGmailMessage }, { embedText }] = await Promise.all([
+    import('@/lib/extract-ideas'),
+    import('@/lib/embed'),
+  ]);
+
+  // Compute embedding from body_clean (or body_text) so the message is
+  // retrievable in Reflect immediately on promote.
+  const text = row.bodyClean ?? row.bodyText ?? '';
+  let embedding: number[] | undefined;
+  if (text.trim().length >= 200) {
+    try {
+      embedding = await embedText(text);
+    } catch (err) {
+      console.warn('[gmail:promote] embed failed', messageId, err);
+    }
+  }
+
+  await db
+    .update(gmailMessages)
+    .set({
+      status: 'promoted',
+      promotedAt: now,
+      embedding,
+      updatedAt: now,
+    })
+    .where(eq(gmailMessages.id, messageId));
+
+  // Idea extraction. Best-effort — promote succeeds even if extraction fails.
+  try {
+    await extractIdeasFromGmailMessage({
+      userId: user.id,
+      messageId: row.id,
+      title: row.subject ?? '(no subject)',
+      bodyText: text,
+      webUrl: null,
+      postedAt: row.postedAt?.toISOString() ?? null,
+    });
+  } catch (err) {
+    console.warn('[gmail:promote] extractIdeas failed', messageId, err);
+  }
+
+  revalidatePath('/studio/insights');
+  revalidatePath('/studio/knowledge');
+  return { ok: true };
 }

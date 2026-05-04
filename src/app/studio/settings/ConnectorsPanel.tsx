@@ -17,13 +17,16 @@ import {
 } from './connectors/BeehiivCard';
 import { ObsidianCard } from './connectors/ObsidianCard';
 import { LinkedinCard } from './connectors/LinkedinCard';
+import { GmailCard } from './connectors/GmailCard';
 import {
   getBeehiivStatus,
   getObsidianStatus,
   getLinkedinStatus,
+  getGmailStatus,
   type BeehiivStatus,
   type ObsidianStatus,
   type LinkedinStatus,
+  type GmailStatus,
 } from './connectors/actions';
 
 type ConnectorCard = {
@@ -41,13 +44,6 @@ const SOON_CONNECTORS: ConnectorCard[] = [
     blurb:
       'Selected docs land as captures. Pick which folders Thoughtbed reads — nothing automatic.',
   },
-  {
-    id: 'gmail',
-    name: 'Gmail',
-    glyph: '@',
-    blurb:
-      'Subscribed newsletters land in the Inbox; you triage. Other email stays untouched.',
-  },
 ];
 
 export function ConnectorsPanel() {
@@ -56,6 +52,8 @@ export function ConnectorsPanel() {
     useState<ObsidianStatus | null>(null);
   const [linkedinStatus, setLinkedinStatus] =
     useState<LinkedinStatus | null>(null);
+  const [gmailStatus, setGmailStatus] =
+    useState<GmailStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -79,6 +77,14 @@ export function ConnectorsPanel() {
     getLinkedinStatus()
       .then((s) => {
         if (!cancelled) setLinkedinStatus(s);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setErr(e instanceof Error ? e.message : 'Failed to load status');
+      });
+    getGmailStatus()
+      .then((s) => {
+        if (!cancelled) setGmailStatus(s);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -155,6 +161,30 @@ export function ConnectorsPanel() {
               <div className="flex-1">
                 <h3 className="font-sans text-[16px] font-semibold text-ink leading-tight">
                   LinkedIn
+                </h3>
+              </div>
+            </div>
+            <p className="font-sans text-[13px] text-tag">
+              {err ? err : 'Loading…'}
+            </p>
+          </li>
+        )}
+
+        {/* Phase 13: Live Gmail card. Same skeleton pattern. */}
+        {gmailStatus ? (
+          <GmailCard initialStatus={gmailStatus} />
+        ) : (
+          <li className="rounded-panel bg-paper border border-rule p-6 flex flex-col gap-3 min-h-[180px]">
+            <div className="flex items-center gap-3">
+              <span
+                className="w-10 h-10 rounded-soft bg-paper-2 flex items-center justify-center font-mono text-[14px] text-tag"
+                aria-hidden
+              >
+                ✉
+              </span>
+              <div className="flex-1">
+                <h3 className="font-sans text-[16px] font-semibold text-ink leading-tight">
+                  Gmail
                 </h3>
               </div>
             </div>
