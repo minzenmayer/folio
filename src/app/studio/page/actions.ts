@@ -30,6 +30,7 @@ import { decryptSecret } from '@/lib/crypto';
 import { createPost as createBeehiivPost } from '@/lib/beehiiv';
 import type {
   UpdateDraftResult,
+  UpdateDraftTitleResult,
   DraftVersionRow,
   RestoreDraftResult,
 } from './action-types';
@@ -74,6 +75,38 @@ function deriveTitle(doc: any): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Phase 14a: strip the FIRST top-level H1 node from a Tiptap doc, if any.
+ * Used when we auto-promote the H1 text into the dedicated title slot —
+ * leaving the H1 in the body would visually duplicate the title.
+ *
+ * Returns a new doc; the input is not mutated.
+ */
+function stripFirstTopLevelH1(doc: any): any {
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.content)) {
+    return doc;
+  }
+  const next = { ...doc };
+  let dropped = false;
+  next.content = doc.content.filter((node: any) => {
+    if (
+      !dropped &&
+      node?.type === 'heading' &&
+      node.attrs?.level === 1
+    ) {
+      dropped = true;
+      return false;
+    }
+    return true;
+  });
+  // If we ended up with zero content, give it back an empty paragraph so
+  // Tiptap doesn't choke.
+  if (next.content.length === 0) {
+    next.content = [{ type: 'paragraph' }];
+  }
+  return next;
 }
 
 // Coalesce window for the snapshot policy. If the most recent autosave
@@ -241,9 +274,38 @@ export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
   // a partial mitigation — the actual workaround is to roundtrip the
   // payload through JSON.stringify/parse so the server walks plain
   // POJOs, not whatever the RSC serializer left behind.
-  const safeContent: unknown = JSON.parse(JSON.stringify(data.contentJson));
+  let safeContent: unknown = JSON.parse(JSON.stringify(data.contentJson));
 
-  const title = deriveTitle(safeContent);
+  // Phase 14a: read existing title before the write so we can preserve a
+  // user-set title across body autosaves AND only auto-promote H1 → title
+  // when the title slot is currently empty.
+  const [existing] = await db
+    .select({
+      title: drafts.title,
+    })
+    .from(drafts)
+    .where(and(eq(drafts.id, data.draftId), eq(drafts.userId, user.id)))
+    .limit(1);
+
+  const existingTitle = existing?.title?.trim() ?? '';
+  const derivedFromBody = deriveTitle(safeContent);
+
+  let title: string | null;
+  let titleSetFromH1 = false;
+  if (existingTitle.length > 0) {
+    // The user has set a title via the dedicated title input — never
+    // overwrite it from the body. Same call site as before, just guarded.
+    title = existingTitle;
+  } else if (derivedFromBody) {
+    // Auto-promote: lift the H1 text into the title slot AND strip the H1
+    // node from the body so the title doesn't visually double up.
+    title = derivedFromBody;
+    safeContent = stripFirstTopLevelH1(safeContent);
+    titleSetFromH1 = true;
+  } else {
+    title = null;
+  }
+
   const newVersion = data.expectedVersion + 1;
 
   const updated = await db
@@ -312,6 +374,81 @@ export async function updateDraft(input: unknown): Promise<UpdateDraftResult> {
     ok: true,
     savedAt: new Date().toISOString(),
     title,
+    version: newVersion,
+    titleSetFromH1: titleSetFromH1 || undefined,
+    contentJson: titleSetFromH1 ? safeContent : undefined,
+  };
+}
+
+// ─── updateDraftTitle ─────────────────────────────────
+// Phase 14a (2026-05-04). Powers the dedicated title input on the editor.
+// Updates only the title column + bumps version (so the body autosave's
+// optimistic-concurrency loop stays in sync). Empty / whitespace strings
+// clear the title back to null so future H1 auto-promotion can fire.
+
+const updateDraftTitleSchema = z.object({
+  draftId: z.string().uuid(),
+  expectedVersion: z.number().int().nonnegative(),
+  title: z.string().max(280),
+});
+
+export async function updateDraftTitle(
+  input: unknown
+): Promise<UpdateDraftTitleResult> {
+  const user = await requireUser();
+  const data = updateDraftTitleSchema.parse(input);
+
+  const trimmed = data.title.trim();
+  const nextTitle: string | null = trimmed.length > 0 ? trimmed : null;
+  const newVersion = data.expectedVersion + 1;
+
+  const updated = await db
+    .update(drafts)
+    .set({
+      title: nextTitle,
+      version: newVersion,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(drafts.id, data.draftId),
+        eq(drafts.userId, user.id),
+        eq(drafts.version, data.expectedVersion)
+      )
+    )
+    .returning({ id: drafts.id, version: drafts.version });
+
+  if (updated.length === 0) {
+    const [current] = await db
+      .select({
+        version: drafts.version,
+        title: drafts.title,
+        updatedAt: drafts.updatedAt,
+      })
+      .from(drafts)
+      .where(and(eq(drafts.id, data.draftId), eq(drafts.userId, user.id)))
+      .limit(1);
+
+    if (!current) {
+      throw new Error('Draft not found');
+    }
+
+    return {
+      ok: false,
+      conflict: true,
+      currentTitle: current.title,
+      currentVersion: current.version,
+      currentUpdatedAt: current.updatedAt.toISOString(),
+    };
+  }
+
+  revalidatePath('/studio/page');
+  revalidatePath(`/studio/page/${data.draftId}`);
+
+  return {
+    ok: true,
+    savedAt: new Date().toISOString(),
+    title: nextTitle,
     version: newVersion,
   };
 }

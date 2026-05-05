@@ -152,16 +152,12 @@ export function DraftMeta({
   return (
     <header className="flex items-baseline justify-between gap-6 border-b border-rule pb-4">
       <div className="min-w-0">
-        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold mb-2">
+        <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-bold">
           ▸ Draft
         </div>
-        <h1
-          className={`font-serif text-[22px] leading-[1.2] truncate ${
-            title ? 'text-ink' : 'italic text-tag font-light'
-          }`}
-        >
-          {title || 'Untitled — start with an H1'}
-        </h1>
+        {/* Phase 14a (2026-05-04): the static H1 title display moved into
+            <TitleInput> below this header. The chrome here is now meta +
+            menu + delete only. */}
       </div>
 
       <div className="flex items-center gap-4 flex-shrink-0">

@@ -140,6 +140,9 @@ export function DraftEditor({
   initialVersion,
   initialUpdatedAt,
   onEditorReady,
+  versionRef: externalVersionRef,
+  bodyInFlightRef,
+  onTitleAutoPromoted,
 }: {
   draftId: string;
   initialContent: unknown;
@@ -149,6 +152,17 @@ export function DraftEditor({
   // editor instance. Lets siblings (DraftMeta, HistoryModal) act on the
   // editor — exports, history-restore — without prop drilling or context.
   onEditorReady?: (editor: Editor | null) => void;
+  // Phase 14a (2026-05-04): the version cursor (drafts.version, the
+  // optimistic-concurrency token) is shared with TitleInput so a
+  // title-side save and a body-side save stay in sync. When supplied
+  // we mirror updates into both refs.
+  versionRef?: React.MutableRefObject<number>;
+  // Phase 14a: lets TitleInput back off while a body save is mid-flight.
+  bodyInFlightRef?: React.MutableRefObject<boolean>;
+  // Phase 14a: when the server reports titleSetFromH1, surface the
+  // promoted title to the parent (EditorPane) so its TitleInput updates
+  // and the inline notice can render.
+  onTitleAutoPromoted?: (title: string) => void;
 }) {
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' });
   const [conflict, setConflict] = useState<ConflictState | null>(null);
@@ -158,7 +172,10 @@ export function DraftEditor({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
-  const versionRef = useRef<number>(initialVersion);
+  // Phase 14a: prefer the parent's versionRef when supplied so the title
+  // input and body editor share the same OCC cursor.
+  const localVersionRef = useRef<number>(initialVersion);
+  const versionRef = externalVersionRef ?? localVersionRef;
   const conflictRef = useRef<ConflictState | null>(null);
   useEffect(() => {
     conflictRef.current = conflict;
@@ -167,6 +184,16 @@ export function DraftEditor({
   const retryCountRef = useRef(0);
 
   const router = useRouter();
+
+  // Phase 14a: keep the parent-shared bodyInFlightRef in sync with our
+  // own inFlightRef so TitleInput knows when to back off.
+  const setInFlight = useCallback(
+    (v: boolean) => {
+      inFlightRef.current = v;
+      if (bodyInFlightRef) bodyInFlightRef.current = v;
+    },
+    [bodyInFlightRef]
+  );
 
   const flushSave = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -180,7 +207,7 @@ export function DraftEditor({
       retryTimerRef.current = null;
     }
 
-    inFlightRef.current = true;
+    setInFlight(true);
     pendingDocRef.current = null;
     setStatus({ kind: 'saving' });
 
@@ -213,6 +240,21 @@ export function DraftEditor({
         kind: 'saved',
         at: result.savedAt ? new Date(result.savedAt) : new Date(),
       });
+      // Phase 14a: H1 → title auto-promote. Server stripped the H1 from
+      // the body and lifted its text into the title slot. Swap our
+      // editor content to match (silent setContent so we don't loop on
+      // onUpdate) and tell the parent to update its title state.
+      if (result.titleSetFromH1 && result.contentJson) {
+        if (editorRef.current) {
+          editorRef.current.commands.setContent(
+            result.contentJson as any,
+            false
+          );
+        }
+        if (onTitleAutoPromoted && result.title) {
+          onTitleAutoPromoted(result.title);
+        }
+      }
       router.refresh();
     } catch (err) {
       console.error('[DraftEditor] save failed', err);
@@ -242,7 +284,7 @@ export function DraftEditor({
         flushSave();
       }, delay);
     } finally {
-      inFlightRef.current = false;
+      setInFlight(false);
       if (
         pendingDocRef.current !== null &&
         !conflictRef.current &&
@@ -286,6 +328,7 @@ export function DraftEditor({
     }
   }, [flushSave]);
 
+  const editorRef = useRef<Editor | null>(null);
   const editor = useEditor({
     extensions: [StarterKit],
     immediatelyRender: false,
@@ -330,6 +373,7 @@ export function DraftEditor({
   // HistoryModal) can call getJSON / getHTML / setContent without prop
   // drilling. Cleaned up on unmount so the parent doesn't hold a dead ref.
   useEffect(() => {
+    editorRef.current = editor ?? null;
     if (!onEditorReady) return;
     onEditorReady(editor ?? null);
     return () => onEditorReady(null);

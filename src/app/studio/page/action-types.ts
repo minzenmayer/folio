@@ -27,6 +27,13 @@ export type UpdateDraftResult =
       savedAt: string;
       title: string | null;
       version: number;
+      // Phase 14a (2026-05-04): when the title was previously empty and
+      // the body started with an H1, the server promotes the H1 text
+      // into the title slot and strips the H1 node from contentJson.
+      // The client uses these to update its title input and swap the
+      // editor's content so the H1 doesn't double up.
+      titleSetFromH1?: boolean;
+      contentJson?: unknown;
     }
   | {
       ok: false;
@@ -34,6 +41,24 @@ export type UpdateDraftResult =
       currentDoc: unknown;
       currentVersion: number;
       currentTitle: string | null;
+      currentUpdatedAt: string;
+    };
+
+// Phase 14a: separate action for the dedicated title input. Bumps the
+// version like updateDraft so the optimistic-concurrency loop stays
+// honest. Does NOT touch contentJson.
+export type UpdateDraftTitleResult =
+  | {
+      ok: true;
+      savedAt: string;
+      title: string | null;
+      version: number;
+    }
+  | {
+      ok: false;
+      conflict: true;
+      currentTitle: string | null;
+      currentVersion: number;
       currentUpdatedAt: string;
     };
 
