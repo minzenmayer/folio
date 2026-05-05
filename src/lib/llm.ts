@@ -300,6 +300,11 @@ export type ProposalResult = {
   retrievalSummary: string;
   platformGuess: 'newsletter' | 'linkedin' | 'unknown';
   angles: ProposalAngle[];
+  // Phase 16 (2026-05-05): hook is the LinkedIn-only opener (6-12
+  // words). Empty / undefined for newsletter and unknown platforms.
+  // Lives at the top of the plan as its own structural slot, separate
+  // from outline beats.
+  hook: string | null;
   outline: { beat: string }[];
   followUpQuestion: string;
 };
@@ -430,6 +435,14 @@ The user has already been sparring with you on this topic. Read the conversation
       .min(1)
       .max(6)
       .describe('Three default. Two if the topic surfaces a clear two-direction tension. Four if open-ended.'),
+    hook: z
+      .string()
+      .max(140)
+      .nullable()
+      .default(null)
+      .describe(
+        'LINKEDIN ONLY. The opener — 6 to 12 words. Stops the scroll. Promises a clear payoff. No jargon. Concrete. Set to null for newsletter or unknown platforms (the spar surfaces hook only as a LinkedIn structural slot).'
+      ),
     outline: z
       .array(
         z.object({
@@ -486,6 +499,8 @@ ${sparseCorpusNote}
 
 Voice rules. No "I notice that", no "It seems like", no "Great topic", no "Here's what I came up with", no preamble. No emoji. No tone-policing. No "Have you considered". Editorial restraint. When you cite an angle's source, the UI will render the citation; you don't need to write "based on your CSL issue X" in the angle line itself — keep the line tight, let sourceCitations do the work.
 
+If platformGuess is "linkedin", emit a `hook` — 6 to 12 words, opener-shape, stops the scroll. If platformGuess is "newsletter" or "unknown", set hook to null. The hook is its own structural slot, separate from the outline beats; do not duplicate the hook as the first beat.
+
 Now produce the structured output.`;
 
   const { object } = await generateObject({
@@ -504,6 +519,7 @@ Now produce the structured output.`;
       line: a.line.trim(),
       sourceCitations: a.sourceCitations ?? [],
     })),
+    hook: object.hook ? object.hook.trim() : null,
     outline: (object.outline ?? []).map((b) => ({
       beat: b.beat.trim(),
     })),

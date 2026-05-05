@@ -1249,6 +1249,9 @@ export type ProposeFromTopicResult =
         };
       };
       angles: ProposeAngle[];
+      // Phase 16: linkedin-only structural slot. null for newsletter
+      // / unknown.
+      hook: string | null;
       outline: { beat: string }[];
       followUpQuestion: string;
       retrievalCount: number;
@@ -1483,6 +1486,7 @@ export async function proposeFromTopic(
       kindCounts: visibleThinkingKindCounts(hits),
     },
     angles,
+    hook: proposal.hook ?? null,
     outline: proposal.outline,
     followUpQuestion: proposal.followUpQuestion,
     retrievalCount: hits.length,

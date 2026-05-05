@@ -843,6 +843,11 @@ function SparView({
     (proposal.platformGuess === 'linkedin' ? 'linkedin' : 'newsletter');
   const platformAmbiguous =
     !platformOverride && proposal.platformGuess === 'unknown';
+  // Phase 16 (2026-05-05): word-count target by platform. Surfaced as
+  // a small mono label at the top of the plan, mirroring the
+  // structural targets the LLM is implicitly drafting toward.
+  const wordCountTarget = platform === 'linkedin' ? '~200 words' : '~1000 words';
+  const showHookSlot = platform === 'linkedin';
 
   const trimmedResponse = response.trim();
   const canSubmitResponse = !isThinking && trimmedResponse.length > 0;
@@ -913,6 +918,39 @@ function SparView({
             </button>
           ))}
         </div>
+      )}
+
+      {/* Phase 16 plan-zone header — word-count target + format
+          label. Lives above Angles so the user sees the target shape
+          they're planning toward. */}
+      <div className="mb-4 flex items-baseline justify-between gap-3">
+        <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+          {platform === 'linkedin' ? 'LinkedIn shape' : 'Newsletter shape'}
+        </p>
+        <p className="font-mono text-[10px] tracking-[0.04em] text-tag">
+          {wordCountTarget}
+        </p>
+      </div>
+
+      {/* Hook — Phase 16 LinkedIn-only structural slot. Sits above
+          Angles because the hook IS the entry move on LinkedIn —
+          the rest of the post earns the read it promises. */}
+      {showHookSlot && proposal.hook && (
+        <section className="mb-8 rounded-soft bg-paper-2 border border-rule px-4 py-4">
+          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3 flex items-center gap-2">
+            <ZoneIcon kind="hook" />
+            Hook
+            <span className="ml-2 font-mono text-[10px] tracking-[0.04em] text-tag normal-case">
+              6–12 words
+            </span>
+          </h3>
+          <p className="font-sans text-[15px] text-ink leading-[1.4] font-medium">
+            {proposal.hook}
+          </p>
+          <p className="mt-2 font-mono text-[10px] tracking-[0.04em] text-tag italic">
+            The opener that earns the read.
+          </p>
+        </section>
       )}
 
       {/* Angles — Phase 16 zone: subtle card + slot icon header. */}
@@ -1435,7 +1473,11 @@ function ModeIcon({ mode }: { mode: StarterMode }) {
 // than as one paper-on-paper word wall. 12px, currentColor — pick up
 // the header's `text-tag`. Lucide-shape: flag / list / help-circle.
 
-function ZoneIcon({ kind }: { kind: 'angles' | 'outline' | 'question' }) {
+function ZoneIcon({
+  kind,
+}: {
+  kind: 'angles' | 'outline' | 'question' | 'hook';
+}) {
   const props = {
     width: 12,
     height: 12,
@@ -1464,6 +1506,14 @@ function ZoneIcon({ kind }: { kind: 'angles' | 'outline' | 'question' }) {
         <line x1="3" y1="6" x2="3.01" y2="6" />
         <line x1="3" y1="12" x2="3.01" y2="12" />
         <line x1="3" y1="18" x2="3.01" y2="18" />
+      </svg>
+    );
+  }
+  if (kind === 'hook') {
+    // chevron-right — the opener / arrow-into shape
+    return (
+      <svg {...props}>
+        <polyline points="9 6 15 12 9 18" />
       </svg>
     );
   }
