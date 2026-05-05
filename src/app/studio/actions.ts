@@ -81,6 +81,8 @@ import {
   generateProposal,
   generateSectionDraft,
   generateBeatDraft,
+  regenerateAngles as llmRegenerateAngles,
+  regenerateOutline as llmRegenerateOutline,
   type ReflectionVoiceMode,
   type ProposalRetrievalItem,
   type ProposalResult,
@@ -1606,6 +1608,194 @@ export async function draftSection(
     };
   }
 }
+
+// ─── regenerateAngles — Phase 16 · cheaper iteration: angles only ────
+//
+// 2026-05-05. Per-zone "Rethink angles" button calls this. Keeps
+// outline / retrieval / proposal context where it is and only
+// re-spins the three angles. Cheaper LLM call, target ~4-5s vs ~8-9s
+// for the full proposeFromTopic. Returns the same ProposeAngle[]
+// shape so the UI can splice without reshaping.
+
+const regenerateAnglesSchema = z.object({
+  topic: z.string().min(1).max(2000),
+  outline: z.array(z.object({ beat: z.string().min(1).max(800) })).min(1).max(8),
+  conversationSoFar: z.string().max(8000).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+});
+
+export type RegenerateAnglesResult =
+  | { ok: true; angles: ProposeAngle[] }
+  | { ok: false; reason: 'invalid_input' | 'error'; message: string };
+
+export async function regenerateAngles(
+  input: unknown
+): Promise<RegenerateAnglesResult> {
+  let parsed: z.infer<typeof regenerateAnglesSchema>;
+  try {
+    parsed = regenerateAnglesSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+
+  let hits: SimilarHit[] = [];
+  try {
+    hits = await findSimilar({
+      text: parsed.topic,
+      kinds: [...SIMILAR_KINDS],
+      limit: 12,
+    });
+  } catch (err) {
+    console.warn('[regenerateAngles] findSimilar failed', err);
+    hits = [];
+  }
+
+  const retrievalItems: ProposalRetrievalItem[] = hits.map((h, i) => ({
+    index: i + 1,
+    bucket: bucket({ kind: h.kind, sourceKind: h.sourceKind ?? null }),
+    label: labelForHit(h),
+    title: h.title,
+    body: bodyForHit(h),
+  }));
+
+  let voiceProfile: Awaited<ReturnType<typeof getVoiceProfile>> = {};
+  try {
+    voiceProfile = await getVoiceProfile(user.id);
+  } catch (err) {
+    console.warn('[regenerateAngles] getVoiceProfile failed', err);
+    voiceProfile = {};
+  }
+
+  try {
+    const result = await llmRegenerateAngles({
+      topic: parsed.topic,
+      conversationSoFar: parsed.conversationSoFar,
+      platformHint: parsed.platformHint,
+      voiceProfile,
+      retrieval: retrievalItems,
+      existingOutline: parsed.outline,
+    });
+    const angles: ProposeAngle[] = result.angles.map((a) => {
+      const sources = (a.sourceCitations ?? [])
+        .map((idx) => {
+          const item = retrievalItems[idx - 1];
+          const hit = hits[idx - 1];
+          if (!item || !hit) return null;
+          return {
+            index: item.index,
+            kind: hit.kind,
+            bucket: item.bucket,
+            label: item.label,
+            title: hit.title,
+            id: hit.id,
+          };
+        })
+        .filter((srt): srt is NonNullable<typeof srt> => srt !== null);
+      return { line: a.line, sources };
+    });
+    return { ok: true, angles };
+  } catch (err) {
+    console.error('[regenerateAngles] llmRegenerateAngles failed', err);
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'rethink failed',
+    };
+  }
+}
+
+// ─── regenerateOutline — Phase 16 · cheaper iteration: outline only ──
+//
+// 2026-05-05. Per-zone "Rethink outline" button calls this. Keeps
+// angles + retrieval intact; re-spins beats. Anchored beats are
+// pinned in the LLM prompt as DO NOT CHANGE so iteration narrows
+// toward the user's selections rather than wiping them.
+
+const regenerateOutlineSchema = z.object({
+  topic: z.string().min(1).max(2000),
+  angles: z.array(z.object({ line: z.string().min(1).max(800) })).min(1).max(8),
+  // Beats the user has anchored. Optional; empty array = nothing pinned.
+  anchoredBeats: z.array(z.string().min(1).max(800)).max(8).optional(),
+  conversationSoFar: z.string().max(8000).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+});
+
+export type RegenerateOutlineResult =
+  | { ok: true; outline: { beat: string }[] }
+  | { ok: false; reason: 'invalid_input' | 'error'; message: string };
+
+export async function regenerateOutline(
+  input: unknown
+): Promise<RegenerateOutlineResult> {
+  let parsed: z.infer<typeof regenerateOutlineSchema>;
+  try {
+    parsed = regenerateOutlineSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+
+  let hits: SimilarHit[] = [];
+  try {
+    hits = await findSimilar({
+      text: parsed.topic,
+      kinds: [...SIMILAR_KINDS],
+      limit: 12,
+    });
+  } catch (err) {
+    console.warn('[regenerateOutline] findSimilar failed', err);
+    hits = [];
+  }
+
+  const retrievalItems: ProposalRetrievalItem[] = hits.map((h, i) => ({
+    index: i + 1,
+    bucket: bucket({ kind: h.kind, sourceKind: h.sourceKind ?? null }),
+    label: labelForHit(h),
+    title: h.title,
+    body: bodyForHit(h),
+  }));
+
+  let voiceProfile: Awaited<ReturnType<typeof getVoiceProfile>> = {};
+  try {
+    voiceProfile = await getVoiceProfile(user.id);
+  } catch (err) {
+    console.warn('[regenerateOutline] getVoiceProfile failed', err);
+    voiceProfile = {};
+  }
+
+  try {
+    const result = await llmRegenerateOutline({
+      topic: parsed.topic,
+      conversationSoFar: parsed.conversationSoFar,
+      platformHint: parsed.platformHint,
+      voiceProfile,
+      retrieval: retrievalItems,
+      existingAngles: parsed.angles,
+      anchoredBeats: parsed.anchoredBeats,
+    });
+    return { ok: true, outline: result.outline };
+  } catch (err) {
+    console.error('[regenerateOutline] llmRegenerateOutline failed', err);
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'rethink failed',
+    };
+  }
+}
+
+// ─── draftBeat — Phase 16 · per-piece micro-drafting ─────────────────
 
 // ─── draftBeat — Phase 16 · per-piece micro-drafting ─────────────────
 //

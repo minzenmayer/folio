@@ -439,6 +439,85 @@ export function Spar() {
     [proposal, platformOverride, conversation, beatIntents]
   );
 
+  // Phase 16 slice 4 — per-zone Rethink. Splices only the relevant
+  // slice of the proposal. Cheaper LLM call (narrower schema) so the
+  // user can iterate angles or outline without re-running the full
+  // proposeFromTopic. Anchored beats are pinned in the regenerateOutline
+  // prompt as DO NOT CHANGE so iteration narrows toward the user's
+  // selections rather than wiping them.
+  const [isRethinkingAngles, startRethinkAnglesTransition] = useTransition();
+  const [isRethinkingOutline, startRethinkOutlineTransition] = useTransition();
+
+  const onRethinkAngles = useCallback(() => {
+    if (!proposal) return;
+    setErrorMessage(null);
+    startRethinkAnglesTransition(async () => {
+      try {
+        const res = await regenerateAngles({
+          topic: proposal.topic,
+          outline: proposal.outline,
+          platformHint:
+            platformOverride ??
+            (proposal.platformGuess === 'linkedin' ? 'linkedin' : undefined),
+          conversationSoFar:
+            conversation.length > 0 ? renderConversation(conversation) : undefined,
+        });
+        if (res.ok) {
+          setProposal((prev) => (prev ? { ...prev, angles: res.angles } : prev));
+        } else {
+          setErrorMessage(res.message);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown';
+        setErrorMessage(message);
+      }
+    });
+  }, [proposal, platformOverride, conversation]);
+
+  const onRethinkOutline = useCallback(() => {
+    if (!proposal) return;
+    setErrorMessage(null);
+    // Pin anchored beats by their CURRENT text — indices shift on
+    // regenerate; pinning by text is what survives. After the new
+    // outline lands, anchoredBeats indices won't necessarily map to
+    // the same lines, so we clear per-beat state and let the user
+    // re-anchor what landed.
+    const anchoredText = proposal.outline
+      .filter((_b, i) => anchoredBeats.has(i))
+      .map((b) => b.beat);
+    startRethinkOutlineTransition(async () => {
+      try {
+        const res = await regenerateOutline({
+          topic: proposal.topic,
+          angles: proposal.angles.map((a) => ({ line: a.line })),
+          anchoredBeats: anchoredText.length > 0 ? anchoredText : undefined,
+          platformHint:
+            platformOverride ??
+            (proposal.platformGuess === 'linkedin' ? 'linkedin' : undefined),
+          conversationSoFar:
+            conversation.length > 0 ? renderConversation(conversation) : undefined,
+        });
+        if (res.ok) {
+          setProposal((prev) =>
+            prev ? { ...prev, outline: res.outline } : prev
+          );
+          setSections({});
+          setBeatIntents({});
+          setBeatExpanded(new Set());
+          setAnchoredBeats(new Set());
+          setBeatFallbackVoice(new Set());
+          setSectionPendingIndex(null);
+          setSectionError(null);
+        } else {
+          setErrorMessage(res.message);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown';
+        setErrorMessage(message);
+      }
+    });
+  }, [proposal, platformOverride, conversation, anchoredBeats]);
+
   const handleOpenPage = useCallback(() => {
     if (!proposal) return;
     const platform: 'newsletter' | 'linkedin' =
@@ -545,6 +624,10 @@ export function Spar() {
           toggleAnchorBeat={toggleAnchorBeat}
           beatFallbackVoice={beatFallbackVoice}
           onSubmitBeatIntent={onSubmitBeatIntent}
+          onRethinkAngles={onRethinkAngles}
+          onRethinkOutline={onRethinkOutline}
+          isRethinkingAngles={isRethinkingAngles}
+          isRethinkingOutline={isRethinkingOutline}
         />
       )}
 
@@ -806,6 +889,10 @@ function SparView({
   toggleAnchorBeat,
   beatFallbackVoice,
   onSubmitBeatIntent,
+  onRethinkAngles,
+  onRethinkOutline,
+  isRethinkingAngles,
+  isRethinkingOutline,
 }: {
   proposal: Extract<ProposeFromTopicResult, { ok: true }>;
   conversation: ConversationTurn[];
@@ -837,6 +924,10 @@ function SparView({
   toggleAnchorBeat: (beatIndex: number) => void;
   beatFallbackVoice: Set<number>;
   onSubmitBeatIntent: (beatIndex: number) => void;
+  onRethinkAngles: () => void;
+  onRethinkOutline: () => void;
+  isRethinkingAngles: boolean;
+  isRethinkingOutline: boolean;
 }) {
   const platform: 'newsletter' | 'linkedin' =
     platformOverride ??
@@ -956,10 +1047,21 @@ function SparView({
       {/* Angles — Phase 16 zone: subtle card + slot icon header. */}
       {proposal.angles.length > 0 && (
         <section className="mb-8 rounded-soft bg-paper-2 border border-rule px-4 py-4">
-          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3 flex items-center gap-2">
-            <ZoneIcon kind="angles" />
-            Angles
-          </h3>
+          <div className="flex items-baseline justify-between gap-3 mb-3">
+            <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium flex items-center gap-2">
+              <ZoneIcon kind="angles" />
+              Angles
+            </h3>
+            <button
+              type="button"
+              onClick={onRethinkAngles}
+              disabled={isRethinkingAngles || isThinking || isCommitting}
+              className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Regenerate angles only — keeps your outline intact"
+            >
+              {isRethinkingAngles ? 'Rethinking…' : '↻ Rethink'}
+            </button>
+          </div>
           <ul className="flex flex-col gap-2">
             {proposal.angles.map((a, i) => (
               <li key={i}>
@@ -998,10 +1100,21 @@ function SparView({
       {/* Outline — Phase 16 zone: clean paper card + numbered-list icon. */}
       {proposal.outline.length > 0 && (
         <section className="mb-8 rounded-soft bg-paper border border-rule px-4 py-4">
-          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3 flex items-center gap-2">
-            <ZoneIcon kind="outline" />
-            Outline
-          </h3>
+          <div className="flex items-baseline justify-between gap-3 mb-3">
+            <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium flex items-center gap-2">
+              <ZoneIcon kind="outline" />
+              Outline
+            </h3>
+            <button
+              type="button"
+              onClick={onRethinkOutline}
+              disabled={isRethinkingOutline || isThinking || isCommitting}
+              className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="Regenerate outline only — keeps your angles intact. Anchored beats are preserved."
+            >
+              {isRethinkingOutline ? 'Rethinking…' : '↻ Rethink'}
+            </button>
+          </div>
           <ol className="flex flex-col gap-3 list-none">
             {proposal.outline.map((b, i) => (
               <BeatRow

@@ -969,3 +969,281 @@ Now produce the structured output.`;
     prose: (object.prose ?? '').trim(),
   };
 }
+
+
+// ─── Phase 16 · regenerateAngles + regenerateOutline ────────────────
+//
+// 2026-05-05. Two narrower variants of generateProposal for the
+// per-zone Rethink buttons. Each keeps the rest of the spar where it
+// is and only re-spins the slice the user asked to rethink. Cheaper
+// LLM call (narrower schema, smaller maxTokens) — target ~4-5s vs
+// ~8-9s for the full proposeFromTopic path.
+
+export type RegenerateAnglesResult = {
+  angles: ProposalAngle[];
+};
+
+export async function regenerateAngles({
+  topic,
+  conversationSoFar,
+  platformHint,
+  voiceProfile,
+  retrieval,
+  existingOutline,
+}: {
+  topic: string;
+  conversationSoFar?: string;
+  platformHint?: 'newsletter' | 'linkedin';
+  voiceProfile?: {
+    longform?: ProposalVoiceProfile;
+    linkedin?: ProposalVoiceProfile;
+  };
+  retrieval: ProposalRetrievalItem[];
+  // The current outline is preserved — pass it so the new angles
+  // stay coherent with the beats the user has already accepted.
+  existingOutline: { beat: string }[];
+}): Promise<RegenerateAnglesResult> {
+  const trimmedTopic = topic.slice(0, 1000);
+  const trimmedConvo = conversationSoFar?.slice(0, 4000);
+
+  const longform = retrieval.filter((h) => h.bucket === 'voice_longform');
+  const shortform = retrieval.filter((h) => h.bucket === 'voice_shortform');
+  const knowledge = retrieval.filter((h) => h.bucket === 'knowledge');
+
+  function renderBlock(items: ProposalRetrievalItem[]): string {
+    if (items.length === 0) return '(empty)';
+    return items
+      .map((h) => {
+        const body = (h.body ?? '').slice(0, PROPOSAL_HIT_BODY_MAX).trim();
+        const head = h.title ? `${h.label}: "${h.title}"` : h.label;
+        return body.length > 0
+          ? `[${h.index}] (${head}) ${body}`
+          : `[${h.index}] (${head})`;
+      })
+      .join('\n\n');
+  }
+
+  const voiceProfileBlock = (() => {
+    if (!voiceProfile) return '(no voice profile yet)';
+    const parts: string[] = [];
+    if (voiceProfile.longform) {
+      parts.push(
+        `LONGFORM: ${voiceProfile.longform.summary ?? '—'}; avoid: ${(voiceProfile.longform.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    if (voiceProfile.linkedin) {
+      parts.push(
+        `LINKEDIN: ${voiceProfile.linkedin.summary ?? '—'}; avoid: ${(voiceProfile.linkedin.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    return parts.length > 0 ? parts.join('\n') : '(profile present but empty)';
+  })();
+
+  const platformLine = platformHint
+    ? `Platform is ${platformHint}.`
+    : 'Platform is unknown — keep angles flexible enough to fit either newsletter or linkedin.';
+
+  const outlineFrame = existingOutline
+    .map((b, i) => `  ${String(i + 1).padStart(2, '0')} ${b.beat}`)
+    .join('\n');
+
+  const conversationBlock = trimmedConvo
+    ? `\n\n<conversation_so_far>\n${trimmedConvo}\n</conversation_so_far>\n`
+    : '';
+
+  const outputSchema = z.object({
+    angles: z
+      .array(
+        z.object({
+          line: z.string().min(1).max(600),
+          sourceCitations: z
+            .array(z.number().int().min(1))
+            .max(12)
+            .default([]),
+        })
+      )
+      .min(1)
+      .max(6),
+  });
+
+  const prompt = `You are a sparring writing partner. The user has asked you to rethink the ANGLES only — leave their outline alone, don't restate it, just give fresh ways into the topic. The outline below is fixed; angles should fit alongside it without contradicting the beats.
+
+<topic>
+${trimmedTopic}
+</topic>${conversationBlock}
+
+<voice_longform>
+${renderBlock(longform)}
+</voice_longform>
+
+<voice_shortform>
+${renderBlock(shortform)}
+</voice_shortform>
+
+<knowledge>
+${renderBlock(knowledge)}
+</knowledge>
+
+<voice_profile>
+${voiceProfileBlock}
+</voice_profile>
+
+<existing_outline_keep_intact>
+${outlineFrame}
+</existing_outline_keep_intact>
+
+${platformLine}
+
+Voice rules. No "I notice that", no "It seems like", no preamble. No emoji. Editorial restraint. Cite source indices via sourceCitations; the UI renders the citation. Three angles default; two if the topic has a clear two-direction tension; four if open-ended.
+
+Now produce just the angles.`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(PROPOSAL_MODEL as any),
+    schema: outputSchema,
+    prompt,
+    maxTokens: 600,
+    temperature: 0.75,
+  });
+
+  return {
+    angles: (object.angles ?? []).map((a) => ({
+      line: a.line.trim(),
+      sourceCitations: a.sourceCitations ?? [],
+    })),
+  };
+}
+
+export type RegenerateOutlineResult = {
+  outline: { beat: string }[];
+};
+
+export async function regenerateOutline({
+  topic,
+  conversationSoFar,
+  platformHint,
+  voiceProfile,
+  retrieval,
+  existingAngles,
+  anchoredBeats,
+}: {
+  topic: string;
+  conversationSoFar?: string;
+  platformHint?: 'newsletter' | 'linkedin';
+  voiceProfile?: {
+    longform?: ProposalVoiceProfile;
+    linkedin?: ProposalVoiceProfile;
+  };
+  retrieval: ProposalRetrievalItem[];
+  existingAngles: { line: string }[];
+  // Beats the user has anchored — pin in the prompt as DO NOT CHANGE
+  // so iteration narrows toward the user's selections rather than
+  // wiping them.
+  anchoredBeats?: string[];
+}): Promise<RegenerateOutlineResult> {
+  const trimmedTopic = topic.slice(0, 1000);
+  const trimmedConvo = conversationSoFar?.slice(0, 4000);
+
+  const longform = retrieval.filter((h) => h.bucket === 'voice_longform');
+  const shortform = retrieval.filter((h) => h.bucket === 'voice_shortform');
+  const knowledge = retrieval.filter((h) => h.bucket === 'knowledge');
+
+  function renderBlock(items: ProposalRetrievalItem[]): string {
+    if (items.length === 0) return '(empty)';
+    return items
+      .map((h) => {
+        const body = (h.body ?? '').slice(0, PROPOSAL_HIT_BODY_MAX).trim();
+        const head = h.title ? `${h.label}: "${h.title}"` : h.label;
+        return body.length > 0
+          ? `[${h.index}] (${head}) ${body}`
+          : `[${h.index}] (${head})`;
+      })
+      .join('\n\n');
+  }
+
+  const voiceProfileBlock = (() => {
+    if (!voiceProfile) return '(no voice profile yet)';
+    const parts: string[] = [];
+    if (voiceProfile.longform) {
+      parts.push(
+        `LONGFORM: ${voiceProfile.longform.summary ?? '—'}; avoid: ${(voiceProfile.longform.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    if (voiceProfile.linkedin) {
+      parts.push(
+        `LINKEDIN: ${voiceProfile.linkedin.summary ?? '—'}; avoid: ${(voiceProfile.linkedin.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    return parts.length > 0 ? parts.join('\n') : '(profile present but empty)';
+  })();
+
+  const platformLine = platformHint
+    ? `Platform is ${platformHint}.`
+    : 'Platform is unknown — outline shape can lean either newsletter or linkedin.';
+
+  const anglesFrame = existingAngles
+    .map((a, i) => `  - ${a.line}`)
+    .join('\n');
+
+  const anchoredFrame =
+    anchoredBeats && anchoredBeats.length > 0
+      ? `\n\n<anchored_beats_DO_NOT_CHANGE>\n${anchoredBeats.map((b) => `  - ${b}`).join('\n')}\n</anchored_beats_DO_NOT_CHANGE>\n\nThe anchored beats above MUST appear verbatim (or near-verbatim — light copy-edit is OK) in the new outline. Reorder is fine. Do not remove or paraphrase away the anchored content; the user has explicitly kept them.`
+      : '';
+
+  const conversationBlock = trimmedConvo
+    ? `\n\n<conversation_so_far>\n${trimmedConvo}\n</conversation_so_far>\n`
+    : '';
+
+  const outputSchema = z.object({
+    outline: z
+      .array(z.object({ beat: z.string().min(1).max(600) }))
+      .min(1)
+      .max(8),
+  });
+
+  const prompt = `You are a sparring writing partner. The user has asked you to rethink the OUTLINE only — leave the angles alone. Produce a fresh outline that fits the angles below.
+
+<topic>
+${trimmedTopic}
+</topic>${conversationBlock}
+
+<voice_longform>
+${renderBlock(longform)}
+</voice_longform>
+
+<voice_shortform>
+${renderBlock(shortform)}
+</voice_shortform>
+
+<knowledge>
+${renderBlock(knowledge)}
+</knowledge>
+
+<voice_profile>
+${voiceProfileBlock}
+</voice_profile>
+
+<existing_angles>
+${anglesFrame}
+</existing_angles>${anchoredFrame}
+
+${platformLine}
+
+Voice rules: no preamble, no emoji, editorial restraint. Section-shape for newsletter (one line per beat); hooky-and-tight for linkedin (one beat = one move). 3 to 5 beats default; up to 8 if the topic warrants. Tight, no padding.
+
+Now produce just the outline.`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(PROPOSAL_MODEL as any),
+    schema: outputSchema,
+    prompt,
+    maxTokens: 600,
+    temperature: 0.7,
+  });
+
+  return {
+    outline: (object.outline ?? []).map((b) => ({ beat: b.beat.trim() })),
+  };
+}
