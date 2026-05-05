@@ -589,24 +589,21 @@ export async function generateVoiceProfile({
   const outputSchema = z.object({
     summary: z
       .string()
-      .min(1)
-      .max(400)
+      .max(1200)
       .describe(
         'A single short paragraph summarizing how this person writes on this platform. Direct, observational, second-person ("you"). One paragraph, not bullet points. No "I notice", no "It seems", no preamble. About 60-100 words.'
       ),
     attributes: z
-      .array(z.string().min(1).max(160))
-      .min(attrTarget.min)
-      .max(attrTarget.max)
+      .array(z.string().min(1).max(400))
+      .max(20)
       .describe(
-        `Concrete voice attributes — short declarative phrases. Each one a specific pattern you can point to in the samples. Examples (don\'t copy these, write fresh): "opens with a question more often than not", "uses em-dashes as breath, not commas", "closes essays with a one-line zinger", "names ideas before naming people". ${attrTarget.min}-${attrTarget.max} items.`
+        `Concrete voice attributes. Short declarative phrases. Each one a specific pattern you can point to in the samples. Examples (don\'t copy these, write fresh): "opens with a question more often than not", "uses em-dashes as breath, not commas", "closes essays with a one-line zinger", "names ideas before naming people". Aim for ${attrTarget.min}-${attrTarget.max} items.`
       ),
     thingsToAvoid: z
-      .array(z.string().min(1).max(160))
-      .min(AVOID_TARGET.min)
-      .max(AVOID_TARGET.max)
+      .array(z.string().min(1).max(400))
+      .max(20)
       .describe(
-        'Words, phrases, or moves the user consistently does NOT make — taboos inferred from their absence in the samples. Examples (don\'t copy): "no exclamation marks", "never uses the word \'really\'", "doesn\'t open with \'I\'", "no marketing-speak verbs (unlock, leverage, supercharge)". 0-6 items. Only include when the absence is striking enough to be a real signal; don\'t pad.'
+        'Words, phrases, or moves the user consistently does NOT make. Taboos inferred from their absence in the samples. Examples (don\'t copy): "no exclamation marks", "never uses the word \'really\'", "no marketing-speak verbs (unlock, leverage, supercharge)". 0-6 items. Only include when the absence is striking enough to be a real signal; don\'t pad.'
       ),
   });
 
