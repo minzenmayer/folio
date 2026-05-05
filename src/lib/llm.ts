@@ -354,9 +354,7 @@ export async function generateProposal({
           ? `[${h.index}] (${head}) ${body}`
           : `[${h.index}] (${head})`;
       })
-      .join('
-
-');
+      .join('\n\n');
   }
 
   // Voice profile block — empty until 15a ships. When present, this
@@ -380,9 +378,7 @@ export async function generateProposal({
   avoid: ${(voiceProfile.linkedin.thingsToAvoid ?? []).join('; ') || '—'}`
       );
     }
-    return parts.length > 0 ? parts.join('
-
-') : '(profile present but empty)';
+    return parts.length > 0 ? parts.join('\n\n') : '(profile present but empty)';
   })();
 
   const platformHintLine = platformHint
