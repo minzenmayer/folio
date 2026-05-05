@@ -1948,11 +1948,16 @@ const commitProposalSchema = z.object({
   // because z.record requires string keys; we coerce to int at the
   // splice site.
   sections: z.record(z.string(), z.string().max(8000)).optional(),
+  // Phase 16 slice 5 (2026-05-05): which beats the user had anchored
+  // in the spar. Stamped onto the H2 node as data-tb-beat-status =
+  // 'anchored' so the Plan ribbon (slice 6) can render filled green
+  // for anchored beats. 0-based outline indices.
+  anchoredBeatIndices: z.array(z.number().int().min(0).max(7)).max(8).optional(),
 });
 
 export async function commitProposal(input: unknown) {
   const user = await requireUser();
-  const { topic, outline, platform, sections } =
+  const { topic, outline, platform, sections, anchoredBeatIndices } =
     commitProposalSchema.parse(input);
 
   const trimmedTopic = topic.trim().slice(0, 280);
@@ -1976,12 +1981,32 @@ export async function commitProposal(input: unknown) {
   // Skip-the-empty-beat filter above means we have to rebuild the
   // mapping in lockstep — for each original outline index, only
   // include the prose if the matching beat survived.
-  const beatsWithProse: Array<{ beat: string; prose?: string }> = [];
+  // Phase 16 slice 5: each surviving beat also gets a stable
+  // randomUUID + status (anchored | drafted | floating). The id +
+  // status stamp into the H2 node attrs so the Plan ribbon can map
+  // the spar's anchored set onto the editor's doc nodes.
+  const anchoredSet = new Set<number>(anchoredBeatIndices ?? []);
+  const beatsWithProse: Array<{
+    beat: string;
+    prose?: string;
+    id: string;
+    status: 'anchored' | 'drafted' | 'floating';
+  }> = [];
   for (let i = 0; i < outline.length; i++) {
     const beatText = outline[i].beat.trim();
     if (beatText.length === 0) continue;
     const prose = proseByOriginalIndex[i];
-    beatsWithProse.push({ beat: beatText, prose });
+    const status: 'anchored' | 'drafted' | 'floating' = anchoredSet.has(i)
+      ? 'anchored'
+      : prose
+        ? 'drafted'
+        : 'floating';
+    beatsWithProse.push({
+      beat: beatText,
+      prose,
+      id: crypto.randomUUID(),
+      status,
+    });
   }
 
   // Build a Tiptap doc:
@@ -2048,7 +2073,11 @@ export async function commitProposal(input: unknown) {
     for (const item of beatsWithProse) {
       content.push({
         type: 'heading',
-        attrs: { level: 2 },
+        attrs: {
+          level: 2,
+          'data-tb-beat-id': item.id,
+          'data-tb-beat-status': item.status,
+        },
         content: [{ type: 'text', text: item.beat }],
       });
       if (item.prose) {

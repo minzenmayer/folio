@@ -17,6 +17,7 @@
     "@ai-sdk/openai": "^1.0.0",
     "@clerk/nextjs": "^6.0.0",
     "@neondatabase/serverless": "^0.10.0",
+    "@tiptap/extension-heading": "^2.10.0",
     "@tiptap/react": "^2.10.0",
     "@tiptap/starter-kit": "^2.10.0",
     "ai": "^4.0.0",

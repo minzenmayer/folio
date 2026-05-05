@@ -532,6 +532,10 @@ export function Spar() {
           // Phase 15a slice B3 — splice drafted sections under their
           // H2 headers. commitProposal handles the empty-map case.
           sections,
+          // Phase 16 slice 5 — anchored beats get stamped on H2
+          // nodes with data-tb-beat-status='anchored' so the Plan
+          // ribbon (slice 6) can paint pills correctly.
+          anchoredBeatIndices: Array.from(anchoredBeats),
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown';
@@ -542,7 +546,7 @@ export function Spar() {
         }
       }
     });
-  }, [proposal, platformOverride, sections]);
+  }, [proposal, platformOverride, sections, anchoredBeats]);
 
   const handleEscapeHatch = useCallback(() => {
     // 'Just open a blank page →' — preserves the Sprint 14 self-pilot

@@ -38,6 +38,7 @@
 
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import Heading from '@tiptap/extension-heading';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateDraft } from './actions';
@@ -329,8 +330,40 @@ export function DraftEditor({
   }, [flushSave]);
 
   const editorRef = useRef<Editor | null>(null);
+  // Phase 16 (2026-05-05): extend Heading to preserve data-tb-beat-id
+  // and data-tb-beat-status attributes through save / load. The Plan
+  // ribbon (slice 6) reads these attrs to compute pill fill states.
+  // Without this extension, Tiptap drops unknown HTML attributes when
+  // serializing to JSON. We override StarterKit's built-in Heading by
+  // listing both — order matters; the explicit one takes precedence.
+  const ThoughtbedHeading = Heading.extend({
+    addAttributes() {
+      return {
+        ...this.parent?.(),
+        'data-tb-beat-id': {
+          default: null,
+          parseHTML: (el) => el.getAttribute('data-tb-beat-id'),
+          renderHTML: (attrs) => {
+            if (!attrs['data-tb-beat-id']) return {};
+            return { 'data-tb-beat-id': attrs['data-tb-beat-id'] };
+          },
+        },
+        'data-tb-beat-status': {
+          default: null,
+          parseHTML: (el) => el.getAttribute('data-tb-beat-status'),
+          renderHTML: (attrs) => {
+            if (!attrs['data-tb-beat-status']) return {};
+            return { 'data-tb-beat-status': attrs['data-tb-beat-status'] };
+          },
+        },
+      };
+    },
+  });
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      StarterKit.configure({ heading: false }),
+      ThoughtbedHeading,
+    ],
     immediatelyRender: false,
     content: initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     onUpdate: ({ editor: ed }) => {
