@@ -82,6 +82,25 @@ export const ideas = pgTable(
       () => extractedIdeas.id,
       { onDelete: 'set null' }
     ),
+
+    // Phase 14b — Garden redesign (2026-05-04). Lifecycle columns.
+    // 'hot' | 'warm' | 'cool' | 'cold' | 'set_aside' (check-constrained in SQL).
+    temperature: text('temperature').notNull().default('warm'),
+    temperatureUpdatedAt: timestamp('temperature_updated_at', {
+      withTimezone: true,
+    })
+      .notNull()
+      .defaultNow(),
+    // # digest surfaces without user action — anti-calcification rule.
+    // Increments on each digest surface; resets on any user action. 3 unacted → cool one step.
+    digestSurfaceCount: integer('digest_surface_count').notNull().default(0),
+    digestSurfaceFirstAt: timestamp('digest_surface_first_at', {
+      withTimezone: true,
+    }),
+    // 'Mark hot' sets pinned_until = now() + 14 days; auto-cool paused while pinned.
+    pinnedUntil: timestamp('pinned_until', { withTimezone: true }),
+    // 'authored' (hand-curated) | 'claimed' (made-mine from extracted_idea)
+    claimKind: text('claim_kind').notNull().default('authored'),
   },
   (table) => ({
     userVisitedIdx: index('idx_ideas_user_visited').on(
@@ -91,6 +110,10 @@ export const ideas = pgTable(
     userMaturityIdx: index('idx_ideas_user_maturity').on(
       table.userId,
       table.maturity
+    ),
+    userTemperatureIdx: index('idx_ideas_temperature').on(
+      table.userId,
+      table.temperature
     ),
     embeddingIdx: index('idx_ideas_embedding').using(
       'hnsw',
@@ -740,11 +763,23 @@ export const extractedIdeas = pgTable(
     // 'promoted' — user moved this into the Garden as a hand-curated idea.
     //              The matching ideas row carries source_extracted_idea_id.
     // 'dismissed' — user explicitly hid; never resurface.
-    // 'snoozed' — hide until snooze_until <= now(); the default Insights
-    //             query unhides it automatically when ripe.
+    // 'snoozed' — DEPRECATED in Phase 14b; legacy rows migrated to 'pending'+cold.
     triageStatus: text('triage_status').notNull().default('pending'),
     triagedAt: timestamp('triaged_at', { withTimezone: true }),
     snoozeUntil: timestamp('snooze_until', { withTimezone: true }),
+
+    // Phase 14b — Garden redesign (2026-05-04). Lifecycle columns mirror ideas.
+    // Default 'cool' for unclaimed extracted ideas; bumped on rail retrieval,
+    // promoted to a partner ideas row when the user claims (writes a sentence).
+    temperature: text('temperature').notNull().default('cool'),
+    temperatureUpdatedAt: timestamp('temperature_updated_at', {
+      withTimezone: true,
+    })
+      .notNull()
+      .defaultNow(),
+    digestSurfaceCount: integer('digest_surface_count').notNull().default(0),
+    // The user's "Make it mine" sentence — copied to ideas.body on claim.
+    claimText: text('claim_text'),
 
     embedding: vector('embedding', { dimensions: 1536 }),
 
@@ -794,6 +829,10 @@ export const extractedIdeas = pgTable(
     userTriageIdx: index('idx_extracted_ideas_user_triage').on(
       table.userId,
       table.triageStatus
+    ),
+    userTemperatureIdx: index('idx_extracted_ideas_temperature').on(
+      table.userId,
+      table.temperature
     ),
   })
 );
@@ -897,3 +936,95 @@ export const gmailSenderRules = pgTable(
 
 export type GmailSenderRule = typeof gmailSenderRules.$inferSelect;
 export type NewGmailSenderRule = typeof gmailSenderRules.$inferInsert;
+
+
+// ────────────────────────────────────────────
+// GARDEN_JUXTAPOSITIONS — Phase 14b (2026-05-04)
+// ────────────────────────────────────────────
+// System-surfaced creative juxtapositions (the marquee partnership move).
+// Each row is a pair of ideas the system flagged as creatively connected
+// — same theme + opposite stance, contradictory self-claim, or new claim
+// with a dormant ancestor. Plus a generated provocation question.
+//
+// Polymorphic refs: left_id and right_id can point at either `ideas` or
+// `extracted_ideas`, distinguished by left_kind / right_kind. App-level
+// referential integrity (no FK — application sweeps stale rows on idea
+// delete). See drizzle/0012_garden_juxtapositions.sql.
+// ────────────────────────────────────────────
+export const gardenJuxtapositions = pgTable(
+  'garden_juxtapositions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // 'tension_within_theme' | 'self_disagreement' | 'old_echo_of_new'
+    heuristic: text('heuristic').notNull(),
+
+    leftKind: text('left_kind').notNull(),  // 'idea' | 'extracted_idea'
+    leftId: uuid('left_id').notNull(),
+    rightKind: text('right_kind').notNull(),
+    rightId: uuid('right_id').notNull(),
+
+    question: text('question').notNull(),
+    reasoning: text('reasoning').notNull(),
+    score: real('score').notNull(),
+
+    surfacedAt: timestamp('surfaced_at', { withTimezone: true }),
+    actedOn: text('acted_on'),  // 'opened' | 'claimed' | 'skipped' | null
+    actedAt: timestamp('acted_at', { withTimezone: true }),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userSurfacedIdx: index('idx_garden_juxtapositions_user_surfaced').on(
+      table.userId,
+      table.surfacedAt
+    ),
+    userPendingIdx: index('idx_garden_juxtapositions_user_pending')
+      .on(table.userId, table.score)
+      .where(sql`${table.surfacedAt} IS NULL`),
+  })
+);
+
+// ────────────────────────────────────────────
+// GARDEN_DIGEST_RUNS — Phase 14b (2026-05-04)
+// Daily digest snapshot. Cron writes one row per (user, date). Page reads cache.
+// ────────────────────────────────────────────
+export const gardenDigestRuns = pgTable(
+  'garden_digest_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    runDate: timestamp('run_date', { mode: 'date', withTimezone: false }).notNull(),
+    // jsonb: [{ kind: 'idea' | 'extracted_idea', id: uuid, reason: string }]
+    selected: jsonb('selected').notNull(),
+    juxtapositionId: uuid('juxtaposition_id').references(
+      () => gardenJuxtapositions.id,
+      { onDelete: 'set null' }
+    ),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userDateIdx: index('idx_garden_digest_runs_user_date').on(
+      table.userId,
+      table.runDate
+    ),
+    userDateUnique: uniqueIndex('garden_digest_runs_user_date_unique').on(
+      table.userId,
+      table.runDate
+    ),
+  })
+);
+
+export type GardenJuxtaposition = typeof gardenJuxtapositions.$inferSelect;
+export type NewGardenJuxtaposition = typeof gardenJuxtapositions.$inferInsert;
+export type GardenDigestRun = typeof gardenDigestRuns.$inferSelect;
+export type NewGardenDigestRun = typeof gardenDigestRuns.$inferInsert;
