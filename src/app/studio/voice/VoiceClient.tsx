@@ -26,10 +26,12 @@ import {
   searchCorpusForTraining,
   getTrainingSampleBody,
   updateManualLists,
+  uploadTrainingFile,
   type RebuildProfileResult,
   type ListedSample,
   type CorpusSearchResult,
   type AddSampleResult,
+  type UploadFileResult,
 } from './actions';
 
 type Platform = 'longform' | 'linkedin';
@@ -707,7 +709,117 @@ function TabButton({
   );
 }
 
+type CorpusSourceKey =
+  | 'newsletter'
+  | 'linkedin'
+  | 'twitter'
+  | 'instagram'
+  | 'threads'
+  | 'substack'
+  | 'blog';
+
+const SOURCE_BUTTONS: Record<
+  Platform,
+  Array<{ key: CorpusSourceKey; label: string; available: boolean }>
+> = {
+  longform: [
+    { key: 'newsletter', label: 'From my newsletter', available: true },
+    { key: 'substack', label: 'From my Substack', available: false },
+    { key: 'blog', label: 'From my blog', available: false },
+  ],
+  linkedin: [
+    { key: 'linkedin', label: 'From my LinkedIn', available: true },
+    { key: 'twitter', label: 'From my X / Twitter', available: false },
+    { key: 'instagram', label: 'From my Instagram', available: false },
+    { key: 'threads', label: 'From my Threads', available: false },
+  ],
+};
+
 function CorpusPickerTab({
+  platform,
+  onAdded,
+}: {
+  platform: Platform;
+  onAdded: (s: ListedSample) => void;
+}) {
+  const [activeSource, setActiveSource] = useState<CorpusSourceKey | null>(null);
+
+  if (activeSource === null) {
+    return (
+      <CorpusSourcePicker
+        platform={platform}
+        onPick={setActiveSource}
+      />
+    );
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setActiveSource(null)}
+        className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag hover:text-ink transition-colors mb-4"
+      >
+        ← Back to sources
+      </button>
+      <CorpusListForSource
+        platform={platform}
+        onAdded={onAdded}
+      />
+    </div>
+  );
+}
+
+function CorpusSourcePicker({
+  platform,
+  onPick,
+}: {
+  platform: Platform;
+  onPick: (key: CorpusSourceKey) => void;
+}) {
+  const buttons = SOURCE_BUTTONS[platform];
+  return (
+    <div>
+      <p className="font-sans text-[13px] text-ink-soft leading-[1.55] mb-5">
+        Pick a source to browse your pieces from. The composer reads
+        only what you actually wrote.
+      </p>
+      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {buttons.map((b) => (
+          <li key={b.key}>
+            <button
+              type="button"
+              onClick={() => b.available && onPick(b.key)}
+              disabled={!b.available}
+              className={`w-full text-left rounded-card border px-4 py-4 transition-colors ${
+                b.available
+                  ? 'bg-paper border-rule hover:border-ink hover:bg-paper-2'
+                  : 'bg-paper-2 border-rule cursor-not-allowed'
+              }`}
+            >
+              <span
+                className={`block font-sans text-[14.5px] font-medium ${
+                  b.available ? 'text-ink' : 'text-tag'
+                }`}
+              >
+                {b.label}
+              </span>
+              <span
+                className={`block font-mono text-[10px] tracking-[0.18em] uppercase mt-1 ${
+                  b.available ? 'text-tag' : 'text-tag/60'
+                }`}
+              >
+                {b.available ? 'Connected' : 'Coming soon'}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CorpusListForSource({
   platform,
   onAdded,
 }: {
@@ -978,47 +1090,81 @@ function UploadTab({
         name.endsWith('.txt') ||
         name.endsWith('.md') ||
         name.endsWith('.markdown') ||
-        file.type.startsWith('text/');
-      if (!isText) {
-        setError(
-          'Only .txt and .md files are supported right now. Use Paste text for PDF/.docx — full file upload is coming next.'
-        );
+        file.type === 'text/plain' ||
+        file.type === 'text/markdown';
+      const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
+      const isDocx =
+        name.endsWith('.docx') ||
+        file.type ===
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+      if (!isText && !isPdf && !isDocx) {
+        setError('Supported types: .txt, .md, .pdf, .docx.');
         return;
       }
-      if (file.size > 200_000) {
-        setError('File is over 200KB. Trim it down or use Paste text.');
+      const cap = isText ? 500_000 : 2_000_000;
+      if (file.size > cap) {
+        setError(
+          `File is over ${Math.round(cap / 1000)}KB. Trim it down or use Paste text.`
+        );
         return;
       }
 
       setAdding(true);
       try {
-        const body = await file.text();
-        const trimmed = body.trim();
-        if (trimmed.length < 20) {
-          setError('File is too short. Need at least 20 characters of writing.');
-          return;
-        }
-        const title = file.name.replace(/\.(txt|md|markdown)$/i, '').slice(0, 200);
-        const r: AddSampleResult = await addTrainingSample({
-          platform,
-          kind: 'upload',
-          title: title || 'Uploaded file',
-          body: trimmed,
-          filename: file.name,
-        });
-        if (r.ok) {
-          onAdded({
-            id: r.sampleId,
+        if (isText) {
+          const body = await file.text();
+          const trimmed = body.trim();
+          if (trimmed.length < 20) {
+            setError('File is too short. Need at least 20 characters.');
+            return;
+          }
+          const title =
+            file.name.replace(/\.(txt|md|markdown)$/i, '').slice(0, 200) ||
+            'Uploaded file';
+          const r: AddSampleResult = await addTrainingSample({
             platform,
             kind: 'upload',
-            sourceKind: null,
-            title: title || file.name,
-            snippet: trimmed.slice(0, 280),
-            position: 0,
-            createdAt: new Date().toISOString(),
+            title,
+            body: trimmed,
+            filename: file.name,
           });
+          if (r.ok) {
+            onAdded({
+              id: r.sampleId,
+              platform,
+              kind: 'upload',
+              sourceKind: null,
+              title,
+              snippet: trimmed.slice(0, 280),
+              position: 0,
+              createdAt: new Date().toISOString(),
+            });
+          } else {
+            setError(r.message);
+          }
         } else {
-          setError(r.message);
+          const buffer = await file.arrayBuffer();
+          const base64 = arrayBufferToBase64(buffer);
+          const r: UploadFileResult = await uploadTrainingFile({
+            platform,
+            filename: file.name,
+            base64,
+          });
+          if (r.ok) {
+            onAdded({
+              id: r.sampleId,
+              platform,
+              kind: 'upload',
+              sourceKind: null,
+              title: r.title,
+              snippet: r.snippet,
+              position: 0,
+              createdAt: new Date().toISOString(),
+            });
+          } else {
+            setError(r.message);
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'upload failed');
@@ -1059,12 +1205,12 @@ function UploadTab({
           {adding ? 'Reading file…' : 'Click or drop a file'}
         </span>
         <span className="font-sans text-[12.5px] text-tag">
-          .txt or .md, up to 200KB
+          .txt, .md, .pdf, or .docx
         </span>
         <input
           id="voice-upload-input"
           type="file"
-          accept=".txt,.md,.markdown,text/plain,text/markdown"
+          accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) handleFile(file);
@@ -1082,13 +1228,7 @@ function UploadTab({
         </p>
       )}
 
-      <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag mt-6">
-        Coming soon
-      </p>
-      <p className="font-sans text-[12.5px] text-tag leading-[1.55] mt-1">
-        PDF and .docx parsing land in the next iteration. For now,
-        copy the text out and use the Paste tab.
-      </p>
+
     </div>
   );
 }

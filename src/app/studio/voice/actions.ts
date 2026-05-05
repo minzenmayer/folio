@@ -365,6 +365,158 @@ async function fetchCorpusTitleBody(
   return null;
 }
 
+// ─── uploadTrainingFile — parse + add a paste/upload sample ─────────
+//
+// Client posts the file as base64 (the FormData path is awkward inside
+// server actions on Next 15.5; base64 is simpler and the body cap is
+// fine for our 200KB-ish files). Server detects the kind from the
+// filename extension and runs the right parser:
+//
+//   .txt / .md / .markdown — UTF-8 decode straight from the bytes
+//   .docx                  — mammoth.extractRawText
+//   .pdf                   — pdf-parse
+//
+// Anything else returns invalid. Extracted text is then written via the
+// same path as addTrainingSample with kind='upload'.
+
+const uploadFileSchema = z.object({
+  platform: z.enum(['longform', 'linkedin']),
+  filename: z.string().min(1).max(200),
+  // ~2.7MB base64 = ~2MB binary, comfortable inside Vercel server action
+  // body cap. The Spar UI limits selection to 2MB before encoding.
+  base64: z.string().min(20).max(3_000_000),
+});
+
+export type UploadFileResult =
+  | { ok: true; sampleId: string; title: string; snippet: string | null }
+  | {
+      ok: false;
+      reason: 'invalid' | 'parse_failed' | 'too_short' | 'cap_reached' | 'error';
+      message: string;
+    };
+
+export async function uploadTrainingFile(
+  input: unknown
+): Promise<UploadFileResult> {
+  const user = await requireUser();
+  let parsed: z.infer<typeof uploadFileSchema>;
+  try {
+    parsed = uploadFileSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const ext = (parsed.filename.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '').trim();
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(parsed.base64, 'base64');
+  } catch {
+    return { ok: false, reason: 'invalid', message: 'Bad base64 payload.' };
+  }
+
+  let extracted = '';
+  try {
+    if (ext === 'txt' || ext === 'md' || ext === 'markdown') {
+      extracted = buf.toString('utf-8');
+    } else if (ext === 'pdf') {
+      // Dynamic import keeps pdf-parse out of the edge runtime bundle
+      // and avoids the test-fixture issues at build time.
+      const pdfParse = (await import('pdf-parse')).default;
+      const result = await pdfParse(buf);
+      extracted = result.text || '';
+    } else if (ext === 'docx') {
+      const mammoth = await import('mammoth');
+      const result = await mammoth.extractRawText({ buffer: buf });
+      extracted = result.value || '';
+    } else {
+      return {
+        ok: false,
+        reason: 'invalid',
+        message: 'Only .txt, .md, .pdf, and .docx files are supported.',
+      };
+    }
+  } catch (err) {
+    console.error('[uploadTrainingFile] parse failed', err);
+    return {
+      ok: false,
+      reason: 'parse_failed',
+      message: err instanceof Error ? err.message : 'parse failed',
+    };
+  }
+
+  const trimmed = extracted.replace(/\u0000/g, '').trim();
+  if (trimmed.length < 20) {
+    return {
+      ok: false,
+      reason: 'too_short',
+      message:
+        'No usable text found in the file. Try a different copy or paste it under the Paste tab.',
+    };
+  }
+
+  // Cap check (mirrors addTrainingSample's logic).
+  const [{ count }] = await db
+    .select({ count: sql<number>\`count(*)::int\` })
+    .from(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.userId, user.id),
+        eq(voiceTrainingSamples.platform, parsed.platform)
+      )
+    );
+  if (Number(count) >= MAX_SAMPLES) {
+    return {
+      ok: false,
+      reason: 'cap_reached',
+      message: \`Already at the \${MAX_SAMPLES}-sample cap for this platform. Remove one first.\`,
+    };
+  }
+
+  // Position
+  const [maxRow] = await db
+    .select({ m: max(voiceTrainingSamples.position) })
+    .from(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.userId, user.id),
+        eq(voiceTrainingSamples.platform, parsed.platform)
+      )
+    );
+  const nextPosition = (Number(maxRow?.m ?? -1) + 1) | 0;
+
+  const title = parsed.filename
+    .replace(/\.(txt|md|markdown|pdf|docx)$/i, '')
+    .slice(0, 200) || 'Uploaded file';
+
+  const [inserted] = await db
+    .insert(voiceTrainingSamples)
+    .values({
+      userId: user.id,
+      platform: parsed.platform,
+      kind: 'upload',
+      sourceKind: null,
+      sourceId: null,
+      title,
+      body: trimmed,
+      filename: parsed.filename,
+      position: nextPosition,
+    })
+    .returning({ id: voiceTrainingSamples.id });
+
+  revalidatePath('/studio/voice');
+
+  return {
+    ok: true,
+    sampleId: inserted.id,
+    title,
+    snippet: trimmed.slice(0, 280),
+  };
+}
+
 // ─── removeSample ────────────────────────────────────────────────────
 
 const removeSampleSchema = z.object({

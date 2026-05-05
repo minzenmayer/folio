@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // pdf-parse + mammoth are pure-node deps used inside server actions
+  // (uploadTrainingFile in voice/actions.ts). Keep them out of the
+  // bundle so Next doesn't try to ship them client-side.
+  serverExternalPackages: ['pdf-parse', 'mammoth'],
   experimental: {
     serverActions: {
       bodySizeLimit: '4mb',
