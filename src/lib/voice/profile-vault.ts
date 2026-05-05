@@ -196,7 +196,7 @@ async function loadCandidates(
         )
       );
     return rows
-      .map((r) => {
+      .map((r): CandidatePiece | null => {
         const text = (r.body ?? r.rawContent ?? '').trim();
         if (text.length < 50) return null;
         return {
@@ -206,7 +206,7 @@ async function loadCandidates(
           body: text.slice(0, TEXT_BUDGET_CHARS[sourceKind]),
           postedAt: r.postedAt ?? null,
           isCanonical: canonicalIds.has(r.id),
-        } satisfies CandidatePiece;
+        };
       })
       .filter((x): x is CandidatePiece => x !== null);
   }
