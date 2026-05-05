@@ -1,24 +1,17 @@
-// Thoughtbed · /studio/voice server actions — Phase 15a (2026-05-05)
+// Thoughtbed · /studio/voice server actions — Phase 15 (UX rework)
 //
-// rebuildProfile(platform)  — kicks profileVault for the given
-//                              platform; revalidates /studio/voice on
-//                              completion.
-// setCanonical / unsetCanonical({ sourceKind, sourceId })
-//                            — toggles a piece in the
-//                              voice_canonical_pieces join table.
-// updateManualLists({ platform, attributes, thingsToAvoid })
-//                            — overwrites the manual fields on the
-//                              voice_profiles row.
-// listCanonicalCandidates({ platform, search? })
-//                            — returns the source pieces for the
-//                              voice page's canonical list, with
-//                              their current canonical state.
+// 5-sample-picker model. The user picks up to 5 training samples per
+// platform via the page UI; rebuildProfile reads those samples and
+// runs profileVault on them.
 //
-// All strictly user-scoped via requireUser.
+// Three sample kinds: corpus (pointer to a row in newsletter_issues /
+// obsidian_notes / linkedin_posts), paste (inline text), upload
+// (inline text from a file). voice_training_samples carries the
+// state.
 
 'use server';
 
-import { eq, and, desc, ilike, or } from 'drizzle-orm';
+import { eq, and, desc, sql, ilike, or, max, asc } from 'drizzle-orm';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import {
@@ -27,22 +20,15 @@ import {
   obsidianNotes,
   linkedinPosts,
   voiceProfiles,
-  voiceCanonicalPieces,
+  voiceTrainingSamples,
 } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { profileVault } from '@/lib/voice/profile-vault';
 import type { Platform } from '@/lib/voice/profile';
 
-// Source kind <-> platform mapping.
-function sourceKindsForPlatform(platform: Platform): readonly (
-  | 'newsletter_issue'
-  | 'obsidian_note'
-  | 'linkedin_post'
-)[] {
-  return platform === 'longform'
-    ? (['newsletter_issue', 'obsidian_note'] as const)
-    : (['linkedin_post'] as const);
-}
+const MAX_SAMPLES = 5;
+const PASTE_BODY_MAX = 50_000;
+const PASTE_TITLE_MAX = 200;
 
 // ─── rebuildProfile ──────────────────────────────────────────────────
 
@@ -55,7 +41,6 @@ export type RebuildProfileResult =
       ok: true;
       platform: Platform;
       sampleCount: number;
-      canonicalCount: number;
       builtAt: Date;
     }
   | {
@@ -72,6 +57,7 @@ export async function rebuildProfile(
 
   const result = await profileVault({ userId: user.id, platform });
   revalidatePath('/studio/voice');
+  revalidatePath('/studio/voice-insights');
   revalidatePath('/studio');
 
   if (!result.ok) {
@@ -82,42 +68,319 @@ export async function rebuildProfile(
     ok: true,
     platform: result.platform,
     sampleCount: result.sampleCount,
-    canonicalCount: result.canonicalCount,
     builtAt: result.builtAt,
   };
 }
 
-// ─── set/unsetCanonical ──────────────────────────────────────────────
+// ─── listTrainingSamples ─────────────────────────────────────────────
 
-const canonicalToggleSchema = z.object({
+const listSamplesSchema = z.object({
+  platform: z.enum(['longform', 'linkedin']),
+});
+
+export type ListedSample = {
+  id: string;
+  platform: Platform;
+  kind: 'corpus' | 'paste' | 'upload';
+  // For corpus: the source kind ('newsletter_issue' | ...). Null for paste/upload.
+  sourceKind: string | null;
+  title: string;
+  // Snippet for cards; full body fetched separately when expanded.
+  snippet: string | null;
+  position: number;
+  createdAt: string;
+};
+
+export async function listTrainingSamples(
+  input: unknown
+): Promise<{ samples: ListedSample[] }> {
+  const user = await requireUser();
+  const { platform } = listSamplesSchema.parse(input);
+
+  const rows = await db
+    .select()
+    .from(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.userId, user.id),
+        eq(voiceTrainingSamples.platform, platform)
+      )
+    )
+    .orderBy(asc(voiceTrainingSamples.position));
+
+  // For corpus rows we need the title from the source table when the
+  // user added the sample by reference. We stored title at add-time
+  // for stability, so just use it as-is; same for body snippet.
+  const samples: ListedSample[] = rows.map((r) => ({
+    id: r.id,
+    platform: r.platform as Platform,
+    kind: r.kind as 'corpus' | 'paste' | 'upload',
+    sourceKind: r.sourceKind ?? null,
+    title: r.title,
+    snippet: r.body ? r.body.slice(0, 280) : null,
+    position: r.position,
+    createdAt: r.createdAt.toISOString(),
+  }));
+
+  return { samples };
+}
+
+// ─── getTrainingSampleBody — full content for the expand view ────────
+
+const getSampleBodySchema = z.object({
+  id: z.string().uuid(),
+});
+
+export async function getTrainingSampleBody(
+  input: unknown
+): Promise<{ body: string }> {
+  const user = await requireUser();
+  const { id } = getSampleBodySchema.parse(input);
+
+  const rows = await db
+    .select()
+    .from(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.id, id),
+        eq(voiceTrainingSamples.userId, user.id)
+      )
+    )
+    .limit(1);
+
+  return { body: rows[0]?.body ?? '' };
+}
+
+// ─── addSample — corpus / paste / upload ─────────────────────────────
+
+const addCorpusSchema = z.object({
+  platform: z.enum(['longform', 'linkedin']),
+  kind: z.literal('corpus'),
   sourceKind: z.enum(['newsletter_issue', 'obsidian_note', 'linkedin_post']),
   sourceId: z.string().uuid(),
 });
 
-export async function setCanonical(input: unknown) {
+const addPasteSchema = z.object({
+  platform: z.enum(['longform', 'linkedin']),
+  kind: z.literal('paste'),
+  title: z.string().min(1).max(PASTE_TITLE_MAX),
+  body: z.string().min(20).max(PASTE_BODY_MAX),
+});
+
+const addUploadSchema = z.object({
+  platform: z.enum(['longform', 'linkedin']),
+  kind: z.literal('upload'),
+  title: z.string().min(1).max(PASTE_TITLE_MAX),
+  body: z.string().min(20).max(PASTE_BODY_MAX),
+  filename: z.string().min(1).max(200).optional(),
+});
+
+const addSampleSchema = z.discriminatedUnion('kind', [
+  addCorpusSchema,
+  addPasteSchema,
+  addUploadSchema,
+]);
+
+export type AddSampleResult =
+  | { ok: true; sampleId: string }
+  | { ok: false; reason: 'cap_reached' | 'duplicate' | 'invalid' | 'error'; message: string };
+
+export async function addTrainingSample(
+  input: unknown
+): Promise<AddSampleResult> {
   const user = await requireUser();
-  const { sourceKind, sourceId } = canonicalToggleSchema.parse(input);
+  let parsed: z.infer<typeof addSampleSchema>;
+  try {
+    parsed = addSampleSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
 
-  await db
-    .insert(voiceCanonicalPieces)
-    .values({ userId: user.id, sourceKind, sourceId })
-    .onConflictDoNothing();
-
-  revalidatePath('/studio/voice');
-  return { ok: true as const };
-}
-
-export async function unsetCanonical(input: unknown) {
-  const user = await requireUser();
-  const { sourceKind, sourceId } = canonicalToggleSchema.parse(input);
-
-  await db
-    .delete(voiceCanonicalPieces)
+  // Cap check.
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(voiceTrainingSamples)
     .where(
       and(
-        eq(voiceCanonicalPieces.userId, user.id),
-        eq(voiceCanonicalPieces.sourceKind, sourceKind),
-        eq(voiceCanonicalPieces.sourceId, sourceId)
+        eq(voiceTrainingSamples.userId, user.id),
+        eq(voiceTrainingSamples.platform, parsed.platform)
+      )
+    );
+  if (Number(count) >= MAX_SAMPLES) {
+    return {
+      ok: false,
+      reason: 'cap_reached',
+      message: `Already at the ${MAX_SAMPLES}-sample cap for this platform. Remove one first.`,
+    };
+  }
+
+  // Duplicate check for corpus kind only.
+  if (parsed.kind === 'corpus') {
+    const dup = await db
+      .select({ id: voiceTrainingSamples.id })
+      .from(voiceTrainingSamples)
+      .where(
+        and(
+          eq(voiceTrainingSamples.userId, user.id),
+          eq(voiceTrainingSamples.platform, parsed.platform),
+          eq(voiceTrainingSamples.kind, 'corpus'),
+          eq(voiceTrainingSamples.sourceKind, parsed.sourceKind),
+          eq(voiceTrainingSamples.sourceId, parsed.sourceId)
+        )
+      )
+      .limit(1);
+    if (dup.length > 0) {
+      return {
+        ok: false,
+        reason: 'duplicate',
+        message: 'That piece is already in your training samples.',
+      };
+    }
+  }
+
+  // Compute next position.
+  const [maxRow] = await db
+    .select({ m: max(voiceTrainingSamples.position) })
+    .from(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.userId, user.id),
+        eq(voiceTrainingSamples.platform, parsed.platform)
+      )
+    );
+  const nextPosition = (Number(maxRow?.m ?? -1) + 1) | 0;
+
+  // Resolve title + body for corpus samples (snapshot for stability).
+  let title: string;
+  let body: string;
+  let filename: string | null = null;
+  let sourceKind: string | null = null;
+  let sourceId: string | null = null;
+
+  if (parsed.kind === 'corpus') {
+    sourceKind = parsed.sourceKind;
+    sourceId = parsed.sourceId;
+    const fetched = await fetchCorpusTitleBody(
+      user.id,
+      parsed.sourceKind,
+      parsed.sourceId
+    );
+    if (!fetched) {
+      return {
+        ok: false,
+        reason: 'invalid',
+        message: 'Source piece not found in your space.',
+      };
+    }
+    title = fetched.title;
+    body = fetched.body;
+  } else if (parsed.kind === 'paste') {
+    title = parsed.title.trim();
+    body = parsed.body.trim();
+  } else {
+    title = parsed.title.trim();
+    body = parsed.body.trim();
+    filename = parsed.filename ?? null;
+  }
+
+  const [inserted] = await db
+    .insert(voiceTrainingSamples)
+    .values({
+      userId: user.id,
+      platform: parsed.platform,
+      kind: parsed.kind,
+      sourceKind,
+      sourceId,
+      title,
+      body,
+      filename,
+      position: nextPosition,
+    })
+    .returning({ id: voiceTrainingSamples.id });
+
+  revalidatePath('/studio/voice');
+  return { ok: true, sampleId: inserted.id };
+}
+
+async function fetchCorpusTitleBody(
+  userId: string,
+  sourceKind: 'newsletter_issue' | 'obsidian_note' | 'linkedin_post',
+  sourceId: string
+): Promise<{ title: string; body: string } | null> {
+  if (sourceKind === 'newsletter_issue') {
+    const [r] = await db
+      .select({
+        title: newsletterIssues.title,
+        body: newsletterIssues.bodyText,
+      })
+      .from(newsletterIssues)
+      .where(
+        and(
+          eq(newsletterIssues.id, sourceId),
+          eq(newsletterIssues.userId, userId)
+        )
+      )
+      .limit(1);
+    if (!r || !r.body) return null;
+    return { title: (r.title || 'Untitled issue').trim(), body: r.body };
+  }
+  if (sourceKind === 'obsidian_note') {
+    const [r] = await db
+      .select({ title: obsidianNotes.title, body: obsidianNotes.bodyText })
+      .from(obsidianNotes)
+      .where(
+        and(
+          eq(obsidianNotes.id, sourceId),
+          eq(obsidianNotes.userId, userId)
+        )
+      )
+      .limit(1);
+    if (!r || !r.body) return null;
+    return { title: (r.title || 'Untitled note').trim(), body: r.body };
+  }
+  if (sourceKind === 'linkedin_post') {
+    const [r] = await db
+      .select({
+        body: linkedinPosts.bodyClean,
+        rawContent: linkedinPosts.content,
+      })
+      .from(linkedinPosts)
+      .where(
+        and(
+          eq(linkedinPosts.id, sourceId),
+          eq(linkedinPosts.userId, userId)
+        )
+      )
+      .limit(1);
+    if (!r) return null;
+    const body = (r.body ?? r.rawContent ?? '').trim();
+    if (body.length === 0) return null;
+    const title = body.split('\n')[0].slice(0, 80) || 'LinkedIn post';
+    return { title, body };
+  }
+  return null;
+}
+
+// ─── removeSample ────────────────────────────────────────────────────
+
+const removeSampleSchema = z.object({
+  id: z.string().uuid(),
+});
+
+export async function removeTrainingSample(input: unknown) {
+  const user = await requireUser();
+  const { id } = removeSampleSchema.parse(input);
+
+  await db
+    .delete(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.id, id),
+        eq(voiceTrainingSamples.userId, user.id)
       )
     );
 
@@ -125,115 +388,61 @@ export async function unsetCanonical(input: unknown) {
   return { ok: true as const };
 }
 
-// ─── updateManualLists ───────────────────────────────────────────────
+// ─── searchCorpusForTraining ─────────────────────────────────────────
+// Used by the Add-from-corpus picker. Returns matching pieces from the
+// platform's source kinds, including those NOT yet selected so the
+// user can find candidates.
 
-const updateManualListsSchema = z.object({
+const searchCorpusSchema = z.object({
   platform: z.enum(['longform', 'linkedin']),
-  attributes: z.array(z.string().min(1).max(160)).max(20),
-  thingsToAvoid: z.array(z.string().min(1).max(160)).max(20),
+  query: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(100).default(50),
 });
 
-export async function updateManualLists(input: unknown) {
-  const user = await requireUser();
-  const { platform, attributes, thingsToAvoid } =
-    updateManualListsSchema.parse(input);
-
-  const trimmedAttrs = attributes
-    .map((a) => a.trim())
-    .filter((a) => a.length > 0);
-  const trimmedAvoid = thingsToAvoid
-    .map((a) => a.trim())
-    .filter((a) => a.length > 0);
-
-  // Upsert by (user_id, platform). If no profile row exists yet, this
-  // creates a row with empty auto fields — manual content is allowed
-  // before the first build, so the user can stage thoughts before
-  // running profileVault for the first time.
-  await db
-    .insert(voiceProfiles)
-    .values({
-      userId: user.id,
-      platform,
-      attributesManual: trimmedAttrs,
-      thingsToAvoidManual: trimmedAvoid,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [voiceProfiles.userId, voiceProfiles.platform],
-      set: {
-        attributesManual: trimmedAttrs,
-        thingsToAvoidManual: trimmedAvoid,
-        updatedAt: new Date(),
-      },
-    });
-
-  revalidatePath('/studio/voice');
-  return { ok: true as const };
-}
-
-// ─── listCanonicalCandidates ─────────────────────────────────────────
-
-const listCandidatesSchema = z.object({
-  platform: z.enum(['longform', 'linkedin']),
-  search: z.string().max(200).optional(),
-  limit: z.number().int().min(1).max(500).default(200),
-  // Source kind filter for the longform tab. linkedin only has one
-  // source kind, so it's ignored there.
-  sourceKind: z
-    .enum(['newsletter_issue', 'obsidian_note', 'linkedin_post'])
-    .optional(),
-});
-
-export type CanonicalCandidate = {
+export type CorpusSearchResult = {
   sourceKind: 'newsletter_issue' | 'obsidian_note' | 'linkedin_post';
   id: string;
-  title: string | null;
+  title: string;
   snippet: string | null;
-  postedAt: Date | null;
-  isCanonical: boolean;
+  postedAt: string | null;
+  alreadySelected: boolean;
 };
 
-export async function listCanonicalCandidates(
+export async function searchCorpusForTraining(
   input: unknown
-): Promise<{
-  candidates: CanonicalCandidate[];
-  totalEligible: number;
-  totalCanonical: number;
-}> {
+): Promise<{ results: CorpusSearchResult[] }> {
   const user = await requireUser();
-  const parsed = listCandidatesSchema.parse(input);
-  const platformKinds = sourceKindsForPlatform(parsed.platform);
-  // platformKinds is a narrower readonly tuple per platform; k is the
-  // full source-kind enum. Widen the array's element type for .includes
-  // so TS doesn't reject the cross-union compare.
-  const platformKindStrs = platformKinds as readonly string[];
-  const wantedKinds = parsed.sourceKind
-    ? ([parsed.sourceKind] as const).filter((k) => platformKindStrs.includes(k))
-    : platformKinds;
+  const parsed = searchCorpusSchema.parse(input);
+  const search = parsed.query?.trim();
+  const sourceKinds: ('newsletter_issue' | 'obsidian_note' | 'linkedin_post')[] =
+    parsed.platform === 'longform'
+      ? ['newsletter_issue', 'obsidian_note']
+      : ['linkedin_post'];
 
-  if (wantedKinds.length === 0) {
-    return { candidates: [], totalEligible: 0, totalCanonical: 0 };
-  }
-
-  // Read canonical IDs once for the whole platform.
-  const canonicalRows = await db
+  // Already-selected source IDs for this platform — used to gray
+  // them out in the picker.
+  const selectedRows = await db
     .select({
-      sourceKind: voiceCanonicalPieces.sourceKind,
-      sourceId: voiceCanonicalPieces.sourceId,
+      sourceKind: voiceTrainingSamples.sourceKind,
+      sourceId: voiceTrainingSamples.sourceId,
     })
-    .from(voiceCanonicalPieces)
-    .where(eq(voiceCanonicalPieces.userId, user.id));
-  const canonicalSet = new Set(
-    canonicalRows.map((r) => `${r.sourceKind}:${r.sourceId}`)
+    .from(voiceTrainingSamples)
+    .where(
+      and(
+        eq(voiceTrainingSamples.userId, user.id),
+        eq(voiceTrainingSamples.platform, parsed.platform),
+        eq(voiceTrainingSamples.kind, 'corpus')
+      )
+    );
+  const selectedSet = new Set(
+    selectedRows
+      .filter((r) => r.sourceKind && r.sourceId)
+      .map((r) => `${r.sourceKind}:${r.sourceId}`)
   );
 
-  const search = parsed.search?.trim();
+  const out: CorpusSearchResult[] = [];
 
-  // Per-kind queries, then merge + sort. Per-kind keeps the SQL
-  // tractable even though it's three branches.
-  const out: CanonicalCandidate[] = [];
-
-  if (wantedKinds.includes('newsletter_issue')) {
+  if (sourceKinds.includes('newsletter_issue')) {
     const where = search
       ? and(
           eq(newsletterIssues.userId, user.id),
@@ -252,18 +461,19 @@ export async function listCanonicalCandidates(
       .orderBy(desc(newsletterIssues.publishDate))
       .limit(parsed.limit);
     for (const r of rows) {
+      if (!r.body || r.body.length < 50) continue; // skip thin rows
       out.push({
         sourceKind: 'newsletter_issue',
         id: r.id,
-        title: r.title,
-        snippet: (r.body ?? '').slice(0, 240).trim() || null,
-        postedAt: r.postedAt ?? null,
-        isCanonical: canonicalSet.has(`newsletter_issue:${r.id}`),
+        title: r.title || 'Untitled issue',
+        snippet: r.body.slice(0, 280),
+        postedAt: r.postedAt?.toISOString() ?? null,
+        alreadySelected: selectedSet.has(`newsletter_issue:${r.id}`),
       });
     }
   }
 
-  if (wantedKinds.includes('obsidian_note')) {
+  if (sourceKinds.includes('obsidian_note')) {
     const where = search
       ? and(
           eq(obsidianNotes.userId, user.id),
@@ -285,18 +495,19 @@ export async function listCanonicalCandidates(
       .orderBy(desc(obsidianNotes.updatedAt))
       .limit(parsed.limit);
     for (const r of rows) {
+      if (!r.body || r.body.length < 50) continue;
       out.push({
         sourceKind: 'obsidian_note',
         id: r.id,
-        title: r.title,
-        snippet: (r.body ?? '').slice(0, 240).trim() || null,
-        postedAt: r.postedAt ?? null,
-        isCanonical: canonicalSet.has(`obsidian_note:${r.id}`),
+        title: r.title || 'Untitled note',
+        snippet: r.body.slice(0, 280),
+        postedAt: r.postedAt?.toISOString() ?? null,
+        alreadySelected: selectedSet.has(`obsidian_note:${r.id}`),
       });
     }
   }
 
-  if (wantedKinds.includes('linkedin_post')) {
+  if (sourceKinds.includes('linkedin_post')) {
     const where = search
       ? and(
           eq(linkedinPosts.userId, user.id),
@@ -318,34 +529,66 @@ export async function listCanonicalCandidates(
       .orderBy(desc(linkedinPosts.postedAt))
       .limit(parsed.limit);
     for (const r of rows) {
-      const text = (r.body ?? r.rawContent ?? '').trim();
-      if (text.length === 0) continue;
+      const body = (r.body ?? r.rawContent ?? '').trim();
+      if (body.length < 50) continue;
+      const title = body.split('\n')[0].slice(0, 80) || 'LinkedIn post';
       out.push({
         sourceKind: 'linkedin_post',
         id: r.id,
-        title: text.split('\n')[0]?.slice(0, 80) || null,
-        snippet: text.slice(0, 240) || null,
-        postedAt: r.postedAt ?? null,
-        isCanonical: canonicalSet.has(`linkedin_post:${r.id}`),
+        title,
+        snippet: body.slice(0, 280),
+        postedAt: r.postedAt?.toISOString() ?? null,
+        alreadySelected: selectedSet.has(`linkedin_post:${r.id}`),
       });
     }
   }
 
-  // Sort the merged list by postedAt desc; nulls last.
+  // Sort merged results by postedAt desc when present.
   out.sort((a, b) => {
-    const aT = a.postedAt?.getTime() ?? 0;
-    const bT = b.postedAt?.getTime() ?? 0;
-    return bT - aT;
+    const at = a.postedAt ? new Date(a.postedAt).getTime() : 0;
+    const bt = b.postedAt ? new Date(b.postedAt).getTime() : 0;
+    return bt - at;
   });
 
-  // Tallies for the page header.
-  const platformCanonicalIds = canonicalRows.filter((r) =>
-    platformKindStrs.includes(r.sourceKind)
-  ).length;
+  return { results: out.slice(0, parsed.limit) };
+}
 
-  return {
-    candidates: out.slice(0, parsed.limit),
-    totalEligible: out.length,
-    totalCanonical: platformCanonicalIds,
-  };
+// ─── updateManualLists ───────────────────────────────────────────────
+// Unchanged from the prior shape — manual additions still apply on top
+// of Claude's auto-derived schema.
+
+const updateManualListsSchema = z.object({
+  platform: z.enum(['longform', 'linkedin']),
+  attributes: z.array(z.string().min(1).max(160)).max(20),
+  thingsToAvoid: z.array(z.string().min(1).max(160)).max(20),
+});
+
+export async function updateManualLists(input: unknown) {
+  const user = await requireUser();
+  const { platform, attributes, thingsToAvoid } =
+    updateManualListsSchema.parse(input);
+
+  const trimmedAttrs = attributes.map((a) => a.trim()).filter((a) => a.length > 0);
+  const trimmedAvoid = thingsToAvoid.map((a) => a.trim()).filter((a) => a.length > 0);
+
+  await db
+    .insert(voiceProfiles)
+    .values({
+      userId: user.id,
+      platform,
+      attributesManual: trimmedAttrs,
+      thingsToAvoidManual: trimmedAvoid,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [voiceProfiles.userId, voiceProfiles.platform],
+      set: {
+        attributesManual: trimmedAttrs,
+        thingsToAvoidManual: trimmedAvoid,
+        updatedAt: new Date(),
+      },
+    });
+
+  revalidatePath('/studio/voice');
+  return { ok: true as const };
 }
