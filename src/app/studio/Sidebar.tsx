@@ -76,6 +76,14 @@ const NAV_ITEMS: Array<{
     subtitle: 'where Thoughtbed reads',
     href: '/studio/knowledge',
   },
+  {
+    // Phase 15a (2026-05-05): Voice ID — per-platform voice profile
+    // + canonical-piece flagging. Powers the composer's voice
+    // imitation and the section-draft button in the spar.
+    label: 'Voice',
+    subtitle: 'how you write',
+    href: '/studio/voice',
+  },
 ];
 
 const DAY = 24 * 60 * 60 * 1000;

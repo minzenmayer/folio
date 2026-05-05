@@ -83,6 +83,10 @@ import {
   type ProposalRetrievalItem,
   type ProposalResult,
 } from '@/lib/llm';
+// Phase 15a (2026-05-05): per-platform voice profile from /studio/voice.
+// Returns { longform?, linkedin? }; undefined / partial is safe — the
+// proposal prompt falls back to bucket samples on per-platform basis.
+import { getVoiceProfile } from '@/lib/voice/profile';
 import {
   SIMILAR_KINDS,
   SIMILAR_KINDS_FOR_ZOD,
@@ -1352,7 +1356,7 @@ export async function proposeFromTopic(
     };
   }
 
-  await requireUser();
+  const user = await requireUser();
 
   let hits: SimilarHit[] = [];
   try {
@@ -1381,15 +1385,26 @@ export async function proposeFromTopic(
     body: bodyForHit(h),
   }));
 
-  // Voice profile slot — Phase 15a will populate. 15b passes nothing
-  // and the prompt falls back to the bucket samples.
+  // Phase 15a (2026-05-05): voice profile is read here. Returns
+  // { longform?, linkedin? } — undefined / partial is safe; the
+  // generateProposal prompt falls back to the bucket samples per
+  // platform when missing. findSimilar+profile read parallel for
+  // latency.
+  let voiceProfile: Awaited<ReturnType<typeof getVoiceProfile>> = {};
+  try {
+    voiceProfile = await getVoiceProfile(user.id);
+  } catch (err) {
+    console.warn('[proposeFromTopic] getVoiceProfile failed', err);
+    voiceProfile = {};
+  }
+
   let proposal: ProposalResult;
   try {
     proposal = await generateProposal({
       topic: parsed.topic,
       conversationSoFar: parsed.conversationSoFar,
       platformHint: parsed.platformHint,
-      voiceProfile: undefined,
+      voiceProfile,
       retrieval: retrievalItems,
     });
   } catch (err) {
