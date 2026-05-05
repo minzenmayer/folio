@@ -1,23 +1,25 @@
-// Thoughtbed · GmailMessageRow (Phase 13, 2026-05-04 — refreshed Phase 14a)
+// Thoughtbed · GmailMessageRow (Phase 13, refreshed Phase 14a)
 //
-// Triage row for a single pending Gmail newsletter. Mirrors InsightRow's
-// shape but with gmail-specific metadata: from-line, subject, snippet,
-// detection_kind chip.
+// Phase 14a refresh #2 (2026-05-04): three primary actions stacked, with
+// a "..." overflow menu for surgical extras.
 //
-// Phase 14a (2026-05-04) refresh:
-//   · Promote → renamed "Add to garden". Same primary-button styling.
-//   · Snooze  → dropped from the primary buttons. Lives in the "..."
-//                overflow menu as "Snooze 30d".
-//   · Dismiss → renamed "Skip". Stays as the text-link tertiary action.
-//   · "..." overflow menu (Phase 14a Feature 1) wires the per-row sender
-//                rules: allow this address, block this address, block
-//                this domain. Plus the Snooze 30d action.
-//   · Post-promote toast surfaces extractedCount when the action returns
-//                the new shape ("Added. 3 ideas pulled from this — review
-//                them in the Ideas tab.").
-//   · Auto-suggested rules banner: when the action result carries a
-//                `suggestion`, we render an inline banner under the row
-//                with one-click "Add rule" / "Not now".
+//   · Promote to Garden — embed + extractIdeas, status='promoted'.
+//   · Ignore From Sender — adds a block-domain rule AND cascade-dismisses
+//                          every pending/snoozed message from the same
+//                          domain. One click clears the queue of repeat
+//                          offenders. (Replaces the previous "click block,
+//                          then realize the existing pending messages stayed"
+//                          dead end.)
+//   · Skip This One — dismiss only this message; leaves siblings alone.
+//   · "..."           — surgical actions:
+//                       Always keep from <addr>     (allow rule, exact match)
+//                       Never show from <addr>      (block rule, exact match)
+//                       Snooze 30 days              (status='snoozed')
+//
+// Auto-suggested rules banner stays for the PROMOTE side ("you've added 4
+// from this domain — always allow?"). It's gone from the dismiss side
+// because Ignore From Sender now does what the suggestion was suggesting,
+// in one click, without an extra confirmation step.
 
 'use client';
 
@@ -26,6 +28,7 @@ import { useRouter } from 'next/navigation';
 import {
   triageGmailMessage,
   addGmailRule,
+  ignoreGmailSender,
   type TriageSuggestion,
 } from '../settings/connectors/actions';
 
@@ -136,9 +139,37 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
               : 'Added to your garden.',
         });
       }
-      if (res.suggestion) {
+      // Suggestion banner: only render the promote-side suggestion now.
+      // The dismiss-side suggestion got replaced by the explicit "Ignore
+      // From Sender" primary button.
+      if (res.suggestion && res.suggestion.type === 'allow_domain') {
         setSuggestion(res.suggestion);
       }
+      router.refresh();
+    });
+  }
+
+  function ignoreSender() {
+    setMenuOpen(false);
+    setSuggestionDismissed(false);
+    startTransition(async () => {
+      const res = await ignoreGmailSender({ messageId: row.id });
+      if (!res.ok) {
+        setToast({ kind: 'error', text: res.message });
+        router.refresh();
+        return;
+      }
+      const n = res.dismissedCount;
+      const ruleNote = res.ruleAdded
+        ? `Future newsletters from ${res.domain} will be skipped.`
+        : `${res.domain} was already on your block list.`;
+      setToast({
+        kind: 'info',
+        text:
+          n > 1
+            ? `Ignored. Removed ${n} messages from ${res.domain}. ${ruleNote}`
+            : `Ignored. ${ruleNote}`,
+      });
       router.refresh();
     });
   }
@@ -157,8 +188,6 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
         return;
       }
       setToast({ kind: 'info', text: res.message ?? 'Rule added.' });
-      // Clear any visible suggestion — the user just acted on it (or
-      // adopted equivalent wording).
       setSuggestion(null);
       router.refresh();
     });
@@ -197,16 +226,37 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
             </p>
           )}
         </div>
-        <div className="flex flex-col gap-2 shrink-0 items-end">
+        <div className="flex flex-col gap-2 shrink-0 items-stretch min-w-[160px]">
           <button
             type="button"
             disabled={pending}
             onClick={() => fire('promote')}
-            className="font-mono text-[10px] tracking-[0.18em] uppercase font-medium rounded-soft px-3 py-1.5 bg-ink text-bg hover:bg-ink-soft transition-colors disabled:opacity-40 whitespace-nowrap"
+            className="font-mono text-[10px] tracking-[0.18em] uppercase font-medium rounded-soft px-3 py-1.5 bg-ink text-bg hover:bg-ink-soft transition-colors disabled:opacity-40 whitespace-nowrap text-center"
           >
-            Add to garden
+            Promote to Garden
           </button>
-          <div ref={menuWrapRef} className="relative">
+          <button
+            type="button"
+            disabled={pending || !senderDomain}
+            onClick={ignoreSender}
+            title={
+              senderDomain
+                ? `Block ${senderDomain} and clear any other pending messages from it`
+                : 'No sender domain to block'
+            }
+            className="font-mono text-[10px] tracking-[0.18em] uppercase rounded-soft px-3 py-1.5 border border-rule text-ink-soft hover:border-ink hover:text-ink transition-colors disabled:opacity-40 whitespace-nowrap text-center"
+          >
+            Ignore From Sender
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => fire('dismiss')}
+            className="font-sans text-[12px] text-tag hover:text-ink transition-colors disabled:opacity-40 whitespace-nowrap text-center"
+          >
+            Skip This One
+          </button>
+          <div ref={menuWrapRef} className="relative self-end">
             <button
               type="button"
               disabled={pending}
@@ -214,7 +264,7 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-label="More actions"
-              className="font-mono text-[12px] tracking-[0.04em] rounded-soft px-3 py-1.5 border border-rule text-ink-soft hover:border-ink hover:text-ink transition-colors disabled:opacity-40 whitespace-nowrap"
+              className="font-mono text-[14px] tracking-[0.04em] text-tag hover:text-ink transition-colors disabled:opacity-40 px-2 py-0.5"
             >
               ···
             </button>
@@ -245,17 +295,6 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
                     label={`Never show from ${fromAddrLower}`}
                   />
                 )}
-                {senderDomain && (
-                  <MenuItem
-                    onClick={() =>
-                      addRule({
-                        senderDomain,
-                        action: 'block',
-                      })
-                    }
-                    label={`Never show from ${senderDomain}`}
-                  />
-                )}
                 <MenuDivider />
                 <MenuItem
                   onClick={() => fire('snooze')}
@@ -264,14 +303,6 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
               </div>
             )}
           </div>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => fire('dismiss')}
-            className="font-sans text-[12px] text-tag hover:text-ink transition-colors disabled:opacity-40 whitespace-nowrap"
-          >
-            Skip
-          </button>
         </div>
       </div>
 

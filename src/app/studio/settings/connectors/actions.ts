@@ -1551,3 +1551,138 @@ export async function listGmailRules(): Promise<GmailSenderRuleRow[]> {
     createdAt: r.createdAt.toISOString(),
   }));
 }
+
+
+// ─── ignoreGmailSender — Phase 14a refresh (2026-05-04) ───────────────
+//
+// Triage row primary action #2. Combines three things into one click so
+// "ignore from this sender" actually clears the queue:
+//   1. Adds a block rule for the message's sender_domain (forward-only —
+//      future newsletters from this domain never re-enter triage).
+//   2. Cascade-dismisses ALL pending + snoozed messages from the same
+//      sender_domain so the queue drops them immediately. Without this
+//      step, the user reasonably expects 'ignore from sender' to clear
+//      the feed but only future ingest actually changes.
+//   3. Returns dismissedCount + domain so the row can show a single
+//      toast: 'Ignored. Removed N messages from <domain>. Future
+//      newsletters from <domain> will be skipped.'
+//
+// We block by domain (not sender_address) on this primary path because
+// most newsletters rotate the local-part (weekly+xyz@..., daily+abc@...)
+// while keeping the domain stable. Domain blocking is what the user
+// actually means by 'ignore this sender' for newsletters. The narrower
+// 'never show from <full-address>' rule is still available in the '...'
+// menu when they want to be surgical.
+
+const ignoreSenderSchema = z.object({
+  messageId: z.string().uuid(),
+});
+
+export type IgnoreGmailSenderResult =
+  | {
+      ok: true;
+      domain: string;
+      dismissedCount: number;
+      ruleAdded: boolean;
+    }
+  | { ok: false; reason: string; message: string };
+
+export async function ignoreGmailSender(
+  input: unknown
+): Promise<IgnoreGmailSenderResult> {
+  const user = await requireUser();
+  const parsed = ignoreSenderSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: parsed.error.issues[0]?.message ?? 'Invalid input.',
+    };
+  }
+
+  const [row] = await db
+    .select({
+      id: gmailMessages.id,
+      fromAddress: gmailMessages.fromAddress,
+    })
+    .from(gmailMessages)
+    .where(
+      and(
+        eq(gmailMessages.id, parsed.data.messageId),
+        eq(gmailMessages.userId, user.id)
+      )
+    )
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, reason: 'not_found', message: 'Message not found.' };
+  }
+
+  const fromAddr = (row.fromAddress ?? '').trim().toLowerCase();
+  const domain = fromAddr.includes('@') ? fromAddr.split('@')[1] : '';
+  if (!domain) {
+    return {
+      ok: false,
+      reason: 'no_domain',
+      message: "Can't determine sender domain — try 'Skip This One' instead.",
+    };
+  }
+
+  // 1) Add block rule. ON CONFLICT DO NOTHING so re-clicks are idempotent.
+  let ruleAdded = false;
+  try {
+    const ins = await db
+      .insert(gmailSenderRules)
+      .values({
+        userId: user.id,
+        senderDomain: domain,
+        senderAddress: null,
+        action: 'block',
+        reason: 'manual',
+      })
+      .onConflictDoNothing({
+        target: [
+          gmailSenderRules.userId,
+          gmailSenderRules.senderAddress,
+          gmailSenderRules.senderDomain,
+          gmailSenderRules.action,
+        ],
+      })
+      .returning({ id: gmailSenderRules.id });
+    ruleAdded = ins.length > 0;
+  } catch (err) {
+    console.warn('[ignoreGmailSender] rule insert failed', err);
+  }
+
+  // 2) Cascade-dismiss every pending or snoozed message from the same
+  //    domain. Promoted messages stay where they are — we don't unwind
+  //    a deliberate promote.
+  const now = new Date();
+  const dismissed = await db
+    .update(gmailMessages)
+    .set({
+      status: 'dismissed',
+      dismissedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(gmailMessages.userId, user.id),
+        // status in pending | snoozed
+        sql`${gmailMessages.status} IN ('pending', 'snoozed')`,
+        // domain match — case-insensitive on the stored from_address
+        sql`lower(${gmailMessages.fromAddress}) LIKE ${'%@' + domain}`
+      )
+    )
+    .returning({ id: gmailMessages.id });
+
+  revalidatePath('/studio/insights');
+  revalidatePath('/studio/knowledge');
+
+  return {
+    ok: true,
+    domain,
+    dismissedCount: dismissed.length,
+    ruleAdded,
+  };
+}
