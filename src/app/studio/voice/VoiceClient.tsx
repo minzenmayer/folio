@@ -707,6 +707,9 @@ function CorpusPickerTab({
   onAdded: (s: ListedSample) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [pathPrefix, setPathPrefix] = useState('');
+  const [excludePattern, setExcludePattern] = useState('');
+  const [minWords, setMinWords] = useState(0);
   const [results, setResults] = useState<CorpusSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<string | null>(null);
@@ -721,6 +724,10 @@ function CorpusPickerTab({
         const r = await searchCorpusForTraining({
           platform,
           query: query.trim() || undefined,
+          pathPrefix: pathPrefix.trim() || undefined,
+          excludePattern: excludePattern.trim() || undefined,
+          // Convert words → chars (rough average 5 chars/word).
+          minChars: minWords > 0 ? minWords * 5 : 0,
           limit: 50,
         });
         setResults(r.results);
@@ -731,7 +738,7 @@ function CorpusPickerTab({
       }
     }, 200);
     return () => clearTimeout(handle);
-  }, [platform, query]);
+  }, [platform, query, pathPrefix, excludePattern, minWords]);
 
   const onPick = async (item: CorpusSearchResult) => {
     if (item.alreadySelected) return;
@@ -775,8 +782,41 @@ function CorpusPickerTab({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search your pieces…"
-        className="w-full bg-paper-2 rounded-soft border border-rule px-3 py-2 font-sans text-[13.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink mb-4"
+        className="w-full bg-paper-2 rounded-soft border border-rule px-3 py-2 font-sans text-[13.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink mb-3"
       />
+      {/* Filters — designed for vaults that mix essays with research
+          notes. Path prefix scopes to a folder; exclude pattern hides
+          titles matching a substring (e.g., 'Analysis'); min words
+          drops short scratchpad notes. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+        {platform === 'longform' && (
+          <input
+            type="text"
+            value={pathPrefix}
+            onChange={(e) => setPathPrefix(e.target.value)}
+            placeholder="Vault folder (e.g. essays/)"
+            className="bg-paper-2 rounded-soft border border-rule px-3 py-1.5 font-sans text-[12.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
+          />
+        )}
+        <input
+          type="text"
+          value={excludePattern}
+          onChange={(e) => setExcludePattern(e.target.value)}
+          placeholder="Hide titles with… (e.g. Analysis)"
+          className="bg-paper-2 rounded-soft border border-rule px-3 py-1.5 font-sans text-[12.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
+        />
+        <input
+          type="number"
+          value={minWords || ''}
+          onChange={(e) =>
+            setMinWords(Math.max(0, Number(e.target.value) || 0))
+          }
+          placeholder="Min words"
+          min={0}
+          step={100}
+          className="bg-paper-2 rounded-soft border border-rule px-3 py-1.5 font-sans text-[12.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
+        />
+      </div>
       {error && (
         <p className="font-sans text-[13px] text-ink leading-[1.5] mb-3">
           {error}
@@ -810,7 +850,11 @@ function CorpusPickerTab({
                     <p className="font-sans text-[14px] text-ink leading-[1.4] font-medium truncate">
                       {r.title}
                     </p>
-                    <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5] mt-0.5 line-clamp-2">
+                    <p className="font-mono text-[10px] tracking-[0.04em] text-tag mt-0.5 truncate">
+                      {r.path ? r.path : sourceLabel(r.sourceKind)}{' · '}
+                      {Math.round(r.charCount / 5).toLocaleString()} words
+                    </p>
+                    <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5] mt-1 line-clamp-2">
                       {r.snippet ?? ''}
                     </p>
                   </button>

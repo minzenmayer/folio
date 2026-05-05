@@ -396,6 +396,17 @@ export async function removeTrainingSample(input: unknown) {
 const searchCorpusSchema = z.object({
   platform: z.enum(['longform', 'linkedin']),
   query: z.string().max(200).optional(),
+  // Path-prefix filter for vault notes. Match against obsidian_notes.path.
+  // E.g., 'essays/' scopes results to that folder.
+  pathPrefix: z.string().max(200).optional(),
+  // Title pattern to exclude (case-insensitive substring). Lets the user
+  // hide research-y notes by typing a fragment like 'Analysis' or
+  // 'Synthesis'. Still allows them to search ON those words.
+  excludePattern: z.string().max(80).optional(),
+  // Minimum body length in characters. Default 0 = no filter. Useful
+  // to drop short scratchpad notes; 2000 char min surfaces real
+  // essays.
+  minChars: z.number().int().min(0).max(50000).default(0),
   limit: z.number().int().min(1).max(100).default(50),
 });
 
@@ -406,6 +417,12 @@ export type CorpusSearchResult = {
   snippet: string | null;
   postedAt: string | null;
   alreadySelected: boolean;
+  // Vault path for obsidian_note results (e.g., 'essays/trust.md').
+  // Null for the other source kinds.
+  path: string | null;
+  // Approximate body length in chars. Used by the UI to show 'short
+  // note' vs 'longform piece' indicators and filter client-side.
+  charCount: number;
 };
 
 export async function searchCorpusForTraining(
@@ -414,6 +431,9 @@ export async function searchCorpusForTraining(
   const user = await requireUser();
   const parsed = searchCorpusSchema.parse(input);
   const search = parsed.query?.trim();
+  const pathPrefix = parsed.pathPrefix?.trim();
+  const excludePattern = parsed.excludePattern?.trim().toLowerCase();
+  const minChars = parsed.minChars ?? 0;
   const sourceKinds: ('newsletter_issue' | 'obsidian_note' | 'linkedin_post')[] =
     parsed.platform === 'longform'
       ? ['newsletter_issue', 'obsidian_note']
@@ -469,6 +489,8 @@ export async function searchCorpusForTraining(
         snippet: r.body.slice(0, 280),
         postedAt: r.postedAt?.toISOString() ?? null,
         alreadySelected: selectedSet.has(`newsletter_issue:${r.id}`),
+        path: null,
+        charCount: r.body.length,
       });
     }
   }
@@ -488,6 +510,7 @@ export async function searchCorpusForTraining(
         id: obsidianNotes.id,
         title: obsidianNotes.title,
         body: obsidianNotes.bodyText,
+        path: obsidianNotes.path,
         postedAt: obsidianNotes.updatedAt,
       })
       .from(obsidianNotes)
@@ -496,6 +519,8 @@ export async function searchCorpusForTraining(
       .limit(parsed.limit);
     for (const r of rows) {
       if (!r.body || r.body.length < 50) continue;
+      // Apply path-prefix filter (vault-only feature).
+      if (pathPrefix && !(r.path ?? '').startsWith(pathPrefix)) continue;
       out.push({
         sourceKind: 'obsidian_note',
         id: r.id,
@@ -503,6 +528,8 @@ export async function searchCorpusForTraining(
         snippet: r.body.slice(0, 280),
         postedAt: r.postedAt?.toISOString() ?? null,
         alreadySelected: selectedSet.has(`obsidian_note:${r.id}`),
+        path: r.path,
+        charCount: r.body.length,
       });
     }
   }
@@ -539,18 +566,30 @@ export async function searchCorpusForTraining(
         snippet: body.slice(0, 280),
         postedAt: r.postedAt?.toISOString() ?? null,
         alreadySelected: selectedSet.has(`linkedin_post:${r.id}`),
+        path: null,
+        charCount: body.length,
       });
     }
   }
 
+  // Apply minChars + excludePattern filters (cheaper client-side
+  // than re-running the SQL with all conditions per source kind).
+  let filtered = out;
+  if (minChars > 0) filtered = filtered.filter((r) => r.charCount >= minChars);
+  if (excludePattern) {
+    filtered = filtered.filter(
+      (r) => !r.title.toLowerCase().includes(excludePattern)
+    );
+  }
+
   // Sort merged results by postedAt desc when present.
-  out.sort((a, b) => {
+  filtered.sort((a, b) => {
     const at = a.postedAt ? new Date(a.postedAt).getTime() : 0;
     const bt = b.postedAt ? new Date(b.postedAt).getTime() : 0;
     return bt - at;
   });
 
-  return { results: out.slice(0, parsed.limit) };
+  return { results: filtered.slice(0, parsed.limit) };
 }
 
 // ─── updateManualLists ───────────────────────────────────────────────
