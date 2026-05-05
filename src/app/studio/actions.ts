@@ -1439,6 +1439,113 @@ export async function proposeFromTopic(
   };
 }
 
+// ─── commitProposal — Phase 15b · "Open the page" hand-off ─────────────
+//
+// Creates a draft from the spar view's current outline + topic and
+// redirects to /studio/page/[id]. Slice 6 of the Phase 15b stack.
+//
+// Inputs:
+//   - topic: the user's submitted topic; used as the H1 / title.
+//   - outline: array of beat strings; each becomes an H2 section header.
+//   - platform: 'newsletter' | 'linkedin' — controls draft shape and
+//     the editor's mode= URL parameter (so the rail boots in the
+//     right voice). Linkedin still gets section H2s in 15b — body-only
+//     fast-path is the escape-hatch composeNew path, not this one.
+//
+// No section-draft button in 15b (Option 2 from the build prompt) so
+// no per-beat prose to splice in. When 15a + section-drafts ship, the
+// signature gains an optional sections map and beats get filled in.
+
+const commitProposalSchema = z.object({
+  topic: z.string().min(1).max(2000),
+  outline: z
+    .array(z.object({ beat: z.string().min(1).max(500) }))
+    .min(0)
+    .max(8),
+  platform: z.enum(['newsletter', 'linkedin']).default('newsletter'),
+});
+
+export async function commitProposal(input: unknown) {
+  const user = await requireUser();
+  const { topic, outline, platform } = commitProposalSchema.parse(input);
+
+  const trimmedTopic = topic.trim().slice(0, 280);
+  const beats = outline.map((b) => b.beat.trim()).filter((b) => b.length > 0);
+
+  // Build a Tiptap doc:
+  //   newsletter → H1 = topic, H2 per beat with an empty paragraph below
+  //                each so the user has a slot to start writing.
+  //   linkedin   → no H1; beats become a small bulleted scaffold so the
+  //                shape is "outline + body" rather than "title + sections".
+  let initialDoc: { type: 'doc'; content: Array<Record<string, unknown>> };
+  if (platform === 'linkedin') {
+    const content: Array<Record<string, unknown>> = [];
+    if (beats.length > 0) {
+      content.push({
+        type: 'bulletList',
+        content: beats.map((b) => ({
+          type: 'listItem',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: b }],
+            },
+          ],
+        })),
+      });
+    }
+    content.push({ type: 'paragraph' });
+    initialDoc = { type: 'doc', content };
+  } else {
+    const content: Array<Record<string, unknown>> = [
+      {
+        type: 'heading',
+        attrs: { level: 1 },
+        content: [{ type: 'text', text: trimmedTopic }],
+      },
+    ];
+    for (const b of beats) {
+      content.push({
+        type: 'heading',
+        attrs: { level: 2 },
+        content: [{ type: 'text', text: b }],
+      });
+      content.push({ type: 'paragraph' });
+    }
+    if (beats.length === 0) content.push({ type: 'paragraph' });
+    initialDoc = { type: 'doc', content };
+  }
+
+  const [draft] = await db
+    .insert(drafts)
+    .values({
+      userId: user.id,
+      title: platform === 'linkedin' ? null : trimmedTopic,
+      contentJson: initialDoc,
+    })
+    .returning();
+
+  // Best-effort embed (mirrors composeNew). Embedding the topic + the
+  // outline beats together gives the rail a richer query shape than
+  // topic alone.
+  try {
+    const embedSource = [trimmedTopic, ...beats].join('\n');
+    if (embedSource.trim().length > 0) {
+      const embedding = await embedText(embedSource);
+      await db
+        .update(drafts)
+        .set({ embedding })
+        .where(and(eq(drafts.id, draft.id), eq(drafts.userId, user.id)));
+    }
+  } catch (err) {
+    console.warn('[commitProposal] embed failed', err);
+  }
+
+  revalidatePath('/studio');
+  revalidatePath('/studio/page');
+  redirect(`/studio/page/${draft.id}?mode=${platform}`);
+}
+
 // ─── exploreIdeas — Sprint 12 query interface ───────────────────────
 
 const exploreIdeasSchema = z.object({
