@@ -342,6 +342,12 @@ export type SimilarHit = {
   claimFull?: string | null;
   evidenceFull?: string | null;
   sourceTitle?: string | null;
+  // Phase 15b (2026-05-05): for kind === 'extracted_idea', the originating
+  // source kind (newsletter_issue / obsidian_note / linkedin_post /
+  // gmail_message). Lets the bucket helper in retrieval-kinds.ts split
+  // extracted ideas into voice vs knowledge for the home composer's
+  // sparring-partner prompt. Null on non-extracted_idea hits.
+  sourceKind?: SimilarKind | null;
   // Phase 14a: per-hit "this is here because…" reasoning, generated
   // alongside the synthesis paragraph in generateReflection. The rail
   // renders this as a small italic line under the title.
@@ -821,6 +827,20 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
               r.sourceTitleLinkedin ??
               r.sourceTitleGmail ??
               null;
+            // Phase 15b: surface which source kind the extracted_idea came
+            // from. Used by retrieval-kinds.ts bucket() to route this hit
+            // into voice_longform / voice_shortform / knowledge in the
+            // home composer prompt. Exactly one FK is set per row (XOR
+            // CHECK in 0009_gmail.sql), so first-non-null wins.
+            const sourceKind: SimilarKind | null = r.sourceTitleNewsletter
+              ? 'newsletter_issue'
+              : r.sourceTitleObsidian
+                ? 'obsidian_note'
+                : r.sourceTitleLinkedin
+                  ? 'linkedin_post'
+                  : r.sourceTitleGmail
+                    ? 'gmail_message'
+                    : null;
             return {
               kind: 'extracted_idea',
               id: r.id,
@@ -832,6 +852,7 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
               claimFull: claim || null,
               evidenceFull: evidence || null,
               sourceTitle,
+              sourceKind,
             };
           })
         )

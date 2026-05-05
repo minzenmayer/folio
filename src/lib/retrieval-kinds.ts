@@ -38,3 +38,56 @@ export const SIMILAR_KINDS_FOR_ZOD = [...SIMILAR_KINDS] as [
   SimilarKind,
   ...SimilarKind[],
 ];
+
+// ── Phase 15b (2026-05-05) ──────────────────────────────────────────
+// Retrieval buckets. The home composer's sparring-partner prompt
+// distinguishes between *how the user writes* (voice) and *what they've
+// read* (knowledge). The voice side splits further by surface, because
+// Payton's longform voice (CSL newsletter / Obsidian) and his LinkedIn
+// voice are genuinely different — flattening them averages out both.
+//
+//   voice_longform  — user-authored sources that read as essay-shape:
+//                     newsletter_issue, obsidian_note, draft, idea, capture,
+//                     plus extracted_ideas pulled from those.
+//   voice_shortform — user-authored short-form: linkedin_post, plus
+//                     extracted_ideas pulled from linkedin posts.
+//   knowledge       — things the user *reads*, not writes: gmail_message,
+//                     plus extracted_ideas pulled from gmail.
+//
+// `bucket(hit)` accepts either a bare SimilarKind or a partial SimilarHit
+// shape with a `sourceKind` (the originating kind for extracted_idea
+// rows). For extracted_idea without a known sourceKind, default to
+// voice_longform — that's where extracted ideas overwhelmingly land in
+// today's corpus and avoids polluting the knowledge bucket with
+// user-authored material.
+export type RetrievalBucket =
+  | 'voice_longform'
+  | 'voice_shortform'
+  | 'knowledge';
+
+export function bucket(
+  input: SimilarKind | { kind: SimilarKind; sourceKind?: SimilarKind | null }
+): RetrievalBucket {
+  const kind = typeof input === 'string' ? input : input.kind;
+  const sourceKind =
+    typeof input === 'string' ? null : (input.sourceKind ?? null);
+
+  switch (kind) {
+    case 'newsletter_issue':
+    case 'obsidian_note':
+    case 'capture':
+    case 'idea':
+    case 'draft':
+      return 'voice_longform';
+    case 'linkedin_post':
+      return 'voice_shortform';
+    case 'gmail_message':
+      return 'knowledge';
+    case 'extracted_idea': {
+      if (!sourceKind) return 'voice_longform';
+      // Recurse with the source kind. Source can never itself be
+      // extracted_idea (FK constraint), so this terminates after one hop.
+      return bucket(sourceKind);
+    }
+  }
+}
