@@ -41,13 +41,17 @@ export default async function VoicePage() {
     <section>
       <div className="max-w-[920px] mx-auto px-6 md:px-8 py-12 md:py-16">
         <div className="mb-8">
+          <p className="font-mono text-[11px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+            Settings · Voice ID
+          </p>
           <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
-            Voice
+            Train your voice.
           </h1>
           <p className="font-sans text-[15.5px] leading-[1.55] text-ink-soft max-w-[58ch]">
-            How you write — built from your own corpus. The composer reads
-            this when it needs to imitate your voice. Two profiles, one
-            per platform.
+            Flag the pieces that sound most like you, let Claude profile
+            them, then patch the gaps with your own additions. The
+            composer reads this when it imitates your voice. Two profiles,
+            one per platform.
           </p>
         </div>
 

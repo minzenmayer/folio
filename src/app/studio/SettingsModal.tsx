@@ -29,7 +29,11 @@ import { ConnectorsPanel } from './settings/ConnectorsPanel';
 
 const SECTIONS = [
   { id: 'connectors', label: 'Connectors', enabled: true },
-  { id: 'voice', label: 'Voice ID', enabled: false },
+  // Phase 15a (2026-05-05): Voice ID is the training surface. Inline
+  // panel in settings is a brief intro + 'Open Voice ID' button; the
+  // full UI lives at /studio/voice (kept on the route to preserve the
+  // rich tabs/lists layout that doesn't compress well in a modal).
+  { id: 'voice', label: 'Voice ID', enabled: true },
   { id: 'instructions', label: 'Custom Instructions', enabled: false },
   { id: 'memories', label: 'Memories', enabled: false },
   { id: 'billing', label: 'Billing', enabled: false },
@@ -155,7 +159,9 @@ export function SettingsModal() {
               <p className="font-sans text-[13px] text-ink-soft mt-1">
                 {section === 'connectors'
                   ? 'Connect the sources Thoughtbed reads from. Your bed is yours.'
-                  : ''}
+                  : section === 'voice'
+                    ? 'Train how the composer imitates your voice. Per-platform profile + canonical pieces.'
+                    : ''}
               </p>
             </div>
             <button
@@ -183,9 +189,72 @@ export function SettingsModal() {
 
           <div className="flex-1 overflow-y-auto px-8 py-6">
             {section === 'connectors' && <ConnectorsPanel />}
+            {section === 'voice' && <VoiceSettingsLanding onClose={close} />}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Voice ID landing inside Settings ─────────────────────────────────
+
+function VoiceSettingsLanding({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="max-w-[640px]">
+      <p className="font-sans text-[14.5px] leading-[1.6] text-ink mb-5">
+        Voice ID is how you train the composer to imitate your voice. The
+        partner reads it before drafting an angle or a section so the prose
+        sounds like you, not generic AI.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div className="rounded-soft border border-rule p-4">
+          <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag font-medium mb-2">
+            Longform
+          </p>
+          <p className="font-sans text-[13.5px] leading-[1.55] text-ink-soft">
+            Newsletters and vault notes. The voice you use when writing
+            essays.
+          </p>
+        </div>
+        <div className="rounded-soft border border-rule p-4">
+          <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag font-medium mb-2">
+            Short form
+          </p>
+          <p className="font-sans text-[13.5px] leading-[1.55] text-ink-soft">
+            Social posts. A different voice than longform — separate
+            profile so the composer doesn&apos;t average the two.
+          </p>
+        </div>
+      </div>
+
+      <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+        How it works
+      </h3>
+      <ol className="flex flex-col gap-2 mb-6">
+        <li className="font-sans text-[14px] leading-[1.55] text-ink">
+          <span className="font-medium">Flag canonical pieces.</span> Star
+          3-5 pieces per platform that sound most like you.
+        </li>
+        <li className="font-sans text-[14px] leading-[1.55] text-ink">
+          <span className="font-medium">Rebuild the profile.</span> One
+          Claude call. Returns summary, attributes, things to avoid.
+        </li>
+        <li className="font-sans text-[14px] leading-[1.55] text-ink">
+          <span className="font-medium">Add manual lines.</span> Anything
+          Claude missed (e.g. words you don&apos;t use). Persists across
+          rebuilds.
+        </li>
+      </ol>
+
+      <Link
+        href="/studio/voice"
+        onClick={onClose}
+        className="inline-block font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-5 py-2.5 bg-ink text-bg hover:bg-ink-soft transition-colors"
+      >
+        Open Voice ID →
+      </Link>
     </div>
   );
 }

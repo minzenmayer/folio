@@ -77,12 +77,12 @@ const NAV_ITEMS: Array<{
     href: '/studio/knowledge',
   },
   {
-    // Phase 15a (2026-05-05): Voice ID — per-platform voice profile
-    // + canonical-piece flagging. Powers the composer's voice
-    // imitation and the section-draft button in the spar.
-    label: 'Voice',
+    // Phase 15a (2026-05-05): Voice insights — user-facing snapshot
+    // of how you write right now. Voice ID (the training surface)
+    // lives under Settings.
+    label: 'Voice insights',
     subtitle: 'how you write',
-    href: '/studio/voice',
+    href: '/studio/voice-insights',
   },
 ];
 

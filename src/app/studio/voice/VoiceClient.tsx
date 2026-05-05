@@ -73,7 +73,7 @@ export function VoiceClient({
       <div
         role="tablist"
         aria-label="Voice platform"
-        className="flex items-center gap-1 mb-8"
+        className="flex flex-col sm:flex-row gap-2 mb-8"
       >
         <PlatformPill
           label="Longform"
@@ -82,8 +82,8 @@ export function VoiceClient({
           onClick={() => setPlatform('longform')}
         />
         <PlatformPill
-          label="LinkedIn"
-          hint="short-form"
+          label="Short form"
+          hint="social posts"
           selected={platform === 'linkedin'}
           onClick={() => setPlatform('linkedin')}
         />
@@ -126,17 +126,17 @@ function PlatformPill({
       role="tab"
       aria-selected={selected}
       onClick={onClick}
-      className={`flex items-baseline gap-2 rounded-soft px-4 py-2 transition-colors ${
+      className={`flex-1 text-left rounded-card px-5 py-4 transition-colors border ${
         selected
-          ? 'bg-ink text-bg'
-          : 'bg-paper border border-rule text-ink-soft hover:bg-paper-2 hover:text-ink'
+          ? 'bg-ink text-bg border-ink'
+          : 'bg-paper border-rule text-ink-soft hover:bg-paper-2 hover:text-ink hover:border-ink/40'
       }`}
     >
-      <span className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium">
+      <span className="block font-sans text-[20px] font-semibold tracking-tight leading-tight">
         {label}
       </span>
       <span
-        className={`font-sans text-[11px] ${
+        className={`block font-sans text-[12.5px] mt-0.5 ${
           selected ? 'text-bg/70' : 'text-tag'
         }`}
       >
@@ -212,20 +212,80 @@ function ProfilePanel({
       </div>
 
       {rebuildResult && !rebuildResult.ok && (
+        <div className="px-5 py-4 border-b border-rule bg-paper-2">
+          <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag font-medium mb-1">
+            {rebuildResult.reason === 'too_sparse'
+              ? 'Not enough material yet'
+              : 'Rebuild failed'}
+          </p>
+          <p className="font-sans text-[13.5px] text-ink leading-[1.5]">
+            {rebuildResult.message}
+          </p>
+          {rebuildResult.reason === 'too_sparse' && (
+            <p className="font-sans text-[12.5px] text-tag leading-[1.5] mt-2">
+              Connect more sources or wait for the next sync, then try
+              again.
+            </p>
+          )}
+        </div>
+      )}
+      {rebuildResult && rebuildResult.ok && (
         <div className="px-5 py-3 border-b border-rule bg-paper-2">
           <p className="font-sans text-[13px] text-ink leading-[1.5]">
-            {rebuildResult.message}
+            Profile rebuilt. {rebuildResult.sampleCount} sample
+            {rebuildResult.sampleCount === 1 ? '' : 's'}{' '}
+            ({rebuildResult.canonicalCount} canonical +{' '}
+            {Math.max(
+              0,
+              rebuildResult.sampleCount - rebuildResult.canonicalCount
+            )}{' '}
+            recent).
           </p>
         </div>
       )}
 
       {!hasProfile ? (
-        <div className="px-5 py-8 text-center">
-          <p className="font-sans text-[14px] text-ink-soft leading-[1.55] max-w-[48ch] mx-auto">
-            No profile yet. Hit Rebuild to compute one from your{' '}
-            {platform === 'longform' ? 'newsletters + vault' : 'LinkedIn posts'}
-            . You can also flag canonical pieces below first to bias the
-            sample toward what sounds most like you.
+        <div className="px-5 py-7">
+          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-4">
+            How to train this profile
+          </h3>
+          <ol className="flex flex-col gap-3 max-w-[58ch]">
+            <li className="grid grid-cols-[28px_1fr] gap-3 items-baseline">
+              <span className="font-mono text-[11px] tracking-[0.04em] text-tag font-medium pt-1">
+                01
+              </span>
+              <span className="font-sans text-[14px] leading-[1.55] text-ink">
+                <span className="font-medium">Flag canonical pieces.</span>{' '}
+                Browse the list below and star 3–5{' '}
+                {platform === 'longform' ? 'issues or vault notes' : 'posts'}{' '}
+                that sound most like you. The profile build pulls these
+                first; the rest fills in from your recent corpus.
+              </span>
+            </li>
+            <li className="grid grid-cols-[28px_1fr] gap-3 items-baseline">
+              <span className="font-mono text-[11px] tracking-[0.04em] text-tag font-medium pt-1">
+                02
+              </span>
+              <span className="font-sans text-[14px] leading-[1.55] text-ink">
+                <span className="font-medium">Rebuild.</span> One Claude
+                call (~10–20s). Returns a summary, characteristic moves,
+                and things you avoid.
+              </span>
+            </li>
+            <li className="grid grid-cols-[28px_1fr] gap-3 items-baseline">
+              <span className="font-mono text-[11px] tracking-[0.04em] text-tag font-medium pt-1">
+                03
+              </span>
+              <span className="font-sans text-[14px] leading-[1.55] text-ink">
+                <span className="font-medium">Patch the gaps.</span> Add
+                manual lines for anything Claude missed (e.g. words you
+                don&apos;t use). Persists across rebuilds.
+              </span>
+            </li>
+          </ol>
+          <p className="font-sans text-[12.5px] text-tag leading-[1.5] mt-5 max-w-[58ch]">
+            You can skip step 1 and rebuild from a recency-weighted random
+            sample — the profile will be looser, but it&apos;ll work.
           </p>
         </div>
       ) : (
