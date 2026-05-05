@@ -41,7 +41,7 @@ export default function Home() {
             </h1>
             <p className="font-serif font-light text-[clamp(20px,2.2vw,26px)] leading-[1.45] text-ink-soft max-w-[56ch] mx-auto mb-12">
               Thoughtbed is the place your scattered thoughts grow up. Plant
-              seeds, watch them connect, harvest what's ripe — then write
+              seeds, watch them connect, harvest what's ripe. Then write
               from the ones that survived.{' '}
               <span className="text-accent">
                 The garden's not open yet. Leave your address and we'll
@@ -69,22 +69,23 @@ export default function Home() {
               <em className="italic font-normal text-accent">thinks.</em>
             </h2>
             <p className="font-serif text-[19px] leading-[1.65] text-ink-soft mb-6">
-              Most "second brain" tools are passive. They store; they do not
-              produce. Most AI writing tools are productive. They generate;
-              they do not think with you. Thoughtbed sits in the seam — the
-              place where a thought matures into writing, slowly, with care,
-              in a way you can feel yourself change.
+              Most "second brain" tools store. They don't produce. Most AI
+              writing tools generate. They don't think with you. Thoughtbed
+              sits in the seam. The place where a thought matures into
+              writing, slowly, with care, in a way you can feel yourself
+              change.
             </p>
             <p className="font-serif text-[19px] leading-[1.65] text-ink-soft">
               When you write inside Thoughtbed, the garden in the right
               margin pulls from{' '}
               <em className="italic text-ink">
-                your own captures, your matured ideas, your past drafts —
-                your voice
+                your own captures, your matured ideas, your past drafts.
+                Your voice.
               </em>{' '}
-              — never from a generic playbook, never from the public web. The
-              bed gets denser the more you live in it. The system becomes
-              more <em className="italic text-ink">you</em> over time.
+              Never from a generic playbook. Never from the public web.
+              The bed gets denser the more you live in it. The system
+              becomes more <em className="italic text-ink">you</em> over
+              time.
             </p>
           </div>
         </div>

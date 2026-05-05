@@ -285,7 +285,7 @@ function ProfilePanel({
           </ol>
           <p className="font-sans text-[12.5px] text-tag leading-[1.5] mt-5 max-w-[58ch]">
             You can skip step 1 and rebuild from a recency-weighted random
-            sample — the profile will be looser, but it&apos;ll work.
+            sample. The profile will be looser, but it works.
           </p>
         </div>
       ) : (

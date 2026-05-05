@@ -696,7 +696,7 @@ function SparView({
             {proposal.visibleThinking.lines.length > 0 && (
               <ul className="font-sans text-[12.5px] text-ink-soft leading-[1.5] space-y-0.5">
                 {proposal.visibleThinking.lines.map((line, i) => (
-                  <li key={i}>— {line}</li>
+                  <li key={i}>· {line}</li>
                 ))}
               </ul>
             )}
@@ -704,8 +704,8 @@ function SparView({
         )}
         {proposal.retrievalCount === 0 && (
           <p className="mt-3 font-sans text-[12.5px] text-tag leading-[1.5] italic">
-            You don&apos;t have much in your space on this yet — leaning
-            on the topic itself.
+            Not much in your space on this yet. Leaning on the topic
+            itself.
           </p>
         )}
       </div>

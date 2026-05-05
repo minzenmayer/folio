@@ -223,7 +223,7 @@ function VoiceSettingsLanding({ onClose }: { onClose: () => void }) {
             Short form
           </p>
           <p className="font-sans text-[13.5px] leading-[1.55] text-ink-soft">
-            Social posts. A different voice than longform — separate
+            Social posts. A different voice than longform. Separate
             profile so the composer doesn&apos;t average the two.
           </p>
         </div>

@@ -98,8 +98,8 @@ export default async function VoiceInsightsPage() {
             How you write.
           </h1>
           <p className="font-sans text-[15.5px] leading-[1.6] text-ink-soft max-w-[58ch]">
-            A snapshot of your voice — pulled from the pieces you&apos;ve
-            written and the canonical samples you&apos;ve flagged. The
+            A snapshot of your voice. Pulled from pieces you&apos;ve
+            written and canonical samples you&apos;ve flagged. The
             composer reads this when it imitates your voice.
           </p>
         </div>
@@ -215,7 +215,7 @@ function ProfileCard({
                 key={i}
                 className="font-sans text-[14px] leading-[1.5] text-ink-soft"
               >
-                — {a}
+                · {a}
               </li>
             ))}
           </ul>
@@ -235,9 +235,9 @@ function EmptyState() {
         Your voice insights will land here.
       </h2>
       <p className="font-sans text-[14.5px] leading-[1.6] text-ink-soft max-w-[52ch] mx-auto mb-6">
-        Train a voice profile first and this page will show what Thoughtbed
-        sees in your writing — characteristic moves, taboos, the shape of
-        how you write longform vs. short form. Takes about 30 seconds.
+        Train a voice profile first. This page will show what Thoughtbed
+        sees in your writing. Characteristic moves, taboos, the shape of
+        how you write longform versus short form. Takes about 30 seconds.
       </p>
       <Link
         href="/studio?settings=voice"
