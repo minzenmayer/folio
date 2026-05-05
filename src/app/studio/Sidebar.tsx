@@ -29,6 +29,7 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
 import { createDraft } from './page/actions';
@@ -142,7 +143,15 @@ export function Sidebar({
           className="flex items-center gap-2 font-sans text-[18px] font-semibold tracking-tight text-ink hover:text-ink-soft transition-colors group"
           aria-label="Thoughtbed — home"
         >
-          <SproutMark />
+          <Image
+            src="/tb.png"
+            alt=""
+            width={22}
+            height={22}
+            className="shrink-0"
+            priority
+            unoptimized
+          />
           <span>Thoughtbed</span>
         </Link>
         <div className="font-sans text-[12px] text-tag mt-1 ml-7 truncate">
@@ -359,47 +368,6 @@ function HelpIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-  );
-}
-
-// ─── Plant sprout mark ─────────────────────────────────
-//
-// Silhouette traced from Payton's reference image: two leaves in a
-// V-shape on a short stem, wide pot rim, narrower pot body. Pure
-// black on transparent via currentColor. 24x24 viewBox with each
-// "pixel" = 2x2 units for the chunky pixel-art aesthetic.
-function SproutMark() {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden
-      fill="currentColor"
-      className="shrink-0 text-ink"
-    >
-      {/* Leaves — two lobes forming a V at the top, rows 0-5 */}
-      <rect x="4"  y="0"  width="4"  height="2" />
-      <rect x="12" y="0"  width="8"  height="2" />
-      <rect x="2"  y="2"  width="18" height="2" />
-      <rect x="0"  y="4"  width="22" height="2" />
-      <rect x="0"  y="6"  width="24" height="2" />
-      <rect x="2"  y="8"  width="20" height="2" />
-      <rect x="4"  y="10" width="16" height="2" />
-
-      {/* Stem — short column between leaves and pot, rows 6-7 */}
-      <rect x="10" y="12" width="4"  height="2" />
-      <rect x="8"  y="14" width="8"  height="2" />
-
-      {/* Pot rim — wide band, rows 8-9 */}
-      <rect x="2"  y="16" width="20" height="2" />
-      <rect x="2"  y="18" width="20" height="2" />
-
-      {/* Pot body — narrower, rows 10-11 */}
-      <rect x="4"  y="20" width="16" height="2" />
-      <rect x="4"  y="22" width="16" height="2" />
     </svg>
   );
 }
