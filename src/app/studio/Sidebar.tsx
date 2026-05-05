@@ -88,6 +88,7 @@ const NAV_ITEMS: Array<{
 
 const DAY = 24 * 60 * 60 * 1000;
 const WEEK = 7 * DAY;
+const MONTH = 30 * DAY;
 
 export function Sidebar({
   firstName,
@@ -104,16 +105,20 @@ export function Sidebar({
 
   const groups = useMemo(() => {
     const today: RecentItem[] = [];
+    const yesterday: RecentItem[] = [];
     const week: RecentItem[] = [];
+    const month: RecentItem[] = [];
     const older: RecentItem[] = [];
     const now = Date.now();
     for (const item of recents) {
       const age = now - new Date(item.iso).getTime();
       if (age < DAY) today.push(item);
+      else if (age < 2 * DAY) yesterday.push(item);
       else if (age < WEEK) week.push(item);
+      else if (age < MONTH) month.push(item);
       else older.push(item);
     }
-    return { today, week, older };
+    return { today, yesterday, week, month, older };
   }, [recents]);
 
   function isNavActive(item: (typeof NAV_ITEMS)[number]) {
@@ -134,12 +139,13 @@ export function Sidebar({
       <div className="px-5 pt-6 pb-5">
         <Link
           href="/studio"
-          className="font-sans text-[18px] font-semibold tracking-tight text-ink hover:text-ink-soft transition-colors block"
+          className="flex items-center gap-2 font-sans text-[18px] font-semibold tracking-tight text-ink hover:text-ink-soft transition-colors group"
           aria-label="Thoughtbed — home"
         >
-          Thoughtbed
+          <SproutMark />
+          <span>Thoughtbed</span>
         </Link>
-        <div className="font-sans text-[12px] text-tag mt-1 truncate">
+        <div className="font-sans text-[12px] text-tag mt-1 ml-7 truncate">
           {firstName}'s Space
         </div>
       </div>
@@ -209,8 +215,18 @@ export function Sidebar({
               pathname={pathname}
             />
             <RecentGroup
+              label="Yesterday"
+              items={groups.yesterday}
+              pathname={pathname}
+            />
+            <RecentGroup
               label="Last 7 days"
               items={groups.week}
+              pathname={pathname}
+            />
+            <RecentGroup
+              label="Last 30 days"
+              items={groups.month}
               pathname={pathname}
             />
             <RecentGroup
@@ -343,6 +359,42 @@ function HelpIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+// ─── Plant sprout mark ─────────────────────────────────
+//
+// Small pixel-art-feeling sprout next to the Thoughtbed wordmark.
+// Black-and-white only, grid-aligned squares. Two leaves on a stem
+// rising from a small base — reads as "growing" without being
+// literal. Stays the wordmark's font color via currentColor.
+function SproutMark() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+      className="shrink-0 text-ink"
+    >
+      {/* base / soil — three small squares */}
+      <rect x="6" y="17" width="2" height="2" fill="currentColor" />
+      <rect x="9" y="17" width="2" height="2" fill="currentColor" />
+      <rect x="12" y="17" width="2" height="2" fill="currentColor" />
+      {/* stem — single column up the middle */}
+      <rect x="9" y="9" width="2" height="8" fill="currentColor" />
+      {/* left leaf — staircase down-left from stem */}
+      <rect x="7" y="11" width="2" height="2" fill="currentColor" />
+      <rect x="5" y="9" width="2" height="2" fill="currentColor" />
+      <rect x="3" y="7" width="2" height="2" fill="currentColor" />
+      {/* right leaf — staircase up-right from stem (the new growth) */}
+      <rect x="11" y="9" width="2" height="2" fill="currentColor" />
+      <rect x="13" y="7" width="2" height="2" fill="currentColor" />
+      <rect x="15" y="5" width="2" height="2" fill="currentColor" />
+      {/* tip — single square at the top of the stem */}
+      <rect x="9" y="3" width="2" height="2" fill="currentColor" />
     </svg>
   );
 }
