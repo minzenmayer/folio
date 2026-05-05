@@ -403,8 +403,7 @@ The user has already been sparring with you on this topic. Read the conversation
   const outputSchema = z.object({
     retrievalSummary: z
       .string()
-      .min(0)
-      .max(400)
+      .max(1200)
       .describe(
         "One or two sentences reflecting what's in the user's space on this topic. Direct, observational. Not a status report. Reads like a thinking-out-loud line. No 'I notice', no 'It seems', no 'Here's what I found'."
       ),
@@ -419,16 +418,17 @@ The user has already been sparring with you on this topic. Read the conversation
           line: z
             .string()
             .min(1)
-            .max(220)
+            .max(600)
             .describe('A one-line angle — a way into the topic. Specific, declarative. Not a question.'),
           sourceCitations: z
             .array(z.number().int().min(1))
-            .max(6)
+            .max(12)
+            .default([])
             .describe('Indices [n] from the retrieval blocks above whose framing fed this angle.'),
         })
       )
-      .min(2)
-      .max(4)
+      .min(1)
+      .max(6)
       .describe('Three default. Two if the topic surfaces a clear two-direction tension. Four if open-ended.'),
     outline: z
       .array(
@@ -436,19 +436,19 @@ The user has already been sparring with you on this topic. Read the conversation
           beat: z
             .string()
             .min(1)
-            .max(220)
+            .max(600)
             .describe(
               'A single beat — section-shape for newsletter (one line summarizing the section); hooky-and-tight for linkedin (one beat = one move).'
             ),
         })
       )
-      .min(3)
-      .max(5)
+      .min(1)
+      .max(8)
       .describe('A working outline aligned to platformGuess. Tight, no padding.'),
     followUpQuestion: z
       .string()
       .min(1)
-      .max(180)
+      .max(400)
       .describe(
         `One question to keep the thinking moving. Pick the one that fits the topic from this palette (or write a close variant): ${FOLLOW_UP_PALETTE.map((q) => `"${q}"`).join(', ')}. Don't ask all of them.`
       ),

@@ -1472,7 +1472,7 @@ export async function proposeFromTopic(
 const draftSectionSchema = z.object({
   topic: z.string().min(1).max(2000),
   outline: z
-    .array(z.object({ beat: z.string().min(1).max(500) }))
+    .array(z.object({ beat: z.string().min(1).max(800) }))
     .min(1)
     .max(8),
   beatIndex: z.number().int().min(0).max(7),
@@ -1592,7 +1592,7 @@ export async function draftSection(
 const commitProposalSchema = z.object({
   topic: z.string().min(1).max(2000),
   outline: z
-    .array(z.object({ beat: z.string().min(1).max(500) }))
+    .array(z.object({ beat: z.string().min(1).max(800) }))
     .min(0)
     .max(8),
   platform: z.enum(['newsletter', 'linkedin']).default('newsletter'),
