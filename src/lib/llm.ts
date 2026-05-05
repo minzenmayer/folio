@@ -19,7 +19,8 @@
 // via ANTHROPIC_MODEL if you want Sonnet-grade synthesis.
 
 import { anthropic } from '@ai-sdk/anthropic';
-import { generateText } from 'ai';
+import { generateText, generateObject } from 'ai';
+import { z } from 'zod';
 
 import type { SimilarKind } from '@/lib/retrieval-kinds';
 
@@ -83,9 +84,22 @@ const VOICE_INSTRUCTIONS: Record<
 };
 
 /**
+ * Phase 14a (2026-05-04): the reflection API now returns BOTH the prose
+ * synthesis AND a per-hit one-sentence "this is here because…" reasoning
+ * line. The rail renders the reasoning under each card; the synthesis
+ * still drives the existing reflection panel. Single Claude call (more
+ * tokens out, same number of round-trips).
+ */
+export type ReflectionResult = {
+  reflection: string;
+  // Keyed by ReflectionHit.index (1-based).
+  reasoningByIndex: Record<number, string>;
+};
+
+/**
  * Generate a reflection on what the user is circling around in their draft,
- * grounded in the retrieved bank passages. Returns the raw model text —
- * typically with [1], [2] inline citations to the hits.
+ * grounded in the retrieved bank passages. Returns the synthesis text plus
+ * per-hit reasoning indexed by ReflectionHit.index.
  *
  * Mode (Sprint 12): when present, biases the voice. Newsletter and LinkedIn
  * variants are tuned for those surfaces; undefined keeps the neutral voice.
@@ -104,7 +118,7 @@ export async function generateReflection({
   draftText: string;
   hits: ReflectionHit[];
   mode?: ReflectionVoiceMode;
-}): Promise<string> {
+}): Promise<ReflectionResult> {
   const trimmedDraft = draftText.slice(0, MAX_DRAFT_CHARS);
 
   const bankBlock =
@@ -160,6 +174,27 @@ export async function generateReflection({
 
   const voice = VOICE_INSTRUCTIONS[mode ?? 'default'];
 
+  // Reasoning shape — per-hit "this is here because you wrote about X"
+  // sentence. Indices match ReflectionHit.index so the rail can join
+  // back to the SimilarHit list.
+  const reasoningSchema = z.array(
+    z.object({
+      index: z.number().int().min(1),
+      reasoning: z.string().min(1).max(280),
+    })
+  );
+
+  const outputSchema = z.object({
+    reflection: z
+      .string()
+      .min(0)
+      .max(2000)
+      .describe('The synthesis prose — same shape as the prior text-only output.'),
+    perHitReasoning: reasoningSchema.describe(
+      'One sentence per hit explaining why THIS hit is here given the draft. Use the same [index] numbers as in <bank>. Each sentence starts after a quiet conjunction — never repeats the synthesis prose verbatim. About 12-22 words. No preamble, no "this is here because".'
+    ),
+  });
+
   const prompt = `You are a quiet thinking-partner inside Thoughtbed, a private bed where someone matures their own ideas into writing. The user is writing this draft right now:
 
 <draft>
@@ -172,9 +207,13 @@ These items from their own captures, ideas, drafts, newsletter issues, vault not
 ${bankBlock}
 </bank>
 
-${voice.instruction}`;
+You will produce TWO things in a single structured response:
 
-  const { text } = await generateText({
+1. \`reflection\`: ${voice.instruction}
+
+2. \`perHitReasoning\`: For EACH bank item above (use its [index] number), write one short sentence (12-22 words) saying why this item is here given what they're writing — what specific thread of the draft it threads back to. Direct, one specific connection, no preamble. Don't start with 'this is' or 'because'. Examples: "echoes how you framed embodied attention in the buffalo essay" or "picks up the same trust-vs-verification tension you opened with".`;
+
+  const { object } = await generateObject({
     // The SDK's typed model id is a union of known IDs. We deliberately
     // cast through `any` here so a configurable env override (newer
     // models, fine-tuned variants) doesn't fight the type system. The
@@ -182,10 +221,22 @@ ${voice.instruction}`;
     // plain string; if it's invalid the API surfaces a clear error.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     model: anthropic(REFLECTION_MODEL as any),
+    schema: outputSchema,
     prompt,
-    maxTokens: voice.maxTokens,
+    maxTokens: voice.maxTokens + 400,
     temperature: 0.7,
   });
 
-  return text.trim();
+  const reasoningByIndex: Record<number, string> = {};
+  for (const r of object.perHitReasoning ?? []) {
+    if (typeof r.index === 'number' && typeof r.reasoning === 'string') {
+      const trimmed = r.reasoning.trim();
+      if (trimmed.length > 0) reasoningByIndex[r.index] = trimmed;
+    }
+  }
+
+  return {
+    reflection: (object.reflection ?? '').trim(),
+    reasoningByIndex,
+  };
 }

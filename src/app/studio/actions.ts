@@ -335,6 +335,17 @@ export type SimilarHit = {
   // backed by extracted_ideas rows (today: newsletter_issue, obsidian_note).
   ideaTitle?: string | null;
   ideaClaim?: string | null;
+  // Phase 14a (2026-05-04): for kind === 'extracted_idea', carry the FULL
+  // (untruncated) claim + evidence + the underlying source's title so the
+  // rail card can render the whole claim and reveal evidence + source on
+  // expand. claim is short by design, so the card always shows it.
+  claimFull?: string | null;
+  evidenceFull?: string | null;
+  sourceTitle?: string | null;
+  // Phase 14a: per-hit "this is here because…" reasoning, generated
+  // alongside the synthesis paragraph in generateReflection. The rail
+  // renders this as a small italic line under the title.
+  reasoning?: string | null;
 };
 
 const findSimilarSchema = z.object({
@@ -759,9 +770,34 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
           title: extractedIdeas.title,
           claim: extractedIdeas.claim,
           evidence: extractedIdeas.evidence,
+          // Phase 14a (2026-05-04): coalesce the four source-kind FK joins
+          // into a single sourceTitle column so the rail card's expand can
+          // render "from <source>" without four conditional fetches client
+          // side. LEFT JOINs are cheap — only one of the FK columns is
+          // ever set per row (the XOR check enforces it).
+          sourceTitleNewsletter: newsletterIssues.title,
+          sourceTitleObsidian: obsidianNotes.title,
+          sourceTitleLinkedin: linkedinPosts.authorName,
+          sourceTitleGmail: gmailMessages.subject,
           distance: sql<number>`${extractedIdeas.embedding} <=> ${lit}::vector`,
         })
         .from(extractedIdeas)
+        .leftJoin(
+          newsletterIssues,
+          eq(extractedIdeas.newsletterIssueId, newsletterIssues.id)
+        )
+        .leftJoin(
+          obsidianNotes,
+          eq(extractedIdeas.obsidianNoteId, obsidianNotes.id)
+        )
+        .leftJoin(
+          linkedinPosts,
+          eq(extractedIdeas.linkedinPostId, linkedinPosts.id)
+        )
+        .leftJoin(
+          gmailMessages,
+          eq(extractedIdeas.gmailMessageId, gmailMessages.id)
+        )
         .where(ideaWhere)
         .orderBy(sql`${extractedIdeas.embedding} <=> ${lit}::vector`)
         .limit(perKindLimit)
@@ -779,6 +815,12 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
                 : evidence.length > 0
                   ? evidence.slice(0, 280) + (evidence.length > 280 ? '…' : '')
                   : null;
+            const sourceTitle =
+              r.sourceTitleNewsletter ??
+              r.sourceTitleObsidian ??
+              r.sourceTitleLinkedin ??
+              r.sourceTitleGmail ??
+              null;
             return {
               kind: 'extracted_idea',
               id: r.id,
@@ -787,6 +829,9 @@ export async function findSimilar(input: unknown): Promise<SimilarHit[]> {
               similarity: 1 - Number(r.distance),
               ideaTitle: r.title,
               ideaClaim: claim || null,
+              claimFull: claim || null,
+              evidenceFull: evidence || null,
+              sourceTitle,
             };
           })
         )
@@ -910,7 +955,7 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
           ? 'linkedin'
           : undefined;
 
-    const reflection = await generateReflection({
+    const result = await generateReflection({
       draftText,
       hits: sources.map((s, i) => ({
         index: i + 1,
@@ -924,10 +969,16 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
       })),
       mode: voice,
     });
+    // Phase 14a (2026-05-04): fan the per-hit reasoning back into sources
+    // so the rail card render path can pick it up off the SimilarHit.
+    const sourcesWithReasoning: SimilarHit[] = sources.map((s, i) => ({
+      ...s,
+      reasoning: result.reasoningByIndex[i + 1] ?? null,
+    }));
     return {
       ok: true,
-      reflection,
-      sources,
+      reflection: result.reflection,
+      sources: sourcesWithReasoning,
       basedOnChars: draftText.length,
     };
   } catch (err) {
