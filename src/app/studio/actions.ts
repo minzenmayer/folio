@@ -1235,6 +1235,18 @@ export type ProposeFromTopicResult =
       visibleThinking: {
         lines: string[];
         summary: string;
+        // Phase 16 (2026-05-05): structured source-kind counts so the
+        // Spar UI can render a small icon row signaling source breadth
+        // without enumerating every count as a bullet line. Real-use
+        // feedback after slice 2 push: the bullet list felt heavy;
+        // the user wanted a tighter summary with icons-as-depth-cue.
+        kindCounts: {
+          ideas: number;
+          cslIssues: number;
+          linkedin: number;
+          vault: number;
+          gmail: number;
+        };
       };
       angles: ProposeAngle[];
       outline: { beat: string }[];
@@ -1289,6 +1301,26 @@ function bodyForHit(hit: SimilarHit): string | null {
 // matches the spec's example ("3 ripe ideas in your garden touched
 // this", etc.). Each line is dropped if its tally is zero so the list
 // doesn't read as "0 vault notes" stutters.
+// Phase 16 (2026-05-05): structured per-kind counts. visibleThinkingLines
+// builds human strings for legacy / accessibility; this returns the same
+// data as numbers so the UI can render an icon row instead of bullets.
+function visibleThinkingKindCounts(hits: SimilarHit[]): {
+  ideas: number;
+  cslIssues: number;
+  linkedin: number;
+  vault: number;
+  gmail: number;
+} {
+  return {
+    ideas: hits.filter((h) => h.kind === 'idea' || h.kind === 'extracted_idea')
+      .length,
+    cslIssues: hits.filter((h) => h.kind === 'newsletter_issue').length,
+    linkedin: hits.filter((h) => h.kind === 'linkedin_post').length,
+    vault: hits.filter((h) => h.kind === 'obsidian_note').length,
+    gmail: hits.filter((h) => h.kind === 'gmail_message').length,
+  };
+}
+
 function visibleThinkingLines(hits: SimilarHit[]): string[] {
   const lines: string[] = [];
 
@@ -1448,6 +1480,7 @@ export async function proposeFromTopic(
     visibleThinking: {
       lines: visibleThinkingLines(hits),
       summary: proposal.retrievalSummary,
+      kindCounts: visibleThinkingKindCounts(hits),
     },
     angles,
     outline: proposal.outline,

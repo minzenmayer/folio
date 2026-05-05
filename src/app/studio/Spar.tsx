@@ -864,25 +864,22 @@ function SparView({
           </button>
         </div>
 
-        {(proposal.visibleThinking.lines.length > 0 ||
-          proposal.visibleThinking.summary) && (
+        {proposal.visibleThinking.summary && (
           <div
             className="mt-3 border-l-2 border-rule pl-4"
             aria-live="polite"
             aria-atomic="true"
           >
-            {proposal.visibleThinking.summary && (
-              <p className="font-sans text-[13.5px] italic text-ink-soft leading-[1.55] mb-2">
-                {proposal.visibleThinking.summary}
-              </p>
-            )}
-            {proposal.visibleThinking.lines.length > 0 && (
-              <ul className="font-sans text-[12.5px] text-ink-soft leading-[1.5] space-y-0.5">
-                {proposal.visibleThinking.lines.map((line, i) => (
-                  <li key={i}>· {line}</li>
-                ))}
-              </ul>
-            )}
+            <p className="font-sans text-[13.5px] italic text-ink-soft leading-[1.55] mb-2">
+              {proposal.visibleThinking.summary}
+            </p>
+            {/* Phase 16 (2026-05-05): drop the bulleted breakdown.
+                Real-use feedback was that '3 ideas in your garden /
+                1 of your CSL issues' read as heavy. A small icon row
+                signals source breadth without enumerating each count.
+                Each icon's title attribute carries the count for
+                hover and screen readers. */}
+            <SourceIconRow counts={proposal.visibleThinking.kindCounts} />
           </div>
         )}
         {proposal.retrievalCount === 0 && (
@@ -1184,7 +1181,7 @@ function BeatRow({
           onClick={onToggleAnchor}
           aria-pressed={isAnchored}
           disabled={disableDraftButton}
-          className="text-left font-sans text-[14px] text-ink leading-[1.45] truncate disabled:cursor-not-allowed"
+          className="text-left font-sans text-[14px] text-ink leading-[1.45] disabled:cursor-not-allowed break-words"
           title={isAnchored ? 'Click to unanchor' : 'Click to anchor this beat'}
         >
           {beat}
@@ -1196,10 +1193,15 @@ function BeatRow({
             onClick={onToggleExpand}
             disabled={disableDraftButton}
             aria-expanded={isExpanded}
-            aria-label={isExpanded ? 'Close intent input' : 'Open intent input'}
-            className="font-mono text-[12px] text-tag hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-6 h-6 flex items-center justify-center"
+            aria-label={isExpanded ? 'Close intent input' : 'Add your thoughts to this beat'}
+            title={isExpanded ? 'Close' : 'Add your thoughts'}
+            className={`font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-2.5 py-1 border transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
+              isExpanded
+                ? 'bg-paper-3 border-rule-strong text-ink'
+                : 'bg-paper border-rule text-tag hover:border-ink hover:text-ink hover:bg-paper-2'
+            }`}
           >
-            {isExpanded ? '×' : '→'}
+            {isExpanded ? 'Close' : '+ Write'}
           </button>
         )}
         {isPending && (
@@ -1471,6 +1473,127 @@ function ZoneIcon({ kind }: { kind: 'angles' | 'outline' | 'question' }) {
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+// ─── Source icon row — Phase 16 visible-thinking ──────────
+//
+// 2026-05-05. Replaces the bulleted "3 ideas / 1 CSL issue / 4 vault"
+// breakdown under the visible-thinking summary with a tighter row of
+// small mono-line icons — one per source kind that contributed > 0
+// hits. Each icon's title attribute carries the count for hover /
+// screen-reader confirmation. Real-use feedback after slice 2 push:
+// the bullets read as heavy; a row of icons signals depth without
+// enumerating every count.
+
+function SourceIconRow({
+  counts,
+}: {
+  counts: {
+    ideas: number;
+    cslIssues: number;
+    linkedin: number;
+    vault: number;
+    gmail: number;
+  };
+}) {
+  const present: Array<{
+    key: keyof typeof counts;
+    label: string;
+    count: number;
+  }> = [
+    { key: 'ideas', label: 'Garden ideas', count: counts.ideas },
+    { key: 'cslIssues', label: 'CSL issues', count: counts.cslIssues },
+    { key: 'linkedin', label: 'LinkedIn posts', count: counts.linkedin },
+    { key: 'vault', label: 'Vault notes', count: counts.vault },
+    { key: 'gmail', label: 'Newsletters you read', count: counts.gmail },
+  ].filter((item) => item.count > 0);
+
+  if (present.length === 0) return null;
+
+  return (
+    <div
+      className="flex items-center gap-2 mt-1"
+      aria-label="Sources drawn from your space"
+    >
+      {present.map(({ key, label, count }) => (
+        <span
+          key={key}
+          title={`${count} ${label.toLowerCase()}`}
+          className="inline-flex items-center justify-center w-6 h-6 rounded-soft border border-rule bg-paper text-tag"
+        >
+          <SourceIcon kind={key} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SourceIcon({
+  kind,
+}: {
+  kind: 'ideas' | 'cslIssues' | 'linkedin' | 'vault' | 'gmail';
+}) {
+  const props = {
+    width: 12,
+    height: 12,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (kind === 'ideas') {
+    // lightbulb (matches the existing 'ideas' mode pill icon shape)
+    return (
+      <svg {...props}>
+        <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+        <path d="M9 18h6" />
+        <path d="M10 22h4" />
+      </svg>
+    );
+  }
+  if (kind === 'cslIssues') {
+    // newspaper / mail
+    return (
+      <svg {...props}>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <line x1="7" y1="9" x2="17" y2="9" />
+        <line x1="7" y1="13" x2="17" y2="13" />
+        <line x1="7" y1="17" x2="13" y2="17" />
+      </svg>
+    );
+  }
+  if (kind === 'linkedin') {
+    // small "in" mark — square with two posts
+    return (
+      <svg {...props}>
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <line x1="8" y1="11" x2="8" y2="16" />
+        <line x1="8" y1="8" x2="8.01" y2="8" />
+        <path d="M12 16v-3a2 2 0 0 1 4 0v3" />
+        <line x1="12" y1="11" x2="12" y2="16" />
+      </svg>
+    );
+  }
+  if (kind === 'vault') {
+    // book / notebook
+    return (
+      <svg {...props}>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      </svg>
+    );
+  }
+  // gmail → @ inbox
+  return (
+    <svg {...props}>
+      <path d="M22 12c0 5.5-4.5 10-10 10S2 17.5 2 12 6.5 2 12 2c5 0 9 3.5 9.5 8" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8v6a2 2 0 0 0 4 0" />
     </svg>
   );
 }
