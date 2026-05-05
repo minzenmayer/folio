@@ -30,6 +30,7 @@ import {
   type GardenRailMode,
 } from '../AssistantRailLive';
 import { EditorContextProvider } from '../EditorContext';
+import { PlanRibbon } from '../PlanRibbon';
 import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
@@ -98,7 +99,10 @@ export default async function DraftEditorPage({
           </div>
         </section>
 
-        <AssistantRailLive draftId={draft.id} mode={mode} />
+        <div className="flex flex-col">
+          <PlanRibbon />
+          <AssistantRailLive draftId={draft.id} mode={mode} />
+        </div>
       </div>
     </EditorContextProvider>
   );
