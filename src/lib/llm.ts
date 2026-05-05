@@ -656,3 +656,160 @@ function labelForKind(kind: string): string {
   return kind;
 }
 
+
+
+// ─── Phase 15a · generateSectionDraft — Draft-a-section in voice ─────
+//
+// 2026-05-05. Called by the Spar surface's per-beat 'Draft section'
+// button. Takes a voice profile, the beat we're drafting, the
+// surrounding outline context, and a slice of the user's own retrieval
+// for that beat — returns prose for that one beat in their voice.
+//
+// Hard requirement: voiceProfile MUST be present for the platform.
+// Generic-voice section drafts are worse than no drafts (spec
+// rationale; Payton picked Voice ID before section-drafts for this
+// reason). The action layer enforces this; this function trusts the
+// caller has already validated.
+
+export type SectionDraftResult = {
+  prose: string;
+};
+
+const SECTION_DRAFT_MODEL =
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+
+const SECTION_DRAFT_HIT_BODY_MAX = 600;
+
+export async function generateSectionDraft({
+  topic,
+  beatIndex,
+  outline,
+  platform,
+  voiceProfile,
+  retrieval,
+  conversationSoFar,
+}: {
+  topic: string;
+  // 0-based index into outline[] of the beat we are drafting.
+  beatIndex: number;
+  outline: { beat: string }[];
+  platform: 'newsletter' | 'linkedin';
+  // Required (not optional). The caller must enforce.
+  voiceProfile: ProposalVoiceProfile;
+  // Retrieval slice — same ProposalRetrievalItem shape, scoped to the
+  // beat being drafted (caller can re-run findSimilar with the beat
+  // text or pass the topic-level retrieval if scoping isn't worth a
+  // round-trip).
+  retrieval: ProposalRetrievalItem[];
+  conversationSoFar?: string;
+}): Promise<SectionDraftResult> {
+  const beat = outline[beatIndex]?.beat?.trim();
+  if (!beat) {
+    throw new Error(\`generateSectionDraft: beat at index \${beatIndex} is empty\`);
+  }
+
+  const trimmedTopic = topic.slice(0, 1000);
+  const trimmedConvo = conversationSoFar?.slice(0, 4000);
+
+  // Frame the surrounding outline so Claude knows what comes before
+  // and after this beat — cohesion across sections matters even when
+  // we only draft one.
+  const outlineFrame = outline
+    .map((b, i) => {
+      const marker = i === beatIndex ? '→ THIS BEAT' : '  ';
+      return \`\${marker} \${String(i + 1).padStart(2, '0')} \${b.beat}\`;
+    })
+    .join('\n');
+
+  const retrievalBlock =
+    retrieval.length === 0
+      ? '(no retrieval items — write from voice profile + outline only)'
+      : retrieval
+          .slice(0, 8)
+          .map((h) => {
+            const body = (h.body ?? '').slice(0, SECTION_DRAFT_HIT_BODY_MAX).trim();
+            const head = h.title ? \`\${h.label}: "\${h.title}"\` : h.label;
+            return body.length > 0
+              ? \`(\${head}) \${body}\`
+              : \`(\${head})\`;
+          })
+          .join('\n\n');
+
+  const platformLength =
+    platform === 'newsletter'
+      ? '120-260 words for this beat. One to three short paragraphs. Each paragraph does one move.'
+      : '50-120 words for this beat. Tight, hooky, single-thread shape.';
+
+  const voiceBlock = renderVoiceProfileBlock(voiceProfile);
+
+  const conversationFrame = trimmedConvo
+    ? \`\n\n<conversation_so_far>\n\${trimmedConvo}\n</conversation_so_far>\n\`
+    : '';
+
+  const outputSchema = z.object({
+    prose: z
+      .string()
+      .min(20)
+      .max(2000)
+      .describe(
+        'The drafted prose for this single beat — in the user\'s voice. No headings, no bullet markers in the output (the editor will own structure). One coherent piece that fits inside the beat.'
+      ),
+  });
+
+  const prompt = \`You are drafting one section of a piece for the user. They will read it inside their writing surface and decide whether to keep, swap, or rewrite. Your job: produce prose for ONE beat in their voice. NOT the whole piece. NOT a summary. Just this one beat.
+
+<topic>
+\${trimmedTopic}
+</topic>
+
+<outline>
+\${outlineFrame}
+</outline>\${conversationFrame}
+
+<voice_profile>
+\${voiceBlock}
+</voice_profile>
+
+<retrieval>
+\${retrievalBlock}
+</retrieval>
+
+Voice rules:
+  - Write IN the user\'s voice as described in the voice profile. If the profile says they avoid certain words or moves, do NOT use them. If it says they open with X or close with Y, honor that pattern.
+  - No preamble. No "Here\'s a draft of section X." Open with the prose itself.
+  - No headings, no markdown structure. Plain paragraphs only — the editor adds structure.
+  - \${platformLength}
+  - Don\'t pad. Don\'t recap the outline. Write only this beat.
+  - If the retrieval block has the user\'s own past framing on this, lean on it — but in their voice, not as a quote.
+
+Now produce the structured output.\`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(SECTION_DRAFT_MODEL as any),
+    schema: outputSchema,
+    prompt,
+    maxTokens: 800,
+    temperature: 0.65,
+  });
+
+  return {
+    prose: (object.prose ?? '').trim(),
+  };
+}
+
+function renderVoiceProfileBlock(profile: ProposalVoiceProfile): string {
+  const parts: string[] = [];
+  if (profile.summary) parts.push(\`SUMMARY: \${profile.summary}\`);
+  if (profile.attributes && profile.attributes.length > 0) {
+    parts.push(
+      \`ATTRIBUTES:\n\${profile.attributes.map((a) => \`  - \${a}\`).join('\n')}\`
+    );
+  }
+  if (profile.thingsToAvoid && profile.thingsToAvoid.length > 0) {
+    parts.push(
+      \`AVOID:\n\${profile.thingsToAvoid.map((a) => \`  - \${a}\`).join('\n')}\`
+    );
+  }
+  return parts.length > 0 ? parts.join('\n\n') : '(empty profile)';
+}

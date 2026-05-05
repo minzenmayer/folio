@@ -79,6 +79,7 @@ import { tiptapJsonToText } from '@/lib/exports';
 import {
   generateReflection,
   generateProposal,
+  generateSectionDraft,
   type ReflectionVoiceMode,
   type ProposalRetrievalItem,
   type ProposalResult,
@@ -1452,6 +1453,120 @@ export async function proposeFromTopic(
     followUpQuestion: proposal.followUpQuestion,
     retrievalCount: hits.length,
   };
+}
+
+// ─── draftSection — Phase 15a · per-beat draft in user's voice ────────
+//
+// Spar's "Draft a section" button calls this with the beat the user
+// wants drafted. Returns prose to splice into client state; only
+// persisted when the user hits "Open the page" (commitProposal
+// accepts a sections map — see slice B3).
+//
+// Hard requirement: voice profile MUST exist for the resolved
+// platform. Generic-voice section drafts are worse than no drafts
+// (spec rationale; Voice ID was the reason this button waited).
+// Returns ok:false { reason: 'no_voice_profile' } when the platform's
+// profile is empty so the UI can prompt the user to /studio/voice
+// rather than silently producing generic-sounding prose.
+
+const draftSectionSchema = z.object({
+  topic: z.string().min(1).max(2000),
+  outline: z
+    .array(z.object({ beat: z.string().min(1).max(500) }))
+    .min(1)
+    .max(8),
+  beatIndex: z.number().int().min(0).max(7),
+  platform: z.enum(['newsletter', 'linkedin']),
+  conversationSoFar: z.string().max(8000).optional(),
+});
+
+export type DraftSectionResult =
+  | { ok: true; beatIndex: number; prose: string }
+  | {
+      ok: false;
+      reason: 'no_voice_profile' | 'invalid_input' | 'error';
+      message: string;
+    };
+
+export async function draftSection(
+  input: unknown
+): Promise<DraftSectionResult> {
+  let parsed: z.infer<typeof draftSectionSchema>;
+  try {
+    parsed = draftSectionSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+
+  // Resolve the voice profile for the platform. linkedin → linkedin
+  // profile; newsletter → longform profile (essay-shape voice).
+  const profileBundle = await getVoiceProfile(user.id);
+  const platformProfile =
+    parsed.platform === 'linkedin'
+      ? profileBundle.linkedin
+      : profileBundle.longform;
+
+  if (!platformProfile) {
+    return {
+      ok: false,
+      reason: 'no_voice_profile',
+      message: \`No \${parsed.platform === 'linkedin' ? 'LinkedIn' : 'longform'} voice profile yet. Build one at /studio/voice and try again.\`,
+    };
+  }
+
+  // Per-beat retrieval: re-run findSimilar against the beat text so
+  // the draft pulls in references specific to this slot rather than
+  // the whole topic. The beat is short, so retrieval is fast.
+  const beat = parsed.outline[parsed.beatIndex]?.beat ?? parsed.topic;
+  let hits: SimilarHit[] = [];
+  try {
+    hits = await findSimilar({
+      text: beat,
+      kinds: [...SIMILAR_KINDS],
+      limit: 6,
+    });
+  } catch (err) {
+    console.warn('[draftSection] findSimilar failed', err);
+    hits = [];
+  }
+
+  const retrievalItems: ProposalRetrievalItem[] = hits.map((h, i) => ({
+    index: i + 1,
+    bucket: bucket({ kind: h.kind, sourceKind: h.sourceKind ?? null }),
+    label: labelForHit(h),
+    title: h.title,
+    body: bodyForHit(h),
+  }));
+
+  try {
+    const result = await generateSectionDraft({
+      topic: parsed.topic,
+      beatIndex: parsed.beatIndex,
+      outline: parsed.outline,
+      platform: parsed.platform,
+      voiceProfile: platformProfile,
+      retrieval: retrievalItems,
+      conversationSoFar: parsed.conversationSoFar,
+    });
+    return {
+      ok: true,
+      beatIndex: parsed.beatIndex,
+      prose: result.prose,
+    };
+  } catch (err) {
+    console.error('[draftSection] generateSectionDraft failed', err);
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'draft failed',
+    };
+  }
 }
 
 // ─── commitProposal — Phase 15b · "Open the page" hand-off ─────────────
