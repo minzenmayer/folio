@@ -518,12 +518,13 @@ function IdleView({
                 role="tab"
                 aria-selected={selected}
                 onClick={() => setMode(m)}
-                className={`font-sans text-[12.5px] rounded-soft px-3 py-1.5 transition-colors ${
+                className={`flex items-center gap-1.5 font-sans text-[12.5px] rounded-soft px-3 py-1.5 transition-colors ${
                   selected
                     ? 'bg-ink text-bg'
                     : 'bg-transparent text-tag hover:text-ink hover:bg-paper-2'
                 }`}
               >
+                <ModeIcon mode={m} />
                 {MODE_LABELS[m]}
               </button>
             );
@@ -998,5 +999,50 @@ function ErrorView({
         </button>
       </div>
     </div>
+  );
+}
+
+// ─── Mode icons ────────────────────────────────
+//
+// Tiny inline SVGs next to each mode chip. 14px, currentColor so
+// they pick up the chip's text color (bg when selected, tag/ink on
+// hover otherwise). Lucide-shape pencil / sprout / globe.
+
+function ModeIcon({ mode }: { mode: StarterMode }) {
+  const props = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (mode === 'writing') {
+    return (
+      <svg {...props}>
+        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+        <path d="m15 5 4 4" />
+      </svg>
+    );
+  }
+  if (mode === 'ideas') {
+    return (
+      <svg {...props}>
+        <path d="M12 22V8" />
+        <path d="M5 12c0-3.5 3-6 7-6" />
+        <path d="M19 12c0-3.5-3-6-7-6" />
+      </svg>
+    );
+  }
+  // research → globe
+  return (
+    <svg {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
   );
 }

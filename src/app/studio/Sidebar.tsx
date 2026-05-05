@@ -80,7 +80,7 @@ const NAV_ITEMS: Array<{
     // Phase 15a (2026-05-05): Voice insights — user-facing snapshot
     // of how you write right now. Voice ID (the training surface)
     // lives under Settings.
-    label: 'Voice insights',
+    label: 'Insights',
     subtitle: 'how you write',
     href: '/studio/voice-insights',
   },
@@ -365,36 +365,40 @@ function HelpIcon() {
 
 // ─── Plant sprout mark ─────────────────────────────────
 //
-// Small pixel-art-feeling sprout next to the Thoughtbed wordmark.
-// Black-and-white only, grid-aligned squares. Two leaves on a stem
-// rising from a small base — reads as "growing" without being
-// literal. Stays the wordmark's font color via currentColor.
+// Chunky pixel-art sprout next to the Thoughtbed wordmark. Two
+// leaves on a stem; no soil base. Black-and-white only via
+// currentColor. Each "pixel" is a 2x2 unit rect on a 22x22 viewBox
+// for a chunky Minecraft-grass-block feel that scales cleanly.
 function SproutMark() {
   return (
     <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
+      width="22"
+      height="22"
+      viewBox="0 0 22 22"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden
+      fill="currentColor"
       className="shrink-0 text-ink"
     >
-      {/* base / soil — three small squares */}
-      <rect x="6" y="17" width="2" height="2" fill="currentColor" />
-      <rect x="9" y="17" width="2" height="2" fill="currentColor" />
-      <rect x="12" y="17" width="2" height="2" fill="currentColor" />
-      {/* stem — single column up the middle */}
-      <rect x="9" y="9" width="2" height="8" fill="currentColor" />
-      {/* left leaf — staircase down-left from stem */}
-      <rect x="7" y="11" width="2" height="2" fill="currentColor" />
-      <rect x="5" y="9" width="2" height="2" fill="currentColor" />
-      <rect x="3" y="7" width="2" height="2" fill="currentColor" />
-      {/* right leaf — staircase up-right from stem (the new growth) */}
-      <rect x="11" y="9" width="2" height="2" fill="currentColor" />
-      <rect x="13" y="7" width="2" height="2" fill="currentColor" />
-      <rect x="15" y="5" width="2" height="2" fill="currentColor" />
-      {/* tip — single square at the top of the stem */}
-      <rect x="9" y="3" width="2" height="2" fill="currentColor" />
+      {/* Top leaf — chunky rounded paddle, rows 0-3, cols 1-6 */}
+      <rect x="4"  y="0"  width="8"  height="2" />
+      <rect x="2"  y="2"  width="12" height="2" />
+      <rect x="2"  y="4"  width="12" height="2" />
+      <rect x="4"  y="6"  width="10" height="2" />
+
+      {/* Right leaf — smaller bump off the upper stem, rows 4-6, cols 6-9 */}
+      <rect x="14" y="8"  width="4"  height="2" />
+      <rect x="12" y="10" width="8"  height="2" />
+      <rect x="14" y="12" width="2"  height="2" />
+
+      {/* Stem — single column down the middle, rows 4-10, cols 4-5 */}
+      <rect x="8"  y="8"  width="4"  height="2" />
+      <rect x="8"  y="10" width="4"  height="2" />
+      <rect x="8"  y="12" width="4"  height="2" />
+      <rect x="8"  y="14" width="4"  height="2" />
+      <rect x="8"  y="16" width="4"  height="2" />
+      <rect x="8"  y="18" width="4"  height="2" />
+      <rect x="8"  y="20" width="4"  height="2" />
     </svg>
   );
 }
