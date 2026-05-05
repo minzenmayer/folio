@@ -765,10 +765,11 @@ function SparView({
         </div>
       )}
 
-      {/* Angles */}
+      {/* Angles — Phase 16 zone: subtle card + slot icon header. */}
       {proposal.angles.length > 0 && (
-        <div className="mb-5">
-          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+        <section className="mb-8 rounded-soft bg-paper-2 border border-rule px-4 py-4">
+          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3 flex items-center gap-2">
+            <ZoneIcon kind="angles" />
             Angles
           </h3>
           <ul className="flex flex-col gap-2">
@@ -803,13 +804,14 @@ function SparView({
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       )}
 
-      {/* Outline */}
+      {/* Outline — Phase 16 zone: clean paper card + numbered-list icon. */}
       {proposal.outline.length > 0 && (
-        <div className="mb-5">
-          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+        <section className="mb-8 rounded-soft bg-paper border border-rule px-4 py-4">
+          <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3 flex items-center gap-2">
+            <ZoneIcon kind="outline" />
             Outline
           </h3>
           <ol className="flex flex-col gap-3 list-none">
@@ -835,12 +837,18 @@ function SparView({
               open the page.
             </p>
           )}
-        </div>
+        </section>
       )}
 
-      {/* Follow-up question + response */}
+      {/* Follow-up question + response — Phase 16 zone: paper-3 fill + question icon. */}
       {proposal.followUpQuestion && (
-        <div className="mb-5 rounded-soft bg-paper-2 px-4 py-3">
+        <section className="mb-8 rounded-soft bg-paper-3 px-4 py-3">
+          <div className="flex items-baseline gap-2 mb-1">
+            <ZoneIcon kind="question" />
+            <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+              Keep going
+            </span>
+          </div>
           <p className="font-sans text-[13.5px] text-ink leading-[1.5] mb-2 font-medium">
             {proposal.followUpQuestion}
           </p>
@@ -868,7 +876,7 @@ function SparView({
               {isThinking ? 'Thinking…' : 'Reply'}
             </button>
           </div>
-        </div>
+        </section>
       )}
 
       {/* Platform hint when ambiguous */}
@@ -1102,6 +1110,55 @@ function ModeIcon({ mode }: { mode: StarterMode }) {
       <circle cx="12" cy="12" r="10" />
       <line x1="2" y1="12" x2="22" y2="12" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+// ─── Zone icons ────────────────────────────────
+//
+// Phase 16 (2026-05-05). Tiny line-only icons at each zone header so
+// Angles / Outline / Keep going read as structurally distinct rather
+// than as one paper-on-paper word wall. 12px, currentColor — pick up
+// the header's `text-tag`. Lucide-shape: flag / list / help-circle.
+
+function ZoneIcon({ kind }: { kind: 'angles' | 'outline' | 'question' }) {
+  const props = {
+    width: 12,
+    height: 12,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  if (kind === 'angles') {
+    return (
+      <svg {...props}>
+        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+        <line x1="4" y1="22" x2="4" y2="15" />
+      </svg>
+    );
+  }
+  if (kind === 'outline') {
+    return (
+      <svg {...props}>
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        <line x1="3" y1="6" x2="3.01" y2="6" />
+        <line x1="3" y1="12" x2="3.01" y2="12" />
+        <line x1="3" y1="18" x2="3.01" y2="18" />
+      </svg>
+    );
+  }
+  // question → help-circle
+  return (
+    <svg {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   );
 }

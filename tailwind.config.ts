@@ -13,6 +13,11 @@ const config: Config = {
         bg: '#fafafa',           // page background — near-white grey (zinc-50)
         paper: '#ffffff',        // cards / inputs — pure white
         'paper-2': '#f4f4f5',    // hover surfaces / chip fills (zinc-100)
+        // Phase 16 (2026-05-05) — composer v2 zone differentiation. The spar
+        // surface needed a third paper level so the follow-up question card
+        // reads as distinct from angles / outline cards. Stays in the zinc
+        // family (no warm-cream pivot — the brand is monochrome).
+        'paper-3': '#e4e4e7',    // emphasized fills (zinc-200)
         'code-bg': '#f4f4f5',    // inline code / pre blocks (zinc-100)
         ink: '#0a0a0a',          // primary text — near-black (zinc-950)
         'ink-soft': '#52525b',   // secondary text (zinc-600)
