@@ -1210,7 +1210,7 @@ const proposeFromTopicSchema = z.object({
   platformHint: z.enum(['newsletter', 'linkedin']).optional(),
   // Concatenated spar transcript so the partner can advance the
   // thinking instead of restarting on every iteration. Client decides
-  // shape — usually \`Q: ...\nA: ...\` lines.
+  // shape — usually `Q: ...\nA: ...` lines.
   conversationSoFar: z.string().max(8000).optional(),
 });
 
@@ -1516,7 +1516,7 @@ export async function draftSection(
     return {
       ok: false,
       reason: 'no_voice_profile',
-      message: \`No \${parsed.platform === 'linkedin' ? 'LinkedIn' : 'longform'} voice profile yet. Build one at /studio/voice and try again.\`,
+      message: `No ${parsed.platform === 'linkedin' ? 'LinkedIn' : 'longform'} voice profile yet. Build one at /studio/voice and try again.`,
     };
   }
 
@@ -1684,7 +1684,7 @@ export async function commitProposal(input: unknown) {
           // will rewrite or delete.
           content.push({
             type: 'paragraph',
-            content: [{ type: 'text', text: \`[\${item.beat}]\` }],
+            content: [{ type: 'text', text: `[${item.beat}]` }],
           });
         }
       }

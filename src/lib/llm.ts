@@ -705,7 +705,7 @@ export async function generateSectionDraft({
 }): Promise<SectionDraftResult> {
   const beat = outline[beatIndex]?.beat?.trim();
   if (!beat) {
-    throw new Error(\`generateSectionDraft: beat at index \${beatIndex} is empty\`);
+    throw new Error(`generateSectionDraft: beat at index ${beatIndex} is empty`);
   }
 
   const trimmedTopic = topic.slice(0, 1000);
@@ -717,7 +717,7 @@ export async function generateSectionDraft({
   const outlineFrame = outline
     .map((b, i) => {
       const marker = i === beatIndex ? '→ THIS BEAT' : '  ';
-      return \`\${marker} \${String(i + 1).padStart(2, '0')} \${b.beat}\`;
+      return `${marker} ${String(i + 1).padStart(2, '0')} ${b.beat}`;
     })
     .join('\n');
 
@@ -728,10 +728,10 @@ export async function generateSectionDraft({
           .slice(0, 8)
           .map((h) => {
             const body = (h.body ?? '').slice(0, SECTION_DRAFT_HIT_BODY_MAX).trim();
-            const head = h.title ? \`\${h.label}: "\${h.title}"\` : h.label;
+            const head = h.title ? `${h.label}: "${h.title}"` : h.label;
             return body.length > 0
-              ? \`(\${head}) \${body}\`
-              : \`(\${head})\`;
+              ? `(${head}) ${body}`
+              : `(${head})`;
           })
           .join('\n\n');
 
@@ -743,7 +743,7 @@ export async function generateSectionDraft({
   const voiceBlock = renderVoiceProfileBlock(voiceProfile);
 
   const conversationFrame = trimmedConvo
-    ? \`\n\n<conversation_so_far>\n\${trimmedConvo}\n</conversation_so_far>\n\`
+    ? `\n\n<conversation_so_far>\n${trimmedConvo}\n</conversation_so_far>\n`
     : '';
 
   const outputSchema = z.object({
@@ -756,33 +756,33 @@ export async function generateSectionDraft({
       ),
   });
 
-  const prompt = \`You are drafting one section of a piece for the user. They will read it inside their writing surface and decide whether to keep, swap, or rewrite. Your job: produce prose for ONE beat in their voice. NOT the whole piece. NOT a summary. Just this one beat.
+  const prompt = `You are drafting one section of a piece for the user. They will read it inside their writing surface and decide whether to keep, swap, or rewrite. Your job: produce prose for ONE beat in their voice. NOT the whole piece. NOT a summary. Just this one beat.
 
 <topic>
-\${trimmedTopic}
+${trimmedTopic}
 </topic>
 
 <outline>
-\${outlineFrame}
-</outline>\${conversationFrame}
+${outlineFrame}
+</outline>${conversationFrame}
 
 <voice_profile>
-\${voiceBlock}
+${voiceBlock}
 </voice_profile>
 
 <retrieval>
-\${retrievalBlock}
+${retrievalBlock}
 </retrieval>
 
 Voice rules:
   - Write IN the user\'s voice as described in the voice profile. If the profile says they avoid certain words or moves, do NOT use them. If it says they open with X or close with Y, honor that pattern.
   - No preamble. No "Here\'s a draft of section X." Open with the prose itself.
   - No headings, no markdown structure. Plain paragraphs only — the editor adds structure.
-  - \${platformLength}
+  - ${platformLength}
   - Don\'t pad. Don\'t recap the outline. Write only this beat.
   - If the retrieval block has the user\'s own past framing on this, lean on it — but in their voice, not as a quote.
 
-Now produce the structured output.\`;
+Now produce the structured output.`;
 
   const { object } = await generateObject({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -800,15 +800,15 @@ Now produce the structured output.\`;
 
 function renderVoiceProfileBlock(profile: ProposalVoiceProfile): string {
   const parts: string[] = [];
-  if (profile.summary) parts.push(\`SUMMARY: \${profile.summary}\`);
+  if (profile.summary) parts.push(`SUMMARY: ${profile.summary}`);
   if (profile.attributes && profile.attributes.length > 0) {
     parts.push(
-      \`ATTRIBUTES:\n\${profile.attributes.map((a) => \`  - \${a}\`).join('\n')}\`
+      `ATTRIBUTES:\n${profile.attributes.map((a) => `  - ${a}`).join('\n')}`
     );
   }
   if (profile.thingsToAvoid && profile.thingsToAvoid.length > 0) {
     parts.push(
-      \`AVOID:\n\${profile.thingsToAvoid.map((a) => \`  - \${a}\`).join('\n')}\`
+      `AVOID:\n${profile.thingsToAvoid.map((a) => `  - ${a}`).join('\n')}`
     );
   }
   return parts.length > 0 ? parts.join('\n\n') : '(empty profile)';
