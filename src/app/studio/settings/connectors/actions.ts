@@ -70,7 +70,7 @@ import {
 // happens via /api/connectors/gmail/initiate + /api/connectors/gmail/callback
 // (see those routes); this module exposes status / sync / disconnect /
 // triage actions for the GmailCard + Insights tab.
-import { gmailMessages } from '@/db';
+import { gmailMessages, gmailSenderRules } from '@/db';
 import {
   kickFirstGmailSync,
   runIncrementalGmailSync,
@@ -1340,4 +1340,152 @@ export async function triageGmailMessage(input: unknown): Promise<ActionResult> 
   revalidatePath('/studio/insights');
   revalidatePath('/studio/knowledge');
   return { ok: true };
+}
+
+// ─── GMAIL sender rules (Phase 14a, 2026-05-04) ──────────────────────
+//
+// Triage burden reduction. The user can pre-decide what to ingest from
+// a given sender or domain. See drizzle/0010_gmail_sender_rules.sql.
+//
+//   · listGmailRules()       → for the management UI on GmailCard.
+//   · addGmailRule({...})    → create a rule for an address OR a domain.
+//   · removeGmailRule({ id }) → delete by id (idempotent).
+
+export type GmailSenderRuleRow = {
+  id: string;
+  senderAddress: string | null;
+  senderDomain: string | null;
+  action: 'allow' | 'block';
+  reason: string | null;
+  createdAt: string;
+};
+
+const addGmailRuleSchema = z
+  .object({
+    senderAddress: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(3)
+      .max(320)
+      .refine((v) => v.includes('@'), {
+        message: 'Sender address must contain @',
+      })
+      .optional(),
+    senderDomain: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(2)
+      .max(253)
+      .refine((v) => !v.includes('@'), {
+        message: 'Sender domain must not contain @',
+      })
+      .optional(),
+    action: z.enum(['allow', 'block']),
+    reason: z.enum(['manual', 'auto_suggested']).optional().default('manual'),
+  })
+  .refine(
+    (v) =>
+      (v.senderAddress ? 1 : 0) + (v.senderDomain ? 1 : 0) === 1,
+    { message: 'Provide exactly one of senderAddress or senderDomain.' }
+  );
+
+export async function addGmailRule(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const parsed = addGmailRuleSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: parsed.error.issues[0]?.message ?? 'Invalid input.',
+    };
+  }
+  const { senderAddress, senderDomain, action, reason } = parsed.data;
+
+  try {
+    await db
+      .insert(gmailSenderRules)
+      .values({
+        userId: user.id,
+        senderAddress: senderAddress ?? null,
+        senderDomain: senderDomain ?? null,
+        action,
+        reason,
+      })
+      .onConflictDoNothing({
+        target: [
+          gmailSenderRules.userId,
+          gmailSenderRules.senderAddress,
+          gmailSenderRules.senderDomain,
+          gmailSenderRules.action,
+        ],
+      });
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'db_error',
+      message: (err as Error).message?.slice(0, 300) ?? 'Insert failed.',
+    };
+  }
+
+  revalidatePath('/studio/insights');
+  revalidatePath('/studio/settings/connectors');
+  return {
+    ok: true,
+    message:
+      action === 'allow'
+        ? `Always keeping from ${senderAddress ?? senderDomain}.`
+        : `Never showing from ${senderAddress ?? senderDomain}.`,
+  };
+}
+
+const removeGmailRuleSchema = z.object({ id: z.string().uuid() });
+
+export async function removeGmailRule(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  const parsed = removeGmailRuleSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: parsed.error.issues[0]?.message ?? 'Invalid input.',
+    };
+  }
+  await db
+    .delete(gmailSenderRules)
+    .where(
+      and(
+        eq(gmailSenderRules.id, parsed.data.id),
+        eq(gmailSenderRules.userId, user.id)
+      )
+    );
+  revalidatePath('/studio/insights');
+  revalidatePath('/studio/settings/connectors');
+  return { ok: true };
+}
+
+export async function listGmailRules(): Promise<GmailSenderRuleRow[]> {
+  const user = await requireUser();
+  const rows = await db
+    .select({
+      id: gmailSenderRules.id,
+      senderAddress: gmailSenderRules.senderAddress,
+      senderDomain: gmailSenderRules.senderDomain,
+      action: gmailSenderRules.action,
+      reason: gmailSenderRules.reason,
+      createdAt: gmailSenderRules.createdAt,
+    })
+    .from(gmailSenderRules)
+    .where(eq(gmailSenderRules.userId, user.id))
+    .orderBy(sql`${gmailSenderRules.action}, lower(coalesce(${gmailSenderRules.senderAddress}, ${gmailSenderRules.senderDomain}))`);
+
+  return rows.map((r) => ({
+    id: r.id,
+    senderAddress: r.senderAddress,
+    senderDomain: r.senderDomain,
+    action: r.action as 'allow' | 'block',
+    reason: r.reason,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }

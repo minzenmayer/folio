@@ -41,6 +41,11 @@ import {
   GmailApiError,
 } from '@/lib/gmail/api';
 import { classify } from '@/lib/gmail/detection';
+// Phase 14a (2026-05-04): per-(user, sender) allow/block rules. The
+// classifyAndPersist hot path consults checkSenderRule before paying for
+// parseGmailMessage. Block → drop. Allow → promote-on-ingest (embed +
+// extractIdeas in the same write).
+import { checkSenderRule } from '@/lib/gmail/sender-rules';
 
 // ─── tunables ───────────────────────────────────────────
 
@@ -168,6 +173,13 @@ async function persistDetected(input: {
  * Run classification + persist for a list of message ids. Returns
  * counts. Errors per-message are swallowed (logged) so one malformed
  * message doesn't break the chunk.
+ *
+ * Phase 14a (2026-05-04): the sender-rule precheck runs BEFORE we burn
+ * a getMessage round-trip. We need the from-address to evaluate, so we
+ * still fetch the message — but if the rule is 'block' the message
+ * never enters gmail_messages and never embeds. If the rule is 'allow'
+ * the message lands as status='promoted' on insert and we synchronously
+ * embed + fire extractIdeasFromGmailMessage in the same pass.
  */
 async function classifyAndPersist(input: {
   userId: string;
@@ -176,7 +188,8 @@ async function classifyAndPersist(input: {
   ids: string[];
 }): Promise<{ examined: number; detected: number; inserted: number; errors: string[] }> {
   const errors: string[] = [];
-  const detectedRows: NewGmailMessage[] = [];
+  const pendingRows: NewGmailMessage[] = [];
+  const allowlistedRows: NewGmailMessage[] = [];
 
   for (const id of input.ids) {
     try {
@@ -185,10 +198,18 @@ async function classifyAndPersist(input: {
         messageId: id,
       });
       const parsed = parseGmailMessage(raw);
-      const det = classify(parsed);
+
+      // Phase 14a precheck. We need parsed.fromAddress to evaluate, so
+      // the rule check happens AFTER parseGmailMessage. The hot path is
+      // still: rule lookup is one short query that hits a partial index.
+      const preCheckedRule = await checkSenderRule(
+        input.userId,
+        parsed.fromAddress
+      );
+      const det = classify(parsed, { preCheckedRule });
       if (!det.isNewsletter) continue;
 
-      detectedRows.push({
+      const baseRow: NewGmailMessage = {
         userId: input.userId,
         connectorAccountId: input.accountId,
         externalId: parsed.externalId,
@@ -204,23 +225,100 @@ async function classifyAndPersist(input: {
         newsletterKind: det.kind,
         status: 'pending',
         raw: raw as unknown as Record<string, unknown>,
-      });
+      };
+
+      if (det.kind === 'allowlisted') {
+        // Allowlisted = bypass triage. Embed inline so the message is
+        // retrievable in Reflect on the same insert. extractIdeas fires
+        // after the row insert below (we need the inserted row's id).
+        const text = (parsed.bodyText ?? '').trim();
+        let embedding: number[] | undefined;
+        if (text.length >= 200) {
+          try {
+            const { embedText } = await import('@/lib/embed');
+            embedding = await embedText(text);
+          } catch (err) {
+            // Best-effort — promote still proceeds without embedding.
+            // The user can manually re-embed via re-promote later.
+            console.warn(
+              '[gmail:auto-promote] embed failed',
+              parsed.externalId,
+              err
+            );
+          }
+        }
+        allowlistedRows.push({
+          ...baseRow,
+          status: 'promoted',
+          promotedAt: new Date(),
+          embedding,
+        });
+      } else {
+        pendingRows.push(baseRow);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`get/${id}: ${msg.slice(0, 120)}`);
     }
   }
 
-  const inserted = await persistDetected({
+  // Persist pending rows first (the bulk path). onConflictDoNothing
+  // returns only the rows we actually inserted.
+  const insertedPending = await persistDetected({
     userId: input.userId,
     accountId: input.accountId,
-    rows: detectedRows,
+    rows: pendingRows,
   });
+
+  // Persist allowlisted rows + capture their ids so we can fire
+  // extractIdeas with the correct gmailMessageId. Same idempotency
+  // guard — re-runs of the same chunk skip duplicates.
+  let insertedAllowlisted = 0;
+  const insertedAllowlistedRows: Array<{ id: string; subject: string | null; bodyText: string | null; postedAt: Date | null }> = [];
+  if (allowlistedRows.length > 0) {
+    const inserted = await db
+      .insert(gmailMessages)
+      .values(allowlistedRows)
+      .onConflictDoNothing({
+        target: [gmailMessages.userId, gmailMessages.externalId],
+      })
+      .returning({
+        id: gmailMessages.id,
+        subject: gmailMessages.subject,
+        bodyText: gmailMessages.bodyText,
+        postedAt: gmailMessages.postedAt,
+      });
+    insertedAllowlisted = inserted.length;
+    insertedAllowlistedRows.push(...inserted);
+  }
+
+  // Fire extractIdeas for each freshly-inserted allowlisted row.
+  // Best-effort — failures here log + continue (the row is already
+  // promoted; the user can re-promote later to retry extraction).
+  if (insertedAllowlistedRows.length > 0) {
+    const { extractIdeasFromGmailMessage } = await import('@/lib/extract-ideas');
+    for (const row of insertedAllowlistedRows) {
+      const text = (row.bodyText ?? '').trim();
+      if (text.length < 200) continue;
+      try {
+        await extractIdeasFromGmailMessage({
+          userId: input.userId,
+          messageId: row.id,
+          title: row.subject ?? '(no subject)',
+          bodyText: text,
+          webUrl: null,
+          postedAt: row.postedAt?.toISOString() ?? null,
+        });
+      } catch (err) {
+        console.warn('[gmail:auto-promote] extractIdeas failed', row.id, err);
+      }
+    }
+  }
 
   return {
     examined: input.ids.length,
-    detected: detectedRows.length,
-    inserted,
+    detected: pendingRows.length + allowlistedRows.length,
+    inserted: insertedPending + insertedAllowlisted,
     errors,
   };
 }
