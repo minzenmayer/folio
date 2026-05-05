@@ -593,7 +593,7 @@ function AddSampleModal({
   onClose: () => void;
   onAdded: (sample: ListedSample) => void;
 }) {
-  const [tab, setTab] = useState<'corpus' | 'paste' | 'upload'>('corpus');
+  const [tab, setTab] = useState<'upload' | 'paste' | 'corpus'>('upload');
 
   // Close on Escape.
   useEffect(() => {
@@ -636,14 +636,14 @@ function AddSampleModal({
 
         {/* Tabs */}
         <div role="tablist" aria-label="Sample source" className="flex border-b border-rule px-6">
-          <TabButton selected={tab === 'corpus'} onClick={() => setTab('corpus')}>
-            From your space
+          <TabButton selected={tab === 'upload'} onClick={() => setTab('upload')}>
+            Upload file
           </TabButton>
           <TabButton selected={tab === 'paste'} onClick={() => setTab('paste')}>
             Paste text
           </TabButton>
-          <TabButton selected={tab === 'upload'} onClick={() => setTab('upload')}>
-            Upload file
+          <TabButton selected={tab === 'corpus'} onClick={() => setTab('corpus')}>
+            From your space
           </TabButton>
         </div>
 
@@ -666,7 +666,15 @@ function AddSampleModal({
               }}
             />
           )}
-          {tab === 'upload' && <UploadComingSoonTab />}
+          {tab === 'upload' && (
+            <UploadTab
+              platform={platform}
+              onAdded={(s) => {
+                onAdded(s);
+                onClose();
+              }}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -707,9 +715,6 @@ function CorpusPickerTab({
   onAdded: (s: ListedSample) => void;
 }) {
   const [query, setQuery] = useState('');
-  const [pathPrefix, setPathPrefix] = useState('');
-  const [excludePattern, setExcludePattern] = useState('');
-  const [minWords, setMinWords] = useState(0);
   const [results, setResults] = useState<CorpusSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<string | null>(null);
@@ -724,10 +729,6 @@ function CorpusPickerTab({
         const r = await searchCorpusForTraining({
           platform,
           query: query.trim() || undefined,
-          pathPrefix: pathPrefix.trim() || undefined,
-          excludePattern: excludePattern.trim() || undefined,
-          // Convert words → chars (rough average 5 chars/word).
-          minChars: minWords > 0 ? minWords * 5 : 0,
           limit: 50,
         });
         setResults(r.results);
@@ -738,7 +739,7 @@ function CorpusPickerTab({
       }
     }, 200);
     return () => clearTimeout(handle);
-  }, [platform, query, pathPrefix, excludePattern, minWords]);
+  }, [platform, query]);
 
   const onPick = async (item: CorpusSearchResult) => {
     if (item.alreadySelected) return;
@@ -784,39 +785,7 @@ function CorpusPickerTab({
         placeholder="Search your pieces…"
         className="w-full bg-paper-2 rounded-soft border border-rule px-3 py-2 font-sans text-[13.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink mb-3"
       />
-      {/* Filters — designed for vaults that mix essays with research
-          notes. Path prefix scopes to a folder; exclude pattern hides
-          titles matching a substring (e.g., 'Analysis'); min words
-          drops short scratchpad notes. */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
-        {platform === 'longform' && (
-          <input
-            type="text"
-            value={pathPrefix}
-            onChange={(e) => setPathPrefix(e.target.value)}
-            placeholder="Vault folder (e.g. essays/)"
-            className="bg-paper-2 rounded-soft border border-rule px-3 py-1.5 font-sans text-[12.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
-          />
-        )}
-        <input
-          type="text"
-          value={excludePattern}
-          onChange={(e) => setExcludePattern(e.target.value)}
-          placeholder="Hide titles with… (e.g. Analysis)"
-          className="bg-paper-2 rounded-soft border border-rule px-3 py-1.5 font-sans text-[12.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
-        />
-        <input
-          type="number"
-          value={minWords || ''}
-          onChange={(e) =>
-            setMinWords(Math.max(0, Number(e.target.value) || 0))
-          }
-          placeholder="Min words"
-          min={0}
-          step={100}
-          className="bg-paper-2 rounded-soft border border-rule px-3 py-1.5 font-sans text-[12.5px] text-ink placeholder:text-tag focus:outline-none focus:border-ink"
-        />
-      </div>
+
       {error && (
         <p className="font-sans text-[13px] text-ink leading-[1.5] mb-3">
           {error}
@@ -828,7 +797,9 @@ function CorpusPickerTab({
         <p className="font-sans text-[13px] text-tag italic">
           {query.trim()
             ? 'Nothing matches that search.'
-            : 'No pieces in your space yet. Connect more sources or paste text instead.'}
+            : platform === 'longform'
+              ? 'No newsletter pieces synced yet. Connect Beehiiv or use Paste / Upload to add a sample.'
+              : 'No LinkedIn posts synced yet. Use Paste / Upload to add a sample.'}
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -849,10 +820,6 @@ function CorpusPickerTab({
                   >
                     <p className="font-sans text-[14px] text-ink leading-[1.4] font-medium truncate">
                       {r.title}
-                    </p>
-                    <p className="font-mono text-[10px] tracking-[0.04em] text-tag mt-0.5 truncate">
-                      {r.path ? r.path : sourceLabel(r.sourceKind)}{' · '}
-                      {Math.round(r.charCount / 5).toLocaleString()} words
                     </p>
                     <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5] mt-1 line-clamp-2">
                       {r.snippet ?? ''}
@@ -992,15 +959,135 @@ function PasteTab({
   );
 }
 
-function UploadComingSoonTab() {
+function UploadTab({
+  platform,
+  onAdded,
+}: {
+  platform: Platform;
+  onAdded: (s: ListedSample) => void;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleFile = useCallback(
+    async (file: File) => {
+      setError(null);
+      const name = file.name.toLowerCase();
+      const isText =
+        name.endsWith('.txt') ||
+        name.endsWith('.md') ||
+        name.endsWith('.markdown') ||
+        file.type.startsWith('text/');
+      if (!isText) {
+        setError(
+          'Only .txt and .md files are supported right now. Use Paste text for PDF/.docx — full file upload is coming next.'
+        );
+        return;
+      }
+      if (file.size > 200_000) {
+        setError('File is over 200KB. Trim it down or use Paste text.');
+        return;
+      }
+
+      setAdding(true);
+      try {
+        const body = await file.text();
+        const trimmed = body.trim();
+        if (trimmed.length < 20) {
+          setError('File is too short. Need at least 20 characters of writing.');
+          return;
+        }
+        const title = file.name.replace(/\.(txt|md|markdown)$/i, '').slice(0, 200);
+        const r: AddSampleResult = await addTrainingSample({
+          platform,
+          kind: 'upload',
+          title: title || 'Uploaded file',
+          body: trimmed,
+          filename: file.name,
+        });
+        if (r.ok) {
+          onAdded({
+            id: r.sampleId,
+            platform,
+            kind: 'upload',
+            sourceKind: null,
+            title: title || file.name,
+            snippet: trimmed.slice(0, 280),
+            position: 0,
+            createdAt: new Date().toISOString(),
+          });
+        } else {
+          setError(r.message);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'upload failed');
+      } finally {
+        setAdding(false);
+      }
+    },
+    [platform, onAdded]
+  );
+
   return (
-    <div className="text-center py-12">
-      <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
-        Soon
+    <div>
+      <p className="font-sans text-[13px] text-ink-soft leading-[1.55] mb-4">
+        Drop a writing sample here. Anything you wrote that the
+        composer should imitate.
       </p>
-      <p className="font-sans text-[14px] text-ink-soft leading-[1.6] max-w-[44ch] mx-auto">
-        File upload (PDF, .docx, .txt, .md) is coming next. For now,
-        copy the text and paste it under the Paste tab.
+
+      <label
+        htmlFor="voice-upload-input"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const file = e.dataTransfer?.files?.[0];
+          if (file) handleFile(file);
+        }}
+        className={`flex flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-12 transition-colors cursor-pointer ${
+          dragOver
+            ? 'border-ink bg-paper-2'
+            : 'border-rule bg-paper hover:border-ink/40 hover:bg-paper-2'
+        } ${adding ? 'opacity-60 pointer-events-none' : ''}`}
+      >
+        <span className="font-sans text-[14px] text-ink mb-1 font-medium">
+          {adding ? 'Reading file…' : 'Click or drop a file'}
+        </span>
+        <span className="font-sans text-[12.5px] text-tag">
+          .txt or .md, up to 200KB
+        </span>
+        <input
+          id="voice-upload-input"
+          type="file"
+          accept=".txt,.md,.markdown,text/plain,text/markdown"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+            // Reset so the same file can be chosen again after error.
+            e.target.value = '';
+          }}
+          className="hidden"
+          disabled={adding}
+        />
+      </label>
+
+      {error && (
+        <p className="font-sans text-[13px] text-ink leading-[1.5] mt-4">
+          {error}
+        </p>
+      )}
+
+      <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag mt-6">
+        Coming soon
+      </p>
+      <p className="font-sans text-[12.5px] text-tag leading-[1.55] mt-1">
+        PDF and .docx parsing land in the next iteration. For now,
+        copy the text out and use the Paste tab.
       </p>
     </div>
   );
