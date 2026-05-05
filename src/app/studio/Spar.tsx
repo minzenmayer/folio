@@ -57,10 +57,35 @@ type ConversationTurn =
   | { kind: 'anchor'; angle: string }
   | { kind: 'response'; text: string };
 
+// Phase 16 slice 7 (2026-05-05): light client-side detection of
+// content-type from the topic string. Catches the explicit starter
+// prefixes ("Write a sermon about …", "Write an email about …", etc.)
+// and a few free-form variants. Other content types fall back to
+// null and the spar renders no content-type label. The label travels
+// into the LLM prompt via the conversation transcript so angles +
+// outline can shift accordingly without backend plumbing.
+function detectContentType(topic: string): string | null {
+  const t = topic.toLowerCase();
+  if (/(^|\b)(sermon|preach|homily)\b/.test(t)) return 'Sermon';
+  if (/(^|\b)(blog post|blog)\b/.test(t)) return 'Blog';
+  if (/(^|\b)email|message to|note to\b/.test(t)) return 'Email';
+  if (/(^|\b)(twitter thread|x thread|thread about)\b/.test(t))
+    return 'Thread';
+  return null;
+}
+
 function renderConversation(turns: ConversationTurn[]): string {
   // Compact transcript for the server. Mirrors a sparring rhythm —
   // the topic is the anchor; anchors and responses get a short label.
+  // Phase 16 slice 7: content-type prefix when detected so the LLM
+  // sees "Sermon shape" / "Blog shape" / etc. and adjusts angles +
+  // outline accordingly.
   const lines: string[] = [];
+  const topicTurn = turns.find((t) => t.kind === 'topic');
+  if (topicTurn && topicTurn.kind === 'topic') {
+    const ct = detectContentType(topicTurn.text);
+    if (ct) lines.push(`CONTENT_TYPE: ${ct}`);
+  }
   for (const t of turns) {
     if (t.kind === 'topic') lines.push(`TOPIC: ${t.text}`);
     if (t.kind === 'anchor') lines.push(`ANCHORED on: ${t.angle}`);
@@ -936,13 +961,18 @@ function SparView({
   const platform: 'newsletter' | 'linkedin' =
     platformOverride ??
     (proposal.platformGuess === 'linkedin' ? 'linkedin' : 'newsletter');
-  const platformAmbiguous =
-    !platformOverride && proposal.platformGuess === 'unknown';
   // Phase 16 (2026-05-05): word-count target by platform. Surfaced as
   // a small mono label at the top of the plan, mirroring the
   // structural targets the LLM is implicitly drafting toward.
   const wordCountTarget = platform === 'linkedin' ? '~200 words' : '~1000 words';
   const showHookSlot = platform === 'linkedin';
+  // Phase 16 slice 7: content-type label. Sermon / blog / email /
+  // thread all map to the newsletter structural shape (Lede + sections
+  // + closer) but carry their own label so the user sees what they're
+  // planning toward. Detect from topic text — the starter prefixes
+  // are explicit ("Write a sermon about ...") so this is robust
+  // for the common path.
+  const contentType = detectContentType(proposal.topic);
 
   const trimmedResponse = response.trim();
   const canSubmitResponse = !isThinking && trimmedResponse.length > 0;
@@ -1015,13 +1045,46 @@ function SparView({
         </div>
       )}
 
-      {/* Phase 16 plan-zone header — word-count target + format
-          label. Lives above Angles so the user sees the target shape
-          they're planning toward. */}
-      <div className="mb-4 flex items-baseline justify-between gap-3">
-        <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
-          {platform === 'linkedin' ? 'LinkedIn shape' : 'Newsletter shape'}
-        </p>
+      {/* Phase 16 plan-zone header — always-visible format pills +
+          word-count target + (when present) content-type label.
+          The override pills used to live at the bottom of the spar
+          and only render when platformGuess was unknown. Slice 7
+          (2026-05-05): always visible, always switchable. */}
+      <div className="mb-4 flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setPlatformOverride('newsletter')}
+            aria-pressed={platform === 'newsletter'}
+            className={`font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-2.5 py-1 border transition-colors ${
+              platform === 'newsletter'
+                ? 'bg-[#dcfce7] border-[#15803d] text-[#14532d]'
+                : 'bg-paper border-rule text-tag hover:border-ink hover:text-ink'
+            }`}
+          >
+            Newsletter
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlatformOverride('linkedin')}
+            aria-pressed={platform === 'linkedin'}
+            className={`font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-2.5 py-1 border transition-colors ${
+              platform === 'linkedin'
+                ? 'bg-[#dcfce7] border-[#15803d] text-[#14532d]'
+                : 'bg-paper border-rule text-tag hover:border-ink hover:text-ink'
+            }`}
+          >
+            LinkedIn
+          </button>
+          {contentType && (
+            <span
+              className="font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-2.5 py-1 border border-rule bg-paper-2 text-ink-soft"
+              title="Content-type label — maps to newsletter shape"
+            >
+              {contentType}
+            </span>
+          )}
+        </div>
         <p className="font-mono text-[10px] tracking-[0.04em] text-tag">
           {wordCountTarget}
         </p>
@@ -1190,29 +1253,6 @@ function SparView({
             </button>
           </div>
         </section>
-      )}
-
-      {/* Platform hint when ambiguous */}
-      {platformAmbiguous && (
-        <div className="mb-4 flex items-center gap-2">
-          <p className="font-mono text-[10px] tracking-[0.04em] uppercase text-tag flex-1">
-            Platform
-          </p>
-          <button
-            type="button"
-            onClick={() => setPlatformOverride('newsletter')}
-            className="font-mono text-[10px] tracking-[0.14em] uppercase rounded-soft px-3 py-1 border border-rule hover:border-ink hover:bg-paper-2 transition-colors"
-          >
-            Newsletter
-          </button>
-          <button
-            type="button"
-            onClick={() => setPlatformOverride('linkedin')}
-            className="font-mono text-[10px] tracking-[0.14em] uppercase rounded-soft px-3 py-1 border border-rule hover:border-ink hover:bg-paper-2 transition-colors"
-          >
-            LinkedIn
-          </button>
-        </div>
       )}
 
       {/* Open the page */}
