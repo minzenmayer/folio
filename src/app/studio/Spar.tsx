@@ -185,6 +185,23 @@ export function Spar() {
     return () => window.removeEventListener('keydown', onKey);
   }, [phase, escapeToIdle]);
 
+  // When angles land, drop focus on the response textarea — the
+  // natural next move is "what would you say back". Only fires on the
+  // transition INTO spar so iterations don't yank the cursor away
+  // from where the user is reading.
+  const enteredSparOnce = useRef(false);
+  useEffect(() => {
+    if (phase !== 'spar') {
+      enteredSparOnce.current = false;
+      return;
+    }
+    if (enteredSparOnce.current) return;
+    enteredSparOnce.current = true;
+    // Defer past paint so the textarea is mounted.
+    const id = setTimeout(() => responseTextareaRef.current?.focus(), 30);
+    return () => clearTimeout(id);
+  }, [phase]);
+
   const onTopicKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const isSubmit = (e.metaKey || e.ctrlKey) && e.key === 'Enter';
@@ -463,7 +480,11 @@ function SparView({
 
         {(proposal.visibleThinking.lines.length > 0 ||
           proposal.visibleThinking.summary) && (
-          <div className="mt-3 border-l-2 border-rule pl-4">
+          <div
+            className="mt-3 border-l-2 border-rule pl-4"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {proposal.visibleThinking.summary && (
               <p className="font-sans text-[13.5px] italic text-ink-soft leading-[1.55] mb-2">
                 {proposal.visibleThinking.summary}
@@ -476,12 +497,13 @@ function SparView({
                 ))}
               </ul>
             )}
-            {proposal.retrievalCount === 0 && (
-              <p className="font-sans text-[12.5px] text-tag leading-[1.5] italic">
-                You don&apos;t have much in your space on this yet.
-              </p>
-            )}
           </div>
+        )}
+        {proposal.retrievalCount === 0 && (
+          <p className="mt-3 font-sans text-[12.5px] text-tag leading-[1.5] italic">
+            You don&apos;t have much in your space on this yet — leaning
+            on the topic itself.
+          </p>
         )}
       </div>
 
