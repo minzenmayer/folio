@@ -76,11 +76,19 @@ import {
 import { requireUser } from '@/lib/auth';
 import { embedText } from '@/lib/embed';
 import { tiptapJsonToText } from '@/lib/exports';
-import { generateReflection, type ReflectionVoiceMode } from '@/lib/llm';
+import {
+  generateReflection,
+  generateProposal,
+  type ReflectionVoiceMode,
+  type ProposalRetrievalItem,
+  type ProposalResult,
+} from '@/lib/llm';
 import {
   SIMILAR_KINDS,
   SIMILAR_KINDS_FOR_ZOD,
+  bucket,
   type SimilarKind,
+  type RetrievalBucket,
 } from '@/lib/retrieval-kinds';
 // Sprint 15 Wave 3 layer 1: clean source text before showing it to the
 // LLM as snippet context. The same rules drive extractIdeas during sync.
@@ -1162,6 +1170,273 @@ export async function composeNew(input: unknown) {
   revalidatePath('/studio');
   revalidatePath('/studio/page');
   redirect(`/studio/page/${draft.id}?mode=self-pilot`);
+}
+
+// ─── proposeFromTopic — Phase 15b · home composer (sparring partner) ──
+//
+// 2026-05-05. The home composer at /studio submits a topic to this action.
+// One round-trip; fits inside Vercel Hobby's 10s server-action cap on
+// today's corpus sizes (one embed + per-kind vector queries via
+// findSimilar + one Haiku call). If retrieval grows, kick+poll comes
+// back later — stays single-shot for now.
+//
+// Return shape mirrors what the Spar UI needs:
+//   - visibleThinking.lines: deterministic counts shaped into the
+//     thinking-out-loud bullet list ("3 of your past CSL issues
+//     circled this", "5 vault notes share vocabulary"). Computed from
+//     bucket counts + a couple of kind-specific tallies.
+//   - visibleThinking.summary: Claude's one-or-two-sentence
+//     reflective lede.
+//   - angles[].sources: source-citation indices resolved to
+//     { label, title, kind, id } so the UI can render "from your CSL
+//     issue X + vault note Y" without a second fetch.
+//   - outline / followUpQuestion / platformGuess / retrievalCount:
+//     straight pass-through for the UI.
+//   - committableOutline: the bare beat strings the commit step
+//     (Slice 6) will turn into H2 headers when the user opens the page.
+//
+// Voice profile is optional. Phase 15a will populate; 15b leaves it
+// undefined and the proposal prompt falls back to the bucket samples.
+
+const proposeFromTopicSchema = z.object({
+  topic: z.string().min(3).max(2000),
+  // Optional clarification when the user has already answered the
+  // platform question in the spar conversation.
+  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+  // Concatenated spar transcript so the partner can advance the
+  // thinking instead of restarting on every iteration. Client decides
+  // shape — usually \`Q: ...\nA: ...\` lines.
+  conversationSoFar: z.string().max(8000).optional(),
+});
+
+export type ProposeAngle = {
+  line: string;
+  sources: Array<{
+    index: number;
+    kind: SimilarKind;
+    bucket: RetrievalBucket;
+    label: string;
+    title: string | null;
+    id: string;
+  }>;
+};
+
+export type ProposeFromTopicResult =
+  | {
+      ok: true;
+      topic: string;
+      platformGuess: 'newsletter' | 'linkedin' | 'unknown';
+      visibleThinking: {
+        lines: string[];
+        summary: string;
+      };
+      angles: ProposeAngle[];
+      outline: { beat: string }[];
+      followUpQuestion: string;
+      retrievalCount: number;
+    }
+  | {
+      ok: false;
+      reason: 'too_short' | 'error';
+      message: string;
+    };
+
+// Translate a SimilarHit into a human label used in both the LLM prompt
+// blocks and the UI's source-citation chips. Kept verbose on purpose —
+// the labels are the partner's "from your CSL issue …" voice.
+function labelForHit(hit: SimilarHit): string {
+  if (hit.kind === 'newsletter_issue') return 'your CSL issue';
+  if (hit.kind === 'obsidian_note') return 'vault note';
+  if (hit.kind === 'linkedin_post') return 'your LinkedIn post';
+  if (hit.kind === 'gmail_message') return 'newsletter you read';
+  if (hit.kind === 'extracted_idea') {
+    // Show the originating source kind so "from your space" is precise.
+    if (hit.sourceKind === 'newsletter_issue') return 'idea from your CSL';
+    if (hit.sourceKind === 'obsidian_note') return 'idea from your vault';
+    if (hit.sourceKind === 'linkedin_post')
+      return 'idea from your LinkedIn';
+    if (hit.sourceKind === 'gmail_message')
+      return 'idea from a newsletter you read';
+    return 'extracted idea';
+  }
+  if (hit.kind === 'idea') return 'idea in your garden';
+  if (hit.kind === 'draft') return 'earlier draft';
+  if (hit.kind === 'capture') return 'capture';
+  // Exhaustive — but TS doesn't know SimilarKind has been narrowed.
+  return 'item from your space';
+}
+
+// Body excerpt the LLM sees. Prefer the curated claim for
+// extracted_ideas, fall back to snippet for everything else. Caller
+// already truncated; we re-truncate to keep the prompt bounded across
+// future kinds.
+function bodyForHit(hit: SimilarHit): string | null {
+  if (hit.kind === 'extracted_idea') {
+    const claim = (hit.ideaClaim ?? '').trim();
+    if (claim.length > 0) return claim;
+  }
+  const snip = (hit.snippet ?? '').trim();
+  return snip.length > 0 ? snip : null;
+}
+
+// Shape the deterministic visible-thinking list. The exact wording
+// matches the spec's example ("3 ripe ideas in your garden touched
+// this", etc.). Each line is dropped if its tally is zero so the list
+// doesn't read as "0 vault notes" stutters.
+function visibleThinkingLines(hits: SimilarHit[]): string[] {
+  const lines: string[] = [];
+
+  const ideaCount = hits.filter(
+    (h) => h.kind === 'idea' || h.kind === 'extracted_idea'
+  ).length;
+  if (ideaCount > 0) {
+    lines.push(
+      `${ideaCount} ${ideaCount === 1 ? 'idea' : 'ideas'} in your garden touched this`
+    );
+  }
+
+  const cslCount = hits.filter((h) => h.kind === 'newsletter_issue').length;
+  if (cslCount > 0) {
+    lines.push(
+      `${cslCount} of your CSL ${cslCount === 1 ? 'issue' : 'issues'} circled around it`
+    );
+  }
+
+  const linkedinCount = hits.filter((h) => h.kind === 'linkedin_post').length;
+  if (linkedinCount > 0) {
+    lines.push(
+      `${linkedinCount} of your LinkedIn ${linkedinCount === 1 ? 'post' : 'posts'} touched it`
+    );
+  }
+
+  const vaultCount = hits.filter((h) => h.kind === 'obsidian_note').length;
+  if (vaultCount > 0) {
+    lines.push(
+      `${vaultCount} vault ${vaultCount === 1 ? 'note' : 'notes'} share vocabulary`
+    );
+  }
+
+  const gmailCount = hits.filter((h) => h.kind === 'gmail_message').length;
+  if (gmailCount > 0) {
+    lines.push(
+      `${gmailCount} ${gmailCount === 1 ? 'newsletter' : 'newsletters'} you read circle this`
+    );
+  }
+
+  return lines;
+}
+
+/**
+ * Home composer's submit handler. Retrieval + proposal in a single
+ * round-trip. Stateless across sessions per Phase 15b spec — any
+ * "memory" comes from conversationSoFar passed by the client.
+ *
+ * Failures return as a tagged union (ok: false) the same way reflect()
+ * does, so the Spar UI can render a graceful state instead of an
+ * unhandled exception.
+ */
+export async function proposeFromTopic(
+  input: unknown
+): Promise<ProposeFromTopicResult> {
+  // Rather than throw on validation failure, surface as too_short — the
+  // spar UI already swallows whitespace submits client-side, but server
+  // input is never trusted.
+  let parsed: z.infer<typeof proposeFromTopicSchema>;
+  try {
+    parsed = proposeFromTopicSchema.parse(input);
+  } catch {
+    return {
+      ok: false,
+      reason: 'too_short',
+      message: 'Need a topic of at least 3 characters.',
+    };
+  }
+
+  await requireUser();
+
+  let hits: SimilarHit[] = [];
+  try {
+    hits = await findSimilar({
+      text: parsed.topic,
+      // All kinds. The bucket helper sorts them downstream.
+      kinds: [...SIMILAR_KINDS],
+      // 12 is enough material for the partner without ballooning the
+      // prompt. findSimilar already orders by similarity globally.
+      limit: 12,
+    });
+  } catch (err) {
+    console.warn('[proposeFromTopic] findSimilar failed', err);
+    // Continue with empty hits — Claude's prompt knows how to handle
+    // sparse-corpus mode and the user still gets angles + a question.
+    hits = [];
+  }
+
+  // Build retrieval items for the LLM. Index is 1-based — angles cite
+  // these.
+  const retrievalItems: ProposalRetrievalItem[] = hits.map((h, i) => ({
+    index: i + 1,
+    bucket: bucket({ kind: h.kind, sourceKind: h.sourceKind ?? null }),
+    label: labelForHit(h),
+    title: h.title,
+    body: bodyForHit(h),
+  }));
+
+  // Voice profile slot — Phase 15a will populate. 15b passes nothing
+  // and the prompt falls back to the bucket samples.
+  let proposal: ProposalResult;
+  try {
+    proposal = await generateProposal({
+      topic: parsed.topic,
+      conversationSoFar: parsed.conversationSoFar,
+      platformHint: parsed.platformHint,
+      voiceProfile: undefined,
+      retrieval: retrievalItems,
+    });
+  } catch (err) {
+    console.error('[proposeFromTopic] generateProposal failed', err);
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'proposal failed',
+    };
+  }
+
+  // Resolve angle source-citations into UI-friendly refs. Claude returns
+  // 1-based indices; we look them up against the retrievalItems / hits
+  // pair. Out-of-range indices (model hallucination) get dropped
+  // silently — better than crashing the surface.
+  const angles: ProposeAngle[] = proposal.angles.map((a) => {
+    const sources = (a.sourceCitations ?? [])
+      .map((idx) => {
+        const item = retrievalItems[idx - 1];
+        const hit = hits[idx - 1];
+        if (!item || !hit) return null;
+        return {
+          index: item.index,
+          kind: hit.kind,
+          bucket: item.bucket,
+          label: item.label,
+          title: hit.title,
+          id: hit.id,
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+    return { line: a.line, sources };
+  });
+
+  return {
+    ok: true,
+    topic: parsed.topic,
+    platformGuess: proposal.platformGuess,
+    visibleThinking: {
+      lines: visibleThinkingLines(hits),
+      summary: proposal.retrievalSummary,
+    },
+    angles,
+    outline: proposal.outline,
+    followUpQuestion: proposal.followUpQuestion,
+    retrievalCount: hits.length,
+  };
 }
 
 // ─── exploreIdeas — Sprint 12 query interface ───────────────────────
