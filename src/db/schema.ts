@@ -830,3 +830,70 @@ export type NewLinkedinPost = typeof linkedinPosts.$inferInsert;
 export type GmailMessage = typeof gmailMessages.$inferSelect;
 export type NewGmailMessage = typeof gmailMessages.$inferInsert;
 export type NewExtractedIdea = typeof extractedIdeas.$inferInsert;
+
+
+// ────────────────────────────────────────────
+// GMAIL_SENDER_RULES — Phase 14a (2026-05-04)
+// ────────────────────────────────────────────
+// Per-user allowlist + blocklist rules for the Gmail triage queue.
+//
+// Two rule kinds, exclusive per row (XOR check at the SQL layer):
+//   · sender_address — full mailbox match, e.g. "lenny@lennysnewsletter.com"
+//   · sender_domain  — domain match, e.g. "nba.com"
+// At evaluation time per-address rules win over per-domain rules.
+//
+// Two actions:
+//   · 'allow' — bypass triage; detected message lands status='promoted'
+//               and embeds + extracts ideas in the same write.
+//   · 'block' — never reach the triage queue; classifyAndPersist drops
+//               the message before parsing.
+//
+// reason carries 'manual' (user clicked the row menu) or 'auto_suggested'
+// (system noticed N dismisses/promotes from the same domain and the user
+// clicked the suggestion banner).
+//
+// See drizzle/0010_gmail_sender_rules.sql for the migration.
+// ────────────────────────────────────────────
+export const gmailSenderRules = pgTable(
+  'gmail_sender_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    senderAddress: text('sender_address'),
+    senderDomain: text('sender_domain'),
+    action: text('action').notNull(),
+    // 'allow' | 'block'
+    reason: text('reason'),
+    // 'manual' | 'auto_suggested' (future: 'imported', etc.)
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    xor: check(
+      'gmail_sender_rules_xor',
+      sql`(${table.senderAddress} IS NOT NULL)::int + (${table.senderDomain} IS NOT NULL)::int = 1`
+    ),
+    actionChk: check(
+      'gmail_sender_rules_action_chk',
+      sql`${table.action} IN ('allow', 'block')`
+    ),
+    uniqueRule: uniqueIndex('gmail_sender_rules_unique').on(
+      table.userId,
+      table.senderAddress,
+      table.senderDomain,
+      table.action
+    ),
+    userAddrIdx: index('idx_gmail_sender_rules_user_addr')
+      .on(table.userId, table.senderAddress)
+      .where(sql`${table.senderAddress} IS NOT NULL`),
+    userDomainIdx: index('idx_gmail_sender_rules_user_domain')
+      .on(table.userId, table.senderDomain)
+      .where(sql`${table.senderDomain} IS NOT NULL`),
+  })
+);
+
+export type GmailSenderRule = typeof gmailSenderRules.$inferSelect;
+export type NewGmailSenderRule = typeof gmailSenderRules.$inferInsert;
