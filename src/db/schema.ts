@@ -925,6 +925,61 @@ export const voiceCanonicalPieces = pgTable(
 );
 
 // ────────────────────────────────────────────
+// VOICE TRAINING SAMPLES — Phase 15 UX rework (2026-05-05)
+// 5-sample-picker model matching Ghostbase. Each row is one sample
+// for a (user, platform). Corpus samples carry a pointer; paste +
+// upload samples carry inline title/body. App layer caps at 5 per
+// (user, platform).
+// ────────────────────────────────────────────
+export const voiceTrainingSamples = pgTable(
+  'voice_training_samples',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // 'longform' | 'linkedin'
+    platform: text('platform').notNull(),
+    // 'corpus' | 'paste' | 'upload'
+    kind: text('kind').notNull(),
+
+    // For kind='corpus' only: pointer into the source tables.
+    sourceKind: text('source_kind'),
+    sourceId: uuid('source_id'),
+
+    // For kind='paste' / 'upload': inline content.
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    filename: text('filename'),
+
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    platformChk: check(
+      'voice_training_samples_platform_chk',
+      sql`${table.platform} IN ('longform', 'linkedin')`
+    ),
+    kindChk: check(
+      'voice_training_samples_kind_chk',
+      sql`${table.kind} IN ('corpus', 'paste', 'upload')`
+    ),
+    sourceKindChk: check(
+      'voice_training_samples_source_kind_chk',
+      sql`${table.sourceKind} IS NULL OR ${table.sourceKind} IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')`
+    ),
+    userPlatformIdx: index('idx_voice_training_samples_user_platform').on(
+      table.userId,
+      table.platform,
+      table.position
+    ),
+  })
+);
+
+// ────────────────────────────────────────────
 // Type exports for inference
 // ────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
@@ -943,6 +998,7 @@ export type ObsidianNote = typeof obsidianNotes.$inferSelect;
 export type ExtractedIdea = typeof extractedIdeas.$inferSelect;
 export type VoiceProfile = typeof voiceProfiles.$inferSelect;
 export type VoiceCanonicalPiece = typeof voiceCanonicalPieces.$inferSelect;
+export type VoiceTrainingSample = typeof voiceTrainingSamples.$inferSelect;
 
 export type NewUser = typeof users.$inferInsert;
 export type NewIdea = typeof ideas.$inferInsert;
