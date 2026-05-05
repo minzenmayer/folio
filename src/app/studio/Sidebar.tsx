@@ -365,40 +365,45 @@ function HelpIcon() {
 
 // ─── Plant sprout mark ─────────────────────────────────
 //
-// Chunky pixel-art sprout next to the Thoughtbed wordmark. Two
-// leaves on a stem; no soil base. Black-and-white only via
-// currentColor. Each "pixel" is a 2x2 unit rect on a 22x22 viewBox
-// for a chunky Minecraft-grass-block feel that scales cleanly.
+// Pixel-art sprout: top-left leaf, smaller mid-right leaf, curved
+// stem, dirt patch at the base. Single-color silhouette in
+// currentColor on transparent background. Each "pixel" is a 2x2
+// unit rect on a 32x32 viewBox for the chunky pixel-art feel.
 function SproutMark() {
   return (
     <svg
       width="22"
       height="22"
-      viewBox="0 0 22 22"
+      viewBox="0 0 32 32"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden
       fill="currentColor"
       className="shrink-0 text-ink"
     >
-      {/* Top leaf — chunky rounded paddle, rows 0-3, cols 1-6 */}
-      <rect x="4"  y="0"  width="8"  height="2" />
-      <rect x="2"  y="2"  width="12" height="2" />
-      <rect x="2"  y="4"  width="12" height="2" />
-      <rect x="4"  y="6"  width="10" height="2" />
+      {/* Top-left leaf — chunky lobed paddle, rows 1-6 */}
+      <rect x="14" y="2"  width="2"  height="2" />
+      <rect x="10" y="4"  width="8"  height="2" />
+      <rect x="6"  y="6"  width="14" height="2" />
+      <rect x="4"  y="8"  width="14" height="2" />
+      <rect x="6"  y="10" width="10" height="2" />
+      <rect x="8"  y="12" width="8"  height="2" />
 
-      {/* Right leaf — smaller bump off the upper stem, rows 4-6, cols 6-9 */}
-      <rect x="14" y="8"  width="4"  height="2" />
-      <rect x="12" y="10" width="8"  height="2" />
-      <rect x="14" y="12" width="2"  height="2" />
+      {/* Right leaf — smaller bump off the upper stem, rows 6-9 */}
+      <rect x="22" y="12" width="4"  height="2" />
+      <rect x="18" y="14" width="8"  height="2" />
+      <rect x="10" y="16" width="14" height="2" />
+      <rect x="10" y="18" width="12" height="2" />
 
-      {/* Stem — single column down the middle, rows 4-10, cols 4-5 */}
-      <rect x="8"  y="8"  width="4"  height="2" />
-      <rect x="8"  y="10" width="4"  height="2" />
-      <rect x="8"  y="12" width="4"  height="2" />
-      <rect x="8"  y="14" width="4"  height="2" />
-      <rect x="8"  y="16" width="4"  height="2" />
-      <rect x="8"  y="18" width="4"  height="2" />
-      <rect x="8"  y="20" width="4"  height="2" />
+      {/* Stem — column down the middle, rows 7-12 */}
+      <rect x="10" y="14" width="4"  height="2" />
+      <rect x="10" y="20" width="4"  height="2" />
+      <rect x="10" y="22" width="4"  height="2" />
+      <rect x="10" y="24" width="4"  height="2" />
+
+      {/* Dirt — trapezoidal base, rows 13-15 */}
+      <rect x="4"  y="26" width="16" height="2" />
+      <rect x="2"  y="28" width="20" height="2" />
+      <rect x="6"  y="30" width="14" height="2" />
     </svg>
   );
 }

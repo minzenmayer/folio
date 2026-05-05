@@ -476,7 +476,11 @@ function IdleView({
   canSubmit: boolean;
   isPending: boolean;
 }) {
-  const [mode, setMode] = useState<StarterMode>('writing');
+  const [mode, setMode] = useState<StarterMode | null>(null);
+
+  const togglePill = (m: StarterMode) => {
+    setMode((prev) => (prev === m ? null : m));
+  };
 
   const onStarter = (prefix: string) => {
     setTopic(prefix);
@@ -491,7 +495,7 @@ function IdleView({
     }, 0);
   };
 
-  const starters = STARTERS_BY_MODE[mode];
+  const starters = mode ? STARTERS_BY_MODE[mode] : [];
 
   return (
     <>
@@ -506,22 +510,27 @@ function IdleView({
         className="w-full resize-none bg-transparent px-5 pt-5 pb-2 font-sans text-[16px] leading-[1.55] text-ink placeholder:text-tag focus:outline-none"
       />
 
-      {/* Mode chips + arrow send button */}
+      {/* Mode pills + arrow send button.
+          Pills are dropdown toggles. No pill active = no starter
+          list shown (tight composer). Click a pill to open its
+          starter list below; click again to close. Active pill is
+          rounded-full with light-green fill + dark-green outline. */}
       <div className="flex items-center gap-2 px-5 pb-4 pt-1">
-        <div role="tablist" aria-label="Starter mode" className="flex items-center gap-1.5 flex-1 min-w-0">
+        <div role="tablist" aria-label="Starter mode" className="flex items-center gap-2 flex-1 min-w-0">
           {(Object.keys(STARTERS_BY_MODE) as StarterMode[]).map((m) => {
-            const selected = m === mode;
+            const active = m === mode;
             return (
               <button
                 key={m}
                 type="button"
                 role="tab"
-                aria-selected={selected}
-                onClick={() => setMode(m)}
-                className={`flex items-center gap-1.5 font-sans text-[12.5px] rounded-soft px-3 py-1.5 transition-colors ${
-                  selected
-                    ? 'bg-ink text-bg'
-                    : 'bg-transparent text-tag hover:text-ink hover:bg-paper-2'
+                aria-selected={active}
+                aria-expanded={active}
+                onClick={() => togglePill(m)}
+                className={`flex items-center gap-1.5 font-sans text-[12.5px] rounded-full border px-3 py-1.5 transition-colors ${
+                  active
+                    ? 'bg-[#dcfce7] border-[#15803d] text-[#14532d]'
+                    : 'bg-paper border-rule text-tag hover:text-ink hover:border-ink/40 hover:bg-paper-2'
                 }`}
               >
                 <ModeIcon mode={m} />
@@ -550,30 +559,33 @@ function IdleView({
         </button>
       </div>
 
-      {/* Starter list per active mode */}
-      <div className="border-t border-rule">
-        <ul className="divide-y divide-rule">
-          {starters.map((p) => (
-            <li key={p.label}>
-              <button
-                type="button"
-                onClick={() => onStarter(p.prefix)}
-                className="w-full flex items-baseline justify-between gap-3 px-5 py-3 text-left hover:bg-paper-2 transition-colors group"
-              >
-                <span className="font-sans text-[14px] text-ink leading-[1.4]">
-                  {p.label}
-                </span>
-                <span
-                  className="font-mono text-[11px] text-tag group-hover:text-ink transition-colors"
-                  aria-hidden
+      {/* Starter list — only shown when a pill is active. Empty
+          state (mode === null) keeps the composer tight. */}
+      {mode !== null && (
+        <div className="border-t border-rule">
+          <ul className="divide-y divide-rule">
+            {starters.map((p) => (
+              <li key={p.label}>
+                <button
+                  type="button"
+                  onClick={() => onStarter(p.prefix)}
+                  className="w-full flex items-baseline justify-between gap-3 px-5 py-3 text-left hover:bg-paper-2 transition-colors group"
                 >
-                  ↗
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+                  <span className="font-sans text-[14px] text-ink leading-[1.4]">
+                    {p.label}
+                  </span>
+                  <span
+                    className="font-mono text-[11px] text-tag group-hover:text-ink transition-colors"
+                    aria-hidden
+                  >
+                    ↗
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </>
   );
 }
@@ -1031,9 +1043,9 @@ function ModeIcon({ mode }: { mode: StarterMode }) {
   if (mode === 'ideas') {
     return (
       <svg {...props}>
-        <path d="M12 22V8" />
-        <path d="M5 12c0-3.5 3-6 7-6" />
-        <path d="M19 12c0-3.5-3-6-7-6" />
+        <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" />
+        <path d="M9 18h6" />
+        <path d="M10 22h4" />
       </svg>
     );
   }
