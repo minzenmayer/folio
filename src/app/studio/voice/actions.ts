@@ -420,10 +420,14 @@ export async function searchCorpusForTraining(
   const user = await requireUser();
   const parsed = searchCorpusSchema.parse(input);
   const search = parsed.query?.trim();
-  const sourceKinds: ('newsletter_issue' | 'obsidian_note' | 'linkedin_post')[] =
-    parsed.platform === 'longform'
-      ? ['newsletter_issue', 'obsidian_note']
-      : ['linkedin_post'];
+  // Phase 15 (UX rework, 2026-05-05): vault is excluded from the
+  // picker. Vaults mix research notes with actual writing and there's
+  // no clean signal at the row level to tell them apart, so the picker
+  // surfaces only sources Thoughtbed knows the user authored: their
+  // newsletter (longform) and their LinkedIn (shortform). Vault content
+  // can still come in via Paste text or Upload file.
+  const sourceKinds: ('newsletter_issue' | 'linkedin_post')[] =
+    parsed.platform === 'longform' ? ['newsletter_issue'] : ['linkedin_post'];
 
   // Already-selected source IDs for this platform — used to gray
   // them out in the picker.
@@ -476,45 +480,6 @@ export async function searchCorpusForTraining(
         postedAt: r.postedAt?.toISOString() ?? null,
         alreadySelected: selectedSet.has(`newsletter_issue:${r.id}`),
         path: null,
-        charCount: r.body.length,
-      });
-    }
-  }
-
-  if (sourceKinds.includes('obsidian_note')) {
-    const where = search
-      ? and(
-          eq(obsidianNotes.userId, user.id),
-          or(
-            ilike(obsidianNotes.title, `%${search}%`),
-            ilike(obsidianNotes.path, `%${search}%`)
-          )
-        )
-      : eq(obsidianNotes.userId, user.id);
-    const rows = await db
-      .select({
-        id: obsidianNotes.id,
-        title: obsidianNotes.title,
-        body: obsidianNotes.bodyText,
-        path: obsidianNotes.path,
-        postedAt: obsidianNotes.updatedAt,
-      })
-      .from(obsidianNotes)
-      .where(where)
-      .orderBy(desc(obsidianNotes.updatedAt))
-      .limit(parsed.limit);
-    for (const r of rows) {
-      if (!r.body || r.body.length < 50) continue;
-      // Apply path-prefix filter (vault-only feature).
-      if (pathPrefix && !(r.path ?? '').startsWith(pathPrefix)) continue;
-      out.push({
-        sourceKind: 'obsidian_note',
-        id: r.id,
-        title: r.title || 'Untitled note',
-        snippet: r.body.slice(0, 280),
-        postedAt: r.postedAt?.toISOString() ?? null,
-        alreadySelected: selectedSet.has(`obsidian_note:${r.id}`),
-        path: r.path,
         charCount: r.body.length,
       });
     }
