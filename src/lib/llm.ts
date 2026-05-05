@@ -499,7 +499,7 @@ ${sparseCorpusNote}
 
 Voice rules. No "I notice that", no "It seems like", no "Great topic", no "Here's what I came up with", no preamble. No emoji. No tone-policing. No "Have you considered". Editorial restraint. When you cite an angle's source, the UI will render the citation; you don't need to write "based on your CSL issue X" in the angle line itself — keep the line tight, let sourceCitations do the work.
 
-If platformGuess is "linkedin", emit a `hook` — 6 to 12 words, opener-shape, stops the scroll. If platformGuess is "newsletter" or "unknown", set hook to null. The hook is its own structural slot, separate from the outline beats; do not duplicate the hook as the first beat.
+If platformGuess is 'linkedin', emit a hook — 6 to 12 words, opener-shape, stops the scroll. If platformGuess is 'newsletter' or 'unknown', set hook to null. The hook is its own structural slot, separate from the outline beats; do not duplicate the hook as the first beat.
 
 Now produce the structured output.`;
 

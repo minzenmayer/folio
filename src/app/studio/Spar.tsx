@@ -44,6 +44,8 @@ import {
   commitProposal,
   draftSection,
   draftBeat,
+  regenerateAngles,
+  regenerateOutline,
   type ProposeFromTopicResult,
   type ProposeAngle,
   type DraftSectionResult,
@@ -536,7 +538,7 @@ export function Spar() {
             anchoredText.map((t) => norm(t))
           );
           const reAnchored = new Set<number>();
-          res.outline.forEach((b, i) => {
+          res.outline.forEach((b: { beat: string }, i: number) => {
             if (anchoredNormalized.has(norm(b.beat))) reAnchored.add(i);
           });
 
@@ -1725,17 +1727,16 @@ function SourceIconRow({
     gmail: number;
   };
 }) {
-  const present: Array<{
-    key: keyof typeof counts;
-    label: string;
-    count: number;
-  }> = [
-    { key: 'ideas', label: 'Garden ideas', count: counts.ideas },
-    { key: 'cslIssues', label: 'CSL issues', count: counts.cslIssues },
-    { key: 'linkedin', label: 'LinkedIn posts', count: counts.linkedin },
-    { key: 'vault', label: 'Vault notes', count: counts.vault },
-    { key: 'gmail', label: 'Newsletters you read', count: counts.gmail },
-  ].filter((item) => item.count > 0);
+  type Item = { key: keyof typeof counts; label: string; count: number };
+  const present: Array<Item> = (
+    [
+      { key: 'ideas', label: 'Garden ideas', count: counts.ideas },
+      { key: 'cslIssues', label: 'CSL issues', count: counts.cslIssues },
+      { key: 'linkedin', label: 'LinkedIn posts', count: counts.linkedin },
+      { key: 'vault', label: 'Vault notes', count: counts.vault },
+      { key: 'gmail', label: 'Newsletters you read', count: counts.gmail },
+    ] as Item[]
+  ).filter((item) => item.count > 0);
 
   if (present.length === 0) return null;
 
