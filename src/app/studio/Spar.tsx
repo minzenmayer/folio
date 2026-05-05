@@ -199,22 +199,40 @@ export function Spar() {
     propose({ topic: trimmed, conversation: initial });
   }, [topic, propose]);
 
+  // Phase 16 post-ship feedback (2026-05-05): Reply used to re-fire
+  // the full propose call, which silently wiped angles / outline /
+  // anchors / drafted prose. That made the box feel like a state-
+  // killer instead of a thinking-aid. Reframe: lock-in pins the
+  // thought into the conversation as a context note. The proposal
+  // stays where it is. The locked-in thoughts travel into any
+  // subsequent ↻ Rethink call via the conversation transcript so
+  // the LLM still sees them when iteration is requested explicitly.
   const handleResponseSubmit = useCallback(() => {
     if (!proposal) return;
     const trimmed = response.trim();
     if (trimmed.length === 0) return;
-    const next: ConversationTurn[] = [
-      ...conversation,
+    setConversation((prev) => [
+      ...prev,
       { kind: 'response', text: trimmed },
-    ];
-    setConversation(next);
+    ]);
     setResponse('');
-    propose({
-      topic: proposal.topic,
-      conversation: next,
-      platformHint: platformOverride ?? undefined,
+  }, [proposal, response]);
+
+  // Click a pinned thought to remove it. Doesn't re-fire anything;
+  // just drops it from the conversation.
+  const removePinnedThought = useCallback((index: number) => {
+    setConversation((prev) => {
+      // Index here refers to the position among 'response' turns, not
+      // the absolute conversation index. Find the Nth response turn
+      // and drop it.
+      let seen = -1;
+      return prev.filter((t) => {
+        if (t.kind !== 'response') return true;
+        seen += 1;
+        return seen !== index;
+      });
     });
-  }, [proposal, response, conversation, propose, platformOverride]);
+  }, []);
 
   const anchorAngle = useCallback(
     (angle: ProposeAngle) => {
@@ -656,6 +674,10 @@ export function Spar() {
           onResponseSubmit={handleResponseSubmit}
           onAnchor={anchorAngle}
           anchoredAngles={anchoredAngles}
+          pinnedThoughts={conversation
+            .filter((t): t is { kind: 'response'; text: string } => t.kind === 'response')
+            .map((t) => t.text)}
+          onRemoveThought={removePinnedThought}
           onOpenPage={handleOpenPage}
           onEscape={escapeToIdle}
           isThinking={isSubmitting}
@@ -921,6 +943,8 @@ function SparView({
   onResponseSubmit,
   onAnchor,
   anchoredAngles,
+  pinnedThoughts,
+  onRemoveThought,
   onOpenPage,
   onEscape,
   isThinking,
@@ -954,6 +978,8 @@ function SparView({
   onResponseSubmit: () => void;
   onAnchor: (a: ProposeAngle) => void;
   anchoredAngles: Set<string>;
+  pinnedThoughts: string[];
+  onRemoveThought: (index: number) => void;
   onOpenPage: () => void;
   onEscape: () => void;
   isThinking: boolean;
@@ -1064,6 +1090,45 @@ function SparView({
               <span className="ml-1.5 font-mono text-[10px]">×</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Pinned thoughts — Phase 16 post-ship reframe (2026-05-05).
+          The user types into the textbox below and hits Lock in;
+          the thought lands here as a card. Cards travel into any
+          ↻ Rethink call via the conversation transcript and into
+          the editor on Start writing as additional context. Click
+          × to drop a thought; the rest of the spar stays where it
+          is — pins are additive, not state-resetting. */}
+      {pinnedThoughts.length > 0 && (
+        <div className="mb-4">
+          <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag font-medium">
+            Your thoughts
+          </span>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {pinnedThoughts.map((text, i) => (
+              <li
+                key={i}
+                className="rounded-soft border border-rule bg-paper-2 px-3 py-2 flex items-start gap-2"
+              >
+                <span className="font-mono text-[10px] tracking-[0.04em] text-tag pt-0.5 shrink-0">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <p className="flex-1 font-sans text-[13px] text-ink leading-[1.5] break-words">
+                  {text}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onRemoveThought(i)}
+                  aria-label="Remove this thought"
+                  title="Remove"
+                  className="font-mono text-[12px] text-tag hover:text-ink transition-colors shrink-0"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -1244,11 +1309,16 @@ function SparView({
           <div className="flex items-baseline gap-2 mb-1">
             <ZoneIcon kind="question" />
             <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
-              Keep going
+              Anything else?
             </span>
           </div>
+          {proposal.followUpQuestion && (
+            <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5] mb-2 italic">
+              {proposal.followUpQuestion}
+            </p>
+          )}
           <p className="font-sans text-[13.5px] text-ink leading-[1.5] mb-2 font-medium">
-            {proposal.followUpQuestion}
+            Lock in any other thoughts you want carried into the draft.
           </p>
           <textarea
             ref={responseTextareaRef}
@@ -1271,17 +1341,20 @@ function SparView({
               disabled={!canSubmitResponse}
               className="font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-3 py-1.5 bg-ink text-bg hover:bg-ink-soft disabled:bg-rule disabled:text-tag disabled:cursor-not-allowed transition-colors"
             >
-              {isThinking ? 'Thinking…' : 'Reply'}
+              Lock in
             </button>
           </div>
         </section>
       )}
 
-      {/* Open the page */}
+      {/* Start writing — the hand-off button. Phase 16 post-ship
+          reframe (2026-05-05): copy now signals "I'm ready" rather
+          than "open the page with this outline as section headers."
+          Carries the same payload (topic + outline + sections +
+          anchored beat indices) into the editor. */}
       <div className="flex items-center gap-3 pt-2">
         <p className="font-sans text-[12.5px] text-tag flex-1 min-w-0">
-          When you&apos;re ready, open the page with this outline as
-          section headers.
+          When you&apos;re ready, take all of this into the editor.
         </p>
         <button
           type="button"
@@ -1289,7 +1362,7 @@ function SparView({
           disabled={isCommitting || isThinking}
           className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors"
         >
-          {isCommitting ? 'Opening…' : `Open the page (${platform})`}
+          {isCommitting ? 'Opening…' : "I'm ready to start writing →"}
         </button>
       </div>
     </div>
