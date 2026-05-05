@@ -89,18 +89,25 @@ export function VoiceClient({
 
   return (
     <>
+      <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
+        Two trainings · pick one to start
+      </p>
       <div role="tablist" aria-label="Voice platform" className="flex flex-col sm:flex-row gap-2 mb-8">
         <PlatformPill
           label="Longform"
           hint="newsletters + vault"
           selected={platform === 'longform'}
           onClick={() => setPlatform('longform')}
+          sampleCount={longformSamples.length}
+          builtAt={longformProfile?.builtAt ?? null}
         />
         <PlatformPill
           label="Short form"
           hint="social posts"
           selected={platform === 'linkedin'}
           onClick={() => setPlatform('linkedin')}
+          sampleCount={linkedinSamples.length}
+          builtAt={linkedinProfile?.builtAt ?? null}
         />
       </div>
 
@@ -124,12 +131,23 @@ function PlatformPill({
   hint,
   selected,
   onClick,
+  sampleCount,
+  builtAt,
 }: {
   label: string;
   hint: string;
   selected: boolean;
   onClick: () => void;
+  sampleCount: number;
+  builtAt: string | null;
 }) {
+  const trained = Boolean(builtAt);
+  const statusText = !trained
+    ? sampleCount > 0
+      ? `${sampleCount} sample${sampleCount === 1 ? '' : 's'} · not trained yet`
+      : 'No samples yet · not trained'
+    : `${sampleCount} sample${sampleCount === 1 ? '' : 's'} · trained ${timeAgo(builtAt)}`;
+
   return (
     <button
       type="button"
@@ -142,15 +160,37 @@ function PlatformPill({
           : 'bg-paper border-rule text-ink-soft hover:bg-paper-2 hover:text-ink hover:border-ink/40'
       }`}
     >
-      <span className="block font-sans text-[20px] font-semibold tracking-tight leading-tight">
-        {label}
-      </span>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-sans text-[20px] font-semibold tracking-tight leading-tight">
+          {label}
+        </span>
+        <span
+          className={`font-mono text-[10px] tracking-[0.18em] uppercase font-medium ${
+            trained
+              ? selected
+                ? 'text-bg/80'
+                : 'text-ink'
+              : selected
+                ? 'text-bg/60'
+                : 'text-tag'
+          }`}
+        >
+          {trained ? 'Trained' : 'Not trained'}
+        </span>
+      </div>
       <span
         className={`block font-sans text-[12.5px] mt-0.5 ${
           selected ? 'text-bg/70' : 'text-tag'
         }`}
       >
         {hint}
+      </span>
+      <span
+        className={`block font-mono text-[10.5px] tracking-[0.04em] mt-2 ${
+          selected ? 'text-bg/60' : 'text-tag'
+        }`}
+      >
+        {statusText}
       </span>
     </button>
   );

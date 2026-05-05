@@ -41,12 +41,13 @@ export default async function VoicePage() {
             Settings · Voice ID
           </p>
           <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
-            Train your voice.
+            Train your voice. Twice.
           </h1>
           <p className="font-sans text-[15.5px] leading-[1.55] text-ink-soft max-w-[58ch]">
-            Pick up to five writing samples that sound most like you.
-            One Claude pass turns them into a voice profile the
-            composer reads. Two profiles, one per platform.
+            Longform and Short form are two separate profiles. Add
+            samples and retrain each one independently. Your essay
+            voice is not your social-post voice; the composer reads
+            whichever profile fits the piece you&apos;re writing.
           </p>
         </div>
 
