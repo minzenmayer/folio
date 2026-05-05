@@ -1,11 +1,21 @@
 // Thoughtbed · Newsletter detection ladder (Phase 13, 2026-05-04)
 //
-// classify(parsed) → { isNewsletter, kind } using a priority ladder.
+// classify(parsed, opts?) → { isNewsletter, kind } using a priority ladder.
 // First hit wins. We deliberately under-ingest in v1: a false positive
 // pollutes the corpus more than a false negative because the user has to
 // actively dismiss it. Triage absorbs the rest of the noise.
 //
-// Order matters:
+// Phase 14a (2026-05-04) added the sender-rule short-circuit. The sync
+// engine looks up checkSenderRule(userId, fromAddress) before it parses
+// the message and passes the result here as opts.preCheckedRule:
+//   · 'block'  → classify() returns { isNewsletter: false, kind: null }.
+//                The message never lands in gmail_messages.
+//   · 'allow'  → classify() returns { isNewsletter: true, kind: 'allowlisted' }.
+//                The sync engine inserts as status='promoted' + embeds + extracts
+//                in the same write.
+//   · null     → fall through to the regular detection ladder below.
+//
+// Order of the regular ladder matters:
 //   1. Sender domain matches a known newsletter platform → strongest.
 //   2. Sender's local-part looks listy AND the message has a List-Unsubscribe
 //      header → strong (RFC 8058 / RFC 2369 both signal mailing lists).
@@ -15,6 +25,7 @@
 //      by itself in v1. (Per Payton: under-ingest, triage covers gaps.)
 
 import type { ParsedGmailMessage } from '@/lib/gmail/api';
+import type { SenderRuleResult } from '@/lib/gmail/sender-rules';
 
 // ─── kinds ──────────────────────────────────────────────
 
@@ -26,7 +37,11 @@ export type NewsletterDetectionKind =
   | 'detected_ghost'
   | 'detected_buttondown'
   | 'list_unsubscribe'
-  | 'subject_keyword';
+  | 'subject_keyword'
+  // Phase 14a (2026-05-04): the message hit a user-defined allowlist rule.
+  // Bypasses the regular ladder entirely; the sync engine treats it as
+  // promoted-on-ingest.
+  | 'allowlisted';
 
 export type DetectionResult =
   | { isNewsletter: true; kind: NewsletterDetectionKind }
@@ -94,7 +109,25 @@ const SUBJECT_KEYWORDS = [
 
 // ─── classify ───────────────────────────────────────────
 
-export function classify(msg: ParsedGmailMessage): DetectionResult {
+/**
+ * Classify a parsed Gmail message. Optionally short-circuit on a
+ * pre-checked sender rule (Phase 14a) — when supplied, the rule wins
+ * over the regular detection ladder.
+ */
+export function classify(
+  msg: ParsedGmailMessage,
+  opts?: { preCheckedRule?: SenderRuleResult }
+): DetectionResult {
+  // Phase 14a sender-rule short-circuit. A 'block' result aborts ingest
+  // entirely; 'allow' surfaces as the 'allowlisted' detection kind so
+  // downstream (the sync engine) can pick it up and auto-promote.
+  if (opts?.preCheckedRule === 'block') {
+    return { isNewsletter: false, kind: null };
+  }
+  if (opts?.preCheckedRule === 'allow') {
+    return { isNewsletter: true, kind: 'allowlisted' };
+  }
+
   const fromAddr = (msg.fromAddress ?? '').toLowerCase();
   const fromDomain = fromAddr.includes('@') ? fromAddr.split('@')[1] : '';
   const localPart = fromAddr.includes('@') ? fromAddr.split('@')[0] : '';
