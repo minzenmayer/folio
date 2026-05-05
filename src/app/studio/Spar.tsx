@@ -32,6 +32,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -170,18 +171,23 @@ export function Spar() {
   const anchorAngle = useCallback(
     (angle: ProposeAngle) => {
       if (!proposal) return;
-      const next: ConversationTurn[] = [
-        ...conversation,
-        { kind: 'anchor', angle: angle.line },
-      ];
-      setConversation(next);
-      propose({
-        topic: proposal.topic,
-        conversation: next,
-        platformHint: platformOverride ?? undefined,
+      // Toggle anchor — clicking the same angle again unanchors. Don't
+      // re-fire propose; the spar stays where it is. Iteration only
+      // happens when the user hits Reply, so 'click an angle' becomes
+      // a deliberate selection move rather than a context-blowing jolt.
+      setConversation((prev) => {
+        const already = prev.some(
+          (t) => t.kind === 'anchor' && t.angle === angle.line
+        );
+        if (already) {
+          return prev.filter(
+            (t) => !(t.kind === 'anchor' && t.angle === angle.line)
+          );
+        }
+        return [...prev, { kind: 'anchor', angle: angle.line }];
       });
     },
-    [proposal, conversation, propose, platformOverride]
+    [proposal]
   );
 
   const escapeToIdle = useCallback(() => {
@@ -349,6 +355,14 @@ export function Spar() {
   const trimmedTopic = topic.trim();
   const canSubmitTopic = !isSubmitting && trimmedTopic.length >= 3;
 
+  const anchoredAngles = useMemo(() => {
+    const s = new Set<string>();
+    for (const t of conversation) {
+      if (t.kind === 'anchor') s.add(t.angle);
+    }
+    return s;
+  }, [conversation]);
+
   return (
     <div className="bg-paper rounded-card border border-rule">
       {phase === 'idle' && (
@@ -382,6 +396,7 @@ export function Spar() {
           onResponseKeyDown={onResponseKeyDown}
           onResponseSubmit={handleResponseSubmit}
           onAnchor={anchorAngle}
+          anchoredAngles={anchoredAngles}
           onOpenPage={handleOpenPage}
           onEscape={escapeToIdle}
           isThinking={isSubmitting}
@@ -634,6 +649,7 @@ function SparView({
   onResponseKeyDown,
   onResponseSubmit,
   onAnchor,
+  anchoredAngles,
   onOpenPage,
   onEscape,
   isThinking,
@@ -654,6 +670,7 @@ function SparView({
   onResponseKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onResponseSubmit: () => void;
   onAnchor: (a: ProposeAngle) => void;
+  anchoredAngles: Set<string>;
   onOpenPage: () => void;
   onEscape: () => void;
   isThinking: boolean;
@@ -723,6 +740,31 @@ function SparView({
         )}
       </div>
 
+      {/* Anchored chips — visible record of what the user has selected.
+          Click to unanchor. */}
+      {anchoredAngles.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-baseline gap-2">
+          <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag font-medium">
+            Anchored
+          </span>
+          {Array.from(anchoredAngles).map((line) => (
+            <button
+              key={line}
+              type="button"
+              onClick={() => {
+                const angle = proposal.angles.find((a) => a.line === line);
+                if (angle) onAnchor(angle);
+              }}
+              className="font-sans text-[12px] rounded-full border bg-[#dcfce7] border-[#15803d] text-[#14532d] px-3 py-1 hover:opacity-80 transition-opacity"
+              title="Click to unanchor"
+            >
+              {line.length > 80 ? line.slice(0, 80) + '…' : line}
+              <span className="ml-1.5 font-mono text-[10px]">×</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Angles */}
       {proposal.angles.length > 0 && (
         <div className="mb-5">
@@ -736,7 +778,12 @@ function SparView({
                   type="button"
                   onClick={() => onAnchor(a)}
                   disabled={isThinking}
-                  className="w-full text-left rounded-soft border border-rule bg-paper hover:border-ink/40 hover:bg-paper-2 disabled:opacity-60 disabled:cursor-not-allowed transition-colors px-4 py-3"
+                  aria-pressed={anchoredAngles.has(a.line)}
+                  className={`w-full text-left rounded-soft border transition-colors px-4 py-3 disabled:opacity-60 disabled:cursor-not-allowed ${
+                    anchoredAngles.has(a.line)
+                      ? 'bg-[#dcfce7] border-[#15803d]'
+                      : 'bg-paper border-rule hover:border-ink/40 hover:bg-paper-2'
+                  }`}
                 >
                   <p className="font-sans text-[14px] text-ink leading-[1.45]">
                     {a.line}

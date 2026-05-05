@@ -731,7 +731,7 @@ export async function generateSectionDraft({
   const platformLength =
     platform === 'newsletter'
       ? '120-260 words for this beat. One to three short paragraphs. Each paragraph does one move.'
-      : '50-120 words for this beat. Tight, hooky, single-thread shape.';
+      : '50-120 words for this beat. Tight, hooky, single-thread shape. LinkedIn-style formatting: short lines, line breaks between thoughts, occasional one-word lines for emphasis. Not a paragraph block.';
 
   const voiceBlock = renderVoiceProfileBlock(voiceProfile);
 
