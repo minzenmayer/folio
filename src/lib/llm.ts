@@ -240,3 +240,277 @@ You will produce TWO things in a single structured response:
     reasoningByIndex,
   };
 }
+
+
+// ─── Phase 15b · generateProposal — home composer's sparring partner ──
+//
+// 2026-05-05. The home composer at /studio submits a topic; the partner
+// retrieves from the user's space (split into voice_longform /
+// voice_shortform / knowledge buckets), then asks Claude for:
+//
+//   · a one-or-two-sentence retrievalSummary — what's in the space on
+//     this; reads like a thinking-out-loud line, not a system status.
+//   · a platformGuess (newsletter / linkedin / unknown) — derived from
+//     topic shape, used to pick voice samples and outline shape.
+//   · 3 angles — short one-liners. Each names which retrieval indices
+//     fed it so the UI can show "from your CSL issue X + vault note Y".
+//   · an outline — 3 to 5 beats, section-shaped for newsletters,
+//     hooky-and-tight for linkedin.
+//   · a follow-up question — one, picked from a small palette so the
+//     thinking keeps moving without the UI turning into a chat.
+//
+// Voice / knowledge boundary (Phase 15b, prompt-only — no schema work):
+//   - voice buckets are how the user writes. The partner studies them
+//     for shape, vocabulary, sentence rhythm. Used for angle voice and
+//     (when 15a ships) section-draft voice.
+//   - knowledge is what the user has read. Surfaced as references and
+//     angle-fuel only. Never a voice anchor.
+//
+// Voice ID profile slot (forward-compatible): the action accepts an
+// optional voiceProfile that 15a will populate. Ignored if undefined;
+// when present, the prompt uses the profile's summary/attributes
+// instead of the raw few-shot samples.
+//
+// Anti-goals (spec): no "I notice that", no "It seems like", no "Great
+// topic", no preamble, no emoji, no "Have you considered". Editorial
+// restraint. The partner is a thinking-partner, not a coach.
+
+export type ProposalVoiceProfile = {
+  summary?: string;
+  attributes?: string[];
+  thingsToAvoid?: string[];
+};
+
+export type ProposalRetrievalItem = {
+  index: number; // 1-based, used for angle citations
+  bucket: 'voice_longform' | 'voice_shortform' | 'knowledge';
+  // Human label like "your CSL issue", "vault note", "newsletter you read"
+  label: string;
+  title: string | null;
+  // Body excerpt or claim — already cleaned + truncated by caller
+  body: string | null;
+};
+
+export type ProposalAngle = {
+  line: string;
+  sourceCitations: number[];
+};
+
+export type ProposalResult = {
+  retrievalSummary: string;
+  platformGuess: 'newsletter' | 'linkedin' | 'unknown';
+  angles: ProposalAngle[];
+  outline: { beat: string }[];
+  followUpQuestion: string;
+};
+
+const PROPOSAL_MODEL =
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+
+const PROPOSAL_HIT_BODY_MAX = 600;
+
+const FOLLOW_UP_PALETTE = [
+  "What's the takeaway you want?",
+  "Who's this for?",
+  "What's the tension you're naming?",
+  "Is there an idea here you want to bring forward?",
+  'Newsletter or LinkedIn? Or just thinking?',
+];
+
+export async function generateProposal({
+  topic,
+  conversationSoFar,
+  platformHint,
+  voiceProfile,
+  retrieval,
+}: {
+  topic: string;
+  conversationSoFar?: string;
+  platformHint?: 'newsletter' | 'linkedin';
+  // Phase 15a will populate; 15b leaves undefined.
+  voiceProfile?: {
+    longform?: ProposalVoiceProfile;
+    linkedin?: ProposalVoiceProfile;
+  };
+  retrieval: ProposalRetrievalItem[];
+}): Promise<ProposalResult> {
+  const trimmedTopic = topic.slice(0, 1000);
+  const trimmedConvo = conversationSoFar?.slice(0, 4000);
+
+  // Group the retrieval items by bucket for the prompt. Each group is
+  // emitted as its own block so Claude can tell voice from knowledge at
+  // a glance — the boundary the spec's prompt-split is built around.
+  const longform = retrieval.filter((h) => h.bucket === 'voice_longform');
+  const shortform = retrieval.filter((h) => h.bucket === 'voice_shortform');
+  const knowledge = retrieval.filter((h) => h.bucket === 'knowledge');
+
+  function renderBlock(items: ProposalRetrievalItem[]): string {
+    if (items.length === 0) return '(empty)';
+    return items
+      .map((h) => {
+        const body = (h.body ?? '').slice(0, PROPOSAL_HIT_BODY_MAX).trim();
+        const head = h.title ? `${h.label}: "${h.title}"` : h.label;
+        return body.length > 0
+          ? `[${h.index}] (${head}) ${body}`
+          : `[${h.index}] (${head})`;
+      })
+      .join('
+
+');
+  }
+
+  // Voice profile block — empty until 15a ships. When present, this
+  // replaces the few-shot reliance with a clean schema Claude can read.
+  const voiceProfileBlock = (() => {
+    if (!voiceProfile) return '(no voice profile yet — read the voice bucket samples for how the user writes)';
+    const parts: string[] = [];
+    if (voiceProfile.longform) {
+      parts.push(
+        `LONGFORM voice:
+  summary: ${voiceProfile.longform.summary ?? '—'}
+  attributes: ${(voiceProfile.longform.attributes ?? []).join('; ') || '—'}
+  avoid: ${(voiceProfile.longform.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    if (voiceProfile.linkedin) {
+      parts.push(
+        `LINKEDIN voice:
+  summary: ${voiceProfile.linkedin.summary ?? '—'}
+  attributes: ${(voiceProfile.linkedin.attributes ?? []).join('; ') || '—'}
+  avoid: ${(voiceProfile.linkedin.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    return parts.length > 0 ? parts.join('
+
+') : '(profile present but empty)';
+  })();
+
+  const platformHintLine = platformHint
+    ? `The user already indicated this is a ${platformHint} piece. Don't ask again — set platformGuess accordingly.`
+    : 'If the topic shape clearly suggests newsletter (essay-length, multi-beat) or linkedin (single-thread, hooky), set platformGuess. Otherwise leave it "unknown" and ask the platform clarifying question as your follow-up.';
+
+  const sparseCorpusNote =
+    retrieval.length < 3
+      ? 'NOTE: the user does not have much in their space on this yet. Acknowledge that in retrievalSummary in one short clause; lean on what little did surface; do not invent connections.'
+      : '';
+
+  const conversationBlock = trimmedConvo
+    ? `
+
+<conversation_so_far>
+${trimmedConvo}
+</conversation_so_far>
+
+The user has already been sparring with you on this topic. Read the conversation. Your angles and follow-up question should advance the thinking from where it left off — not restart it.`
+    : '';
+
+  const outputSchema = z.object({
+    retrievalSummary: z
+      .string()
+      .min(0)
+      .max(400)
+      .describe(
+        "One or two sentences reflecting what's in the user's space on this topic. Direct, observational. Not a status report. Reads like a thinking-out-loud line. No 'I notice', no 'It seems', no 'Here's what I found'."
+      ),
+    platformGuess: z
+      .enum(['newsletter', 'linkedin', 'unknown'])
+      .describe(
+        'Newsletter for essay-shape topics; linkedin for single-thread / hooky topics; unknown if ambiguous and the user should be asked.'
+      ),
+    angles: z
+      .array(
+        z.object({
+          line: z
+            .string()
+            .min(1)
+            .max(220)
+            .describe('A one-line angle — a way into the topic. Specific, declarative. Not a question.'),
+          sourceCitations: z
+            .array(z.number().int().min(1))
+            .max(6)
+            .describe('Indices [n] from the retrieval blocks above whose framing fed this angle.'),
+        })
+      )
+      .min(2)
+      .max(4)
+      .describe('Three default. Two if the topic surfaces a clear two-direction tension. Four if open-ended.'),
+    outline: z
+      .array(
+        z.object({
+          beat: z
+            .string()
+            .min(1)
+            .max(220)
+            .describe(
+              'A single beat — section-shape for newsletter (one line summarizing the section); hooky-and-tight for linkedin (one beat = one move).'
+            ),
+        })
+      )
+      .min(3)
+      .max(5)
+      .describe('A working outline aligned to platformGuess. Tight, no padding.'),
+    followUpQuestion: z
+      .string()
+      .min(1)
+      .max(180)
+      .describe(
+        `One question to keep the thinking moving. Pick the one that fits the topic from this palette (or write a close variant): ${FOLLOW_UP_PALETTE.map((q) => `"${q}"`).join(', ')}. Don't ask all of them.`
+      ),
+  });
+
+  const prompt = `You are a sparring writing partner inside Thoughtbed — a private bed where someone matures their own ideas into writing. The user has just submitted a topic. Your job is the blank-page-to-clear-direction stretch: surface what's in their space on this, take a real swing at three angles, sketch an outline, and ask one question that keeps the thinking moving. You do NOT draft the body. You do NOT answer questions you weren't asked. You are not a coach.
+
+<topic>
+${trimmedTopic}
+</topic>${conversationBlock}
+
+The retrieval blocks below are split into voice and knowledge.
+  - VOICE LONGFORM is how the user writes essay-shape pieces (newsletter / vault).
+  - VOICE SHORTFORM is how the user writes LinkedIn-shape pieces — a different voice.
+  - KNOWLEDGE is what the user reads, not writes. Use these as references and angle-fuel. NEVER as voice samples.
+
+<voice_longform>
+${renderBlock(longform)}
+</voice_longform>
+
+<voice_shortform>
+${renderBlock(shortform)}
+</voice_shortform>
+
+<knowledge>
+${renderBlock(knowledge)}
+</knowledge>
+
+<voice_profile>
+${voiceProfileBlock}
+</voice_profile>
+
+${platformHintLine}
+${sparseCorpusNote}
+
+Voice rules. No "I notice that", no "It seems like", no "Great topic", no "Here's what I came up with", no preamble. No emoji. No tone-policing. No "Have you considered". Editorial restraint. When you cite an angle's source, the UI will render the citation; you don't need to write "based on your CSL issue X" in the angle line itself — keep the line tight, let sourceCitations do the work.
+
+Now produce the structured output.`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(PROPOSAL_MODEL as any),
+    schema: outputSchema,
+    prompt,
+    maxTokens: 1200,
+    temperature: 0.7,
+  });
+
+  return {
+    retrievalSummary: (object.retrievalSummary ?? '').trim(),
+    platformGuess: object.platformGuess ?? 'unknown',
+    angles: (object.angles ?? []).map((a) => ({
+      line: a.line.trim(),
+      sourceCitations: a.sourceCitations ?? [],
+    })),
+    outline: (object.outline ?? []).map((b) => ({
+      beat: b.beat.trim(),
+    })),
+    followUpQuestion: (object.followUpQuestion ?? '').trim(),
+  };
+}
