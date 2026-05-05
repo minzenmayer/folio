@@ -1233,3 +1233,16 @@ function UploadTab({
   );
 }
 
+// Read an ArrayBuffer into base64 in chunks. The naive
+// btoa(String.fromCharCode(...new Uint8Array(buffer))) blows the
+// stack on files over a few hundred KB; the chunked variant doesn't.
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return btoa(binary);
+}
