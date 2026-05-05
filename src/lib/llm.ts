@@ -514,3 +514,145 @@ Now produce the structured output.`;
     followUpQuestion: (object.followUpQuestion ?? '').trim(),
   };
 }
+
+
+// ─── Phase 15a · generateVoiceProfile — Voice ID build pipeline ─────
+//
+// 2026-05-05. profileVault (in src/lib/voice/profile-vault.ts) hands
+// this function a per-platform sample of representative pieces, and
+// gets back the Ghostbase-shape schema to persist into voice_profiles.
+//
+// One Haiku call per platform. Voice profiles are NOT cumulative —
+// each rebuild overwrites the prior auto fields (manual fields persist
+// in the schema and are merged at read time).
+//
+// The prompt is shaped slightly differently per platform: longform
+// piece samples can be long (several thousand chars) so the prompt
+// asks for sentence-rhythm + paragraph-shape patterns; linkedin is
+// shorter and the prompt asks for hook patterns + line breaks +
+// closer-shape. Same output schema; different framing.
+
+export type VoiceProfileSample = {
+  // 'newsletter_issue' | 'obsidian_note' | 'linkedin_post'
+  sourceKind: string;
+  title: string | null;
+  // Author-facing date — used in the prompt only as context, not
+  // sorted/weighted by Claude.
+  postedAt: Date | null;
+  // Already truncated to per-kind budget by the caller.
+  body: string;
+};
+
+export type VoiceProfileOutput = {
+  summary: string;
+  attributes: string[];
+  thingsToAvoid: string[];
+};
+
+const VOICE_PROFILE_MODEL =
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+
+// Longform attribute count caps. Longform tolerates more nuance; LinkedIn
+// is tighter — trying to extract 12 LinkedIn-voice attributes from 30
+// short posts produces filler, so the cap is lower.
+const LONGFORM_ATTR_TARGET = { min: 6, max: 12 };
+const LINKEDIN_ATTR_TARGET = { min: 4, max: 8 };
+const AVOID_TARGET = { min: 0, max: 6 };
+
+export async function generateVoiceProfile({
+  platform,
+  samples,
+}: {
+  platform: 'longform' | 'linkedin';
+  samples: VoiceProfileSample[];
+}): Promise<VoiceProfileOutput> {
+  if (samples.length === 0) {
+    // Return an empty-but-valid shape rather than throw — caller
+    // (profileVault) checks emptiness against the cold-start placeholder
+    // logic before persisting.
+    return { summary: '', attributes: [], thingsToAvoid: [] };
+  }
+
+  const attrTarget =
+    platform === 'longform' ? LONGFORM_ATTR_TARGET : LINKEDIN_ATTR_TARGET;
+
+  const sampleBlock = samples
+    .map((s, i) => {
+      const head = s.title
+        ? `[${i + 1}] ${labelForKind(s.sourceKind)}: "${s.title}"`
+        : `[${i + 1}] ${labelForKind(s.sourceKind)}`;
+      return `${head}\n${s.body.trim()}`;
+    })
+    .join('\n\n----\n\n');
+
+  const platformFraming =
+    platform === 'longform'
+      ? `These are samples of how the user writes longform pieces — newsletter issues and vault notes (essays, drafts, sustained arguments). Read them as a body of work, not isolated pieces. Look for sentence rhythm, paragraph shape, where they put pressure, what kinds of openings and closings they favor, characteristic transitions, recurring vocabulary that's actually theirs (not generic).`
+      : `These are samples of how the user writes for LinkedIn — short-form posts, often hooky, often single-thread. Voice runs different here than in longform. Look for hook patterns (the first line and how it sets up the rest), line break shape, where they land the takeaway, whether they end with a question or a call to action or a single-word punch, what kinds of moves they actually make on this surface (not what generic LinkedIn "best practice" says).`;
+
+  const outputSchema = z.object({
+    summary: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe(
+        'A single short paragraph summarizing how this person writes on this platform. Direct, observational, second-person ("you"). One paragraph, not bullet points. No "I notice", no "It seems", no preamble. About 60-100 words.'
+      ),
+    attributes: z
+      .array(z.string().min(1).max(160))
+      .min(attrTarget.min)
+      .max(attrTarget.max)
+      .describe(
+        `Concrete voice attributes — short declarative phrases. Each one a specific pattern you can point to in the samples. Examples (don\'t copy these, write fresh): "opens with a question more often than not", "uses em-dashes as breath, not commas", "closes essays with a one-line zinger", "names ideas before naming people". ${attrTarget.min}-${attrTarget.max} items.`
+      ),
+    thingsToAvoid: z
+      .array(z.string().min(1).max(160))
+      .min(AVOID_TARGET.min)
+      .max(AVOID_TARGET.max)
+      .describe(
+        'Words, phrases, or moves the user consistently does NOT make — taboos inferred from their absence in the samples. Examples (don\'t copy): "no exclamation marks", "never uses the word \'really\'", "doesn\'t open with \'I\'", "no marketing-speak verbs (unlock, leverage, supercharge)". 0-6 items. Only include when the absence is striking enough to be a real signal; don\'t pad.'
+      ),
+  });
+
+  const prompt = `You are profiling a writer's voice from samples of their own work. The output goes into a voice profile that an AI will read when imitating this person's voice. The profile must be sharp enough that a different AI reading it later can produce prose that sounds like THIS writer, not a generic version.
+
+${platformFraming}
+
+<samples>
+${sampleBlock}
+</samples>
+
+Voice rules for your output:
+  - Direct observational tone. Second-person ("you").
+  - No preamble, no "I notice", no "It seems", no "this writer".
+  - Don't summarize what they write ABOUT — describe HOW they write.
+  - Be specific. "Uses em-dashes" beats "punctuation-aware".
+  - Things-to-avoid: only include when the absence is a real signal. Don't pad.
+
+Now produce the structured output.`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(VOICE_PROFILE_MODEL as any),
+    schema: outputSchema,
+    prompt,
+    maxTokens: 1500,
+    temperature: 0.5,
+  });
+
+  return {
+    summary: (object.summary ?? '').trim(),
+    attributes: (object.attributes ?? []).map((a) => a.trim()).filter(Boolean),
+    thingsToAvoid: (object.thingsToAvoid ?? [])
+      .map((a) => a.trim())
+      .filter(Boolean),
+  };
+}
+
+function labelForKind(kind: string): string {
+  if (kind === 'newsletter_issue') return 'newsletter issue';
+  if (kind === 'obsidian_note') return 'vault note';
+  if (kind === 'linkedin_post') return 'linkedin post';
+  return kind;
+}
+
