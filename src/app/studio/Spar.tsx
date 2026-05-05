@@ -427,6 +427,15 @@ export function Spar() {
 
 // ─── Idle ─────────────────────────────────────
 
+const STARTER_PROMPTS: Array<{ label: string; prefix: string }> = [
+  { label: 'Write a newsletter about…', prefix: 'Write a newsletter about ' },
+  { label: 'Write a LinkedIn post about…', prefix: 'Write a LinkedIn post about ' },
+  { label: 'Write a sermon about…', prefix: 'Write a sermon about ' },
+  { label: 'Write a blog post about…', prefix: 'Write a blog post about ' },
+  { label: 'Write an email about…', prefix: 'Write an email about ' },
+  { label: 'Write more like my recent pieces', prefix: '' },
+];
+
 function IdleView({
   textareaRef,
   topic,
@@ -444,6 +453,31 @@ function IdleView({
   canSubmit: boolean;
   isPending: boolean;
 }) {
+  const onStarter = (prefix: string) => {
+    if (prefix.length === 0) {
+      // 'Write more like my recent pieces' — fire submit immediately
+      // with that as the topic; the partner reads it as an open prompt
+      // and pulls from recent corpus.
+      setTopic('Write more like my recent pieces');
+      // defer one tick so canSubmit picks up the new topic
+      setTimeout(() => {
+        const ta = textareaRef.current;
+        if (ta) ta.focus();
+      }, 0);
+      return;
+    }
+    setTopic(prefix);
+    setTimeout(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        // Cursor at end so the user types right where the prefix ends.
+        const len = prefix.length;
+        ta.setSelectionRange(len, len);
+      }
+    }, 0);
+  };
+
   return (
     <>
       <textarea
@@ -452,14 +486,13 @@ function IdleView({
         onChange={(e) => setTopic(e.target.value)}
         onKeyDown={onKeyDown}
         rows={4}
-        placeholder="What do you want to think about?"
+        placeholder="What would you like to write?"
         aria-label="Topic"
         className="w-full resize-none bg-transparent px-5 pt-5 pb-2 font-sans text-[16px] leading-[1.55] text-ink placeholder:text-tag focus:outline-none"
       />
       <div className="flex items-center gap-3 px-5 pb-4 pt-1">
         <p className="font-sans text-[12.5px] text-ink-soft flex-1 min-w-0">
-          Drop in a topic. The partner will pull from your space, take a
-          swing at angles, and ask one question to keep thinking.
+          ⌘+Enter to spar. Pick a starter below or write your own.
         </p>
         <button
           type="button"
@@ -469,6 +502,33 @@ function IdleView({
         >
           {isPending ? 'Thinking…' : 'Spar'}
         </button>
+      </div>
+
+      {/* Starter prompts — pre-fill the textarea so the user finishes
+          the topic in their own words. Click ≠ submit; user still
+          types the rest of the sentence. */}
+      <div className="border-t border-rule">
+        <ul className="divide-y divide-rule">
+          {STARTER_PROMPTS.map((p) => (
+            <li key={p.label}>
+              <button
+                type="button"
+                onClick={() => onStarter(p.prefix)}
+                className="w-full flex items-baseline justify-between gap-3 px-5 py-3 text-left hover:bg-paper-2 transition-colors group"
+              >
+                <span className="font-sans text-[14px] text-ink leading-[1.4]">
+                  {p.label}
+                </span>
+                <span
+                  className="font-mono text-[11px] text-tag group-hover:text-ink transition-colors"
+                  aria-hidden
+                >
+                  ↗
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     </>
   );

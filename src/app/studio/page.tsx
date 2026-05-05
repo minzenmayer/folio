@@ -87,14 +87,12 @@ export default async function StudioHome() {
       <div className="max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
         {/* Greeting */}
         <div className="mb-8">
-          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
-            Hello, {firstName}.
-          </h1>
-          <p className="font-sans text-[15.5px] leading-[1.55] text-ink-soft max-w-[58ch]">
-            {isEmpty
-              ? "Drop in a topic to think it through. The partner pulls from your space, takes a swing at angles, and asks one question to keep you moving."
-              : "What are you thinking about today? Drop in a topic and the partner will surface what's in your space."}
+          <p className="font-sans text-[16px] text-ink-soft mb-1">
+            Hello, {firstName}
           </p>
+          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink">
+            What can I help you with?
+          </h1>
         </div>
 
         {/* Composer (Phase 15b — sparring partner) */}
