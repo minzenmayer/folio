@@ -1,21 +1,17 @@
-// Thoughtbed · /studio/voice — Phase 15a (2026-05-05)
+// Thoughtbed · /studio/voice — Phase 15 (Voice ID UX rework, 2026-05-05)
 //
-// Single page; two platforms (longform / linkedin) toggled via a
-// segmented control. Three sections per platform:
-//   1. Voice profile — auto-derived (read-only) + manual additions
-//      (editable). Per-platform Rebuild button + last-built timestamp.
-//   2. Canonical pieces — list of source pieces with star toggles.
-//      Search box.
-//   3. Empty / cold-start state when no profile + thin corpus.
-//
-// See spec: ~/Desktop/Thoughtbed/phase15a_voice_id_spec.md
+// Server component. Loads the per-platform voice profile rows + the
+// training samples already saved for each platform. Hands them to the
+// VoiceClient. The training samples shape (5-sample-picker) replaced
+// the prior canonical-list shape — pickers and add/remove flows live
+// in VoiceClient + voice/actions.ts.
 
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db, voiceProfiles } from '@/db';
 import { requireUser } from '@/lib/auth';
-import { listCanonicalCandidates } from './actions';
+import { listTrainingSamples } from './actions';
 import { VoiceClient } from './VoiceClient';
 
 export const dynamic = 'force-dynamic';
@@ -25,13 +21,13 @@ export default async function VoicePage() {
   if (!clerkId) redirect('/sign-in');
   const user = await requireUser();
 
-  const [profileRows, longformList, linkedinList] = await Promise.all([
+  const [profileRows, longformSamples, linkedinSamples] = await Promise.all([
     db
       .select()
       .from(voiceProfiles)
       .where(eq(voiceProfiles.userId, user.id)),
-    listCanonicalCandidates({ platform: 'longform', limit: 200 }),
-    listCanonicalCandidates({ platform: 'linkedin', limit: 200 }),
+    listTrainingSamples({ platform: 'longform' }),
+    listTrainingSamples({ platform: 'linkedin' }),
   ]);
 
   const longformRow = profileRows.find((r) => r.platform === 'longform');
@@ -48,10 +44,9 @@ export default async function VoicePage() {
             Train your voice.
           </h1>
           <p className="font-sans text-[15.5px] leading-[1.55] text-ink-soft max-w-[58ch]">
-            Flag the pieces that sound most like you, let Claude profile
-            them, then patch the gaps with your own additions. The
-            composer reads this when it imitates your voice. Two profiles,
-            one per platform.
+            Pick up to five writing samples that sound most like you.
+            One Claude pass turns them into a voice profile the
+            composer reads. Two profiles, one per platform.
           </p>
         </div>
 
@@ -96,16 +91,8 @@ export default async function VoicePage() {
                 }
               : null
           }
-          longformCanonical={serializeCandidates(longformList.candidates)}
-          linkedinCanonical={serializeCandidates(linkedinList.candidates)}
-          longformTallies={{
-            totalEligible: longformList.totalEligible,
-            totalCanonical: longformList.totalCanonical,
-          }}
-          linkedinTallies={{
-            totalEligible: linkedinList.totalEligible,
-            totalCanonical: linkedinList.totalCanonical,
-          }}
+          longformSamples={longformSamples.samples}
+          linkedinSamples={linkedinSamples.samples}
         />
       </div>
     </section>
@@ -115,19 +102,4 @@ export default async function VoicePage() {
 function castStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.filter((x): x is string => typeof x === 'string');
-}
-
-function serializeCandidates(
-  cs: Awaited<
-    ReturnType<typeof listCanonicalCandidates>
-  >['candidates']
-) {
-  return cs.map((c) => ({
-    sourceKind: c.sourceKind,
-    id: c.id,
-    title: c.title,
-    snippet: c.snippet,
-    postedAt: c.postedAt ? c.postedAt.toISOString() : null,
-    isCanonical: c.isCanonical,
-  }));
 }
