@@ -36,10 +36,12 @@ import {
   useState,
   useTransition,
 } from 'react';
+import Link from 'next/link';
 import {
   composeNew,
   proposeFromTopic,
   commitProposal,
+  draftSection,
   type ProposeFromTopicResult,
   type ProposeAngle,
 } from './actions';
@@ -76,9 +78,23 @@ export function Spar() {
     'newsletter' | 'linkedin' | null
   >(null);
 
+  // Phase 15a section drafts. Keyed by beatIndex; cleared on Start
+  // over / new topic. Persisted into the draft only when the user
+  // hits "Open the page" — commitProposal accepts a sections map.
+  const [sections, setSections] = useState<Record<number, string>>({});
+  const [sectionPendingIndex, setSectionPendingIndex] = useState<
+    number | null
+  >(null);
+  const [sectionError, setSectionError] = useState<{
+    beatIndex: number;
+    reason: 'no_voice_profile' | 'invalid_input' | 'error';
+    message: string;
+  } | null>(null);
+
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isCommitting, startCommitTransition] = useTransition();
   const [isEscaping, startEscapeTransition] = useTransition();
+  const [, startDraftSectionTransition] = useTransition();
 
   const topicTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const responseTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -91,6 +107,12 @@ export function Spar() {
     }) => {
       setPhase('thinking');
       setErrorMessage(null);
+      // Outline shape can change between iterations; section indices
+      // would drift. Clear sections on every retrieval so they only
+      // ever pair with the current outline.
+      setSections({});
+      setSectionPendingIndex(null);
+      setSectionError(null);
       startSubmitTransition(async () => {
         try {
           const res = await proposeFromTopic({
@@ -169,6 +191,9 @@ export function Spar() {
     setResponse('');
     setErrorMessage(null);
     setPlatformOverride(null);
+    setSections({});
+    setSectionPendingIndex(null);
+    setSectionError(null);
     setTimeout(() => topicTextareaRef.current?.focus(), 0);
   }, [isSubmitting, isCommitting]);
 
@@ -224,6 +249,60 @@ export function Spar() {
     [handleResponseSubmit]
   );
 
+  const onDraftBeat = useCallback(
+    (beatIndex: number) => {
+      if (!proposal) return;
+      const platform: 'newsletter' | 'linkedin' =
+        platformOverride ??
+        (proposal.platformGuess === 'linkedin' ? 'linkedin' : 'newsletter');
+      setSectionPendingIndex(beatIndex);
+      setSectionError(null);
+      startDraftSectionTransition(async () => {
+        try {
+          const res: DraftSectionResult = await draftSection({
+            topic: proposal.topic,
+            outline: proposal.outline,
+            beatIndex,
+            platform,
+            conversationSoFar:
+              conversation.length > 0
+                ? renderConversation(conversation)
+                : undefined,
+          });
+          if (res.ok) {
+            setSections((prev) => ({ ...prev, [beatIndex]: res.prose }));
+          } else {
+            setSectionError({
+              beatIndex,
+              reason: res.reason,
+              message: res.message,
+            });
+          }
+        } catch (err) {
+          setSectionError({
+            beatIndex,
+            reason: 'error',
+            message: err instanceof Error ? err.message : 'draft failed',
+          });
+        } finally {
+          setSectionPendingIndex(null);
+        }
+      });
+    },
+    [proposal, platformOverride, conversation]
+  );
+
+  const onDismissSection = useCallback((beatIndex: number) => {
+    setSections((prev) => {
+      const next = { ...prev };
+      delete next[beatIndex];
+      return next;
+    });
+    setSectionError((prev) =>
+      prev?.beatIndex === beatIndex ? null : prev
+    );
+  }, []);
+
   const handleOpenPage = useCallback(() => {
     if (!proposal) return;
     const platform: 'newsletter' | 'linkedin' =
@@ -235,6 +314,9 @@ export function Spar() {
           topic: proposal.topic,
           outline: proposal.outline,
           platform,
+          // Phase 15a slice B3 — splice drafted sections under their
+          // H2 headers. commitProposal handles the empty-map case.
+          sections,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown';
@@ -245,7 +327,7 @@ export function Spar() {
         }
       }
     });
-  }, [proposal, platformOverride]);
+  }, [proposal, platformOverride, sections]);
 
   const handleEscapeHatch = useCallback(() => {
     // 'Just open a blank page →' — preserves the Sprint 14 self-pilot
@@ -305,6 +387,11 @@ export function Spar() {
           isCommitting={isCommitting}
           platformOverride={platformOverride}
           setPlatformOverride={setPlatformOverride}
+          sections={sections}
+          sectionPendingIndex={sectionPendingIndex}
+          sectionError={sectionError}
+          onDraftBeat={onDraftBeat}
+          onDismissSection={onDismissSection}
         />
       )}
 
@@ -436,6 +523,11 @@ function SparView({
   isCommitting,
   platformOverride,
   setPlatformOverride,
+  sections,
+  sectionPendingIndex,
+  sectionError,
+  onDraftBeat,
+  onDismissSection,
 }: {
   proposal: Extract<ProposeFromTopicResult, { ok: true }>;
   conversation: ConversationTurn[];
@@ -451,6 +543,13 @@ function SparView({
   isCommitting: boolean;
   platformOverride: 'newsletter' | 'linkedin' | null;
   setPlatformOverride: (p: 'newsletter' | 'linkedin' | null) => void;
+  sections: Record<number, string>;
+  sectionPendingIndex: number | null;
+  sectionError:
+    | { beatIndex: number; reason: 'no_voice_profile' | 'invalid_input' | 'error'; message: string }
+    | null;
+  onDraftBeat: (beatIndex: number) => void;
+  onDismissSection: (beatIndex: number) => void;
 }) {
   const platform: 'newsletter' | 'linkedin' =
     platformOverride ??
@@ -549,21 +648,29 @@ function SparView({
           <h3 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-3">
             Outline
           </h3>
-          <ol className="flex flex-col gap-1.5 list-none">
+          <ol className="flex flex-col gap-3 list-none">
             {proposal.outline.map((b, i) => (
-              <li
+              <BeatRow
                 key={i}
-                className="grid grid-cols-[24px_1fr] gap-2 items-baseline"
-              >
-                <span className="font-mono text-[10px] tracking-[0.04em] text-tag">
-                  {String(i + 1).padStart(2, '0')}
-                </span>
-                <span className="font-sans text-[14px] text-ink leading-[1.45]">
-                  {b.beat}
-                </span>
-              </li>
+                index={i}
+                beat={b.beat}
+                drafted={sections[i]}
+                isPending={sectionPendingIndex === i}
+                error={
+                  sectionError?.beatIndex === i ? sectionError : null
+                }
+                onDraft={() => onDraftBeat(i)}
+                onDismiss={() => onDismissSection(i)}
+                disableDraftButton={isThinking || isCommitting}
+              />
             ))}
           </ol>
+          {Object.keys(sections).length > 0 && (
+            <p className="mt-2 font-mono text-[10px] tracking-[0.04em] text-tag italic">
+              Drafted sections will land under their headings when you
+              open the page.
+            </p>
+          )}
         </div>
       )}
 
@@ -639,6 +746,111 @@ function SparView({
         </button>
       </div>
     </div>
+  );
+}
+
+// ─── Beat row (with optional drafted section) ─────
+
+function BeatRow({
+  index,
+  beat,
+  drafted,
+  isPending,
+  error,
+  onDraft,
+  onDismiss,
+  disableDraftButton,
+}: {
+  index: number;
+  beat: string;
+  drafted: string | undefined;
+  isPending: boolean;
+  error: { reason: 'no_voice_profile' | 'invalid_input' | 'error'; message: string } | null;
+  onDraft: () => void;
+  onDismiss: () => void;
+  disableDraftButton: boolean;
+}) {
+  return (
+    <li className="">
+      <div className="grid grid-cols-[24px_1fr_auto] gap-2 items-baseline">
+        <span className="font-mono text-[10px] tracking-[0.04em] text-tag pt-1">
+          {String(index + 1).padStart(2, '0')}
+        </span>
+        <span className="font-sans text-[14px] text-ink leading-[1.45]">
+          {beat}
+        </span>
+        {!drafted && !isPending && (
+          <button
+            type="button"
+            onClick={onDraft}
+            disabled={disableDraftButton}
+            className="font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-3 py-1 border border-rule hover:border-ink hover:bg-paper-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          >
+            Draft section
+          </button>
+        )}
+        {isPending && (
+          <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag whitespace-nowrap">
+            Drafting…
+          </span>
+        )}
+      </div>
+
+      {error && (
+        <div className="ml-[32px] mt-2 rounded-soft border border-rule bg-paper-2 px-3 py-2">
+          <p className="font-sans text-[12.5px] text-ink leading-[1.5]">
+            {error.message}
+          </p>
+          {error.reason === 'no_voice_profile' && (
+            <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5] mt-1">
+              <Link
+                href="/studio/voice"
+                className="underline underline-offset-2 hover:text-ink"
+              >
+                Build a voice profile →
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
+
+      {drafted && (
+        <div className="ml-[32px] mt-2 rounded-soft border border-rule bg-paper-2">
+          <div className="px-4 py-3 border-b border-rule flex items-baseline justify-between gap-3">
+            <p className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag">
+              Draft · in your voice
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onDraft}
+                disabled={disableDraftButton}
+                className="font-mono text-[9px] tracking-[0.16em] uppercase text-tag hover:text-ink transition-colors"
+              >
+                Redraft
+              </button>
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="font-mono text-[9px] tracking-[0.16em] uppercase text-tag hover:text-ink transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+          <div className="px-4 py-3">
+            {drafted.split(/\n\s*\n/).map((para, i) => (
+              <p
+                key={i}
+                className="font-sans text-[13.5px] text-ink leading-[1.6] mb-2 last:mb-0 whitespace-pre-wrap"
+              >
+                {para.trim()}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
