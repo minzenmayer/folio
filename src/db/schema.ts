@@ -842,6 +842,89 @@ export const extractedIdeas = pgTable(
 );
 
 // ────────────────────────────────────────────
+// VOICE — Phase 15a (2026-05-05)
+// Per-platform voice profile + canonical-piece flagging.
+// See drizzle/0013_voice_profiles.sql + spec at
+// ~/Desktop/Thoughtbed/phase15a_voice_id_spec.md.
+// ────────────────────────────────────────────
+export const voiceProfiles = pgTable(
+  'voice_profiles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    // 'longform' | 'linkedin' — see CHECK constraint below.
+    platform: text('platform').notNull(),
+
+    // Claude-derived (read-only in UI; rebuild overwrites).
+    summary: text('summary'),
+    attributesAuto: jsonb('attributes_auto').notNull().default([]),
+    thingsToAvoidAuto: jsonb('things_to_avoid_auto').notNull().default([]),
+
+    // User-authored (editable; persists across rebuilds).
+    attributesManual: jsonb('attributes_manual').notNull().default([]),
+    thingsToAvoidManual: jsonb('things_to_avoid_manual').notNull().default([]),
+
+    // Build provenance.
+    builtAt: timestamp('built_at', { withTimezone: true }),
+    builtFromIds: jsonb('built_from_ids').notNull().default([]),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    platformChk: check(
+      'voice_profiles_platform_chk',
+      sql`${table.platform} IN ('longform', 'linkedin')`
+    ),
+    userPlatformUniq: uniqueIndex('voice_profiles_user_platform_uniq').on(
+      table.userId,
+      table.platform
+    ),
+    userIdx: index('idx_voice_profiles_user').on(table.userId),
+  })
+);
+
+// Join table flagging which source pieces feed the profile build.
+// source_id is a soft FK — its real target depends on source_kind, so
+// no Drizzle .references() at this level. Cleanup of dangling rows is
+// inert (LEFT JOINs skip nulls; future maintenance sweep can prune).
+export const voiceCanonicalPieces = pgTable(
+  'voice_canonical_pieces',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sourceKind: text('source_kind').notNull(),
+    sourceId: uuid('source_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    pk: uniqueIndex('voice_canonical_pieces_pkey').on(
+      table.userId,
+      table.sourceKind,
+      table.sourceId
+    ),
+    sourceKindChk: check(
+      'voice_canonical_pieces_source_kind_chk',
+      sql`${table.sourceKind} IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')`
+    ),
+    userKindIdx: index('idx_voice_canonical_user_kind').on(
+      table.userId,
+      table.sourceKind
+    ),
+  })
+);
+
+// ────────────────────────────────────────────
 // Type exports for inference
 // ────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
@@ -858,6 +941,8 @@ export type ConnectorAccount = typeof connectorAccounts.$inferSelect;
 export type NewsletterIssue = typeof newsletterIssues.$inferSelect;
 export type ObsidianNote = typeof obsidianNotes.$inferSelect;
 export type ExtractedIdea = typeof extractedIdeas.$inferSelect;
+export type VoiceProfile = typeof voiceProfiles.$inferSelect;
+export type VoiceCanonicalPiece = typeof voiceCanonicalPieces.$inferSelect;
 
 export type NewUser = typeof users.$inferInsert;
 export type NewIdea = typeof ideas.$inferInsert;
