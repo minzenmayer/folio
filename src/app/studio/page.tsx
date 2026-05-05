@@ -10,7 +10,7 @@ import { db, captures, ideas, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
-import { Composer } from './Composer';
+import { Spar } from './Spar';
 import { BackfillButton } from './BackfillButton';
 
 function timeAgo(date: Date | string | null): string {
@@ -92,13 +92,13 @@ export default async function StudioHome() {
           </h1>
           <p className="font-sans text-[15.5px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {isEmpty
-              ? "Drop in a topic to get started. Newsletter is the default; switch modes if you're writing for LinkedIn, exploring ideas, or just want a blank page."
-              : 'What are you writing today? Pick a mode below, type your topic, and the page opens.'}
+              ? "Drop in a topic to think it through. The partner pulls from your space, takes a swing at angles, and asks one question to keep you moving."
+              : "What are you thinking about today? Drop in a topic and the partner will surface what's in your space."}
           </p>
         </div>
 
-        {/* Composer */}
-        <Composer initialMode="newsletter" />
+        {/* Composer (Phase 15b — sparring partner) */}
+        <Spar />
 
         {/* Recent drafts + recent ideas */}
         {(recentDrafts.length > 0 || recentIdeas.length > 0) && (
@@ -225,8 +225,9 @@ export default async function StudioHome() {
                   Write
                 </span>
                 <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
-                  <span className="text-ink font-medium">The page</span> — sit
-                  down to write, and ripe ideas surface as you type.
+                  <span className="text-ink font-medium">The partner</span> —
+                  drop in a topic, spar through angles, then open a page
+                  with the outline already in place.
                 </p>
               </li>
             </ul>
