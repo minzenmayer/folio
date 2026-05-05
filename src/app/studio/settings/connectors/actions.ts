@@ -109,6 +109,26 @@ export type ActionResult =
   | { ok: true; message?: string }
   | { ok: false; reason: string; message: string };
 
+// Phase 14a (2026-05-04): triageGmailMessage extends the ok shape with
+//   · extractedCount — for the post-promote toast ("3 ideas pulled").
+//   · suggestion     — when the user has hit the streak threshold for
+//                      this sender's domain (3+ same-action triages in
+//                      30 days and no rule already exists).
+export type TriageSuggestion = {
+  type: 'block_domain' | 'allow_domain';
+  target: string;
+  count: number;
+};
+
+export type TriageGmailResult =
+  | {
+      ok: true;
+      message?: string;
+      extractedCount?: number;
+      suggestion?: TriageSuggestion;
+    }
+  | { ok: false; reason: string; message: string };
+
 // ─── connectBeehiiv ──────────────────────────────────────
 
 const connectSchema = z.object({
@@ -1236,7 +1256,7 @@ const triageSchema = z.object({
   snoozeDays: z.number().int().min(1).max(365).optional(),
 });
 
-export async function triageGmailMessage(input: unknown): Promise<ActionResult> {
+export async function triageGmailMessage(input: unknown): Promise<TriageGmailResult> {
   const parsed = triageSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -1275,6 +1295,26 @@ export async function triageGmailMessage(input: unknown): Promise<ActionResult> 
       })
       .where(eq(gmailMessages.id, messageId));
     revalidatePath('/studio/insights');
+    // Phase 14a: after a dismiss, check for streak to surface a
+    // 'block this domain' suggestion in the row's response.
+    const { getDomainTriageStreakIfNoRule } = await import(
+      '@/lib/gmail/sender-rules'
+    );
+    const streak = await getDomainTriageStreakIfNoRule({
+      userId: user.id,
+      fromAddress: row.fromAddress,
+      triagedStatus: 'dismissed',
+    });
+    if (streak) {
+      return {
+        ok: true,
+        suggestion: {
+          type: 'block_domain',
+          target: streak.domain,
+          count: streak.count,
+        },
+      };
+    }
     return { ok: true };
   }
 
@@ -1324,8 +1364,9 @@ export async function triageGmailMessage(input: unknown): Promise<ActionResult> 
     .where(eq(gmailMessages.id, messageId));
 
   // Idea extraction. Best-effort — promote succeeds even if extraction fails.
+  let extractedCount = 0;
   try {
-    await extractIdeasFromGmailMessage({
+    extractedCount = await extractIdeasFromGmailMessage({
       userId: user.id,
       messageId: row.id,
       title: row.subject ?? '(no subject)',
@@ -1339,7 +1380,28 @@ export async function triageGmailMessage(input: unknown): Promise<ActionResult> 
 
   revalidatePath('/studio/insights');
   revalidatePath('/studio/knowledge');
-  return { ok: true };
+
+  // Phase 14a: post-promote, check for an allowlist suggestion.
+  const { getDomainTriageStreakIfNoRule } = await import(
+    '@/lib/gmail/sender-rules'
+  );
+  const streak = await getDomainTriageStreakIfNoRule({
+    userId: user.id,
+    fromAddress: row.fromAddress,
+    triagedStatus: 'promoted',
+  });
+  if (streak) {
+    return {
+      ok: true,
+      extractedCount,
+      suggestion: {
+        type: 'allow_domain',
+        target: streak.domain,
+        count: streak.count,
+      },
+    };
+  }
+  return { ok: true, extractedCount };
 }
 
 // ─── GMAIL sender rules (Phase 14a, 2026-05-04) ──────────────────────
