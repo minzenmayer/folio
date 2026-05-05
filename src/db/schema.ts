@@ -43,6 +43,10 @@ export const ideas = pgTable(
     // identity
     title: text('title').notNull(),
     essence: text('essence'),
+    // Phase 14b — Garden redesign (2026-05-04). Long-form text that
+    // grows over time as merges append to it. Distinct from essence,
+    // which is the one-paragraph hand-curated line.
+    body: text('body'),
     posedAs: text('posed_as'),
     tags: text('tags').array().default(sql`'{}'`),
     themes: text('themes').array().default(sql`'{}'`),

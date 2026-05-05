@@ -10,6 +10,7 @@
 
 -- ── ideas ─────────────────────────────────────────────────────────────
 ALTER TABLE ideas
+  ADD COLUMN IF NOT EXISTS body                    text,
   ADD COLUMN IF NOT EXISTS temperature             text         NOT NULL DEFAULT 'warm',
   ADD COLUMN IF NOT EXISTS temperature_updated_at  timestamptz  NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS digest_surface_count    integer      NOT NULL DEFAULT 0,
