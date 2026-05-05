@@ -806,3 +806,150 @@ function renderVoiceProfileBlock(profile: ProposalVoiceProfile): string {
   }
   return parts.length > 0 ? parts.join('\n\n') : '(empty profile)';
 }
+
+
+// ─── Phase 16 · generateBeatDraft — Per-piece micro-drafting ────────
+//
+// 2026-05-05. Replaces draftSection as the primary per-beat drafting
+// path. Difference from generateSectionDraft: the user supplies an
+// intent ("what do you want to say in this beat?") and the LLM drafts
+// 2-4 sentences that pay off that intent in the user's voice. Output
+// is intentionally short — closer to a paragraph than a full section.
+//
+// Voice profile fallback is SOFTER than draftSection. If the profile
+// is missing for this platform, the function still drafts — leaning
+// on retrieval-only voice cues + the user's stated intent. The
+// rationale: when the user has typed an intent, they've already given
+// the LLM enough material to draft something useful; a hard-block
+// would feel punitive. draftSection's no-intent path keeps the
+// hard-block (see generateSectionDraft above).
+
+export type BeatDraftResult = {
+  prose: string;
+};
+
+const BEAT_DRAFT_MODEL =
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+
+const BEAT_DRAFT_HIT_BODY_MAX = 500;
+
+export async function generateBeatDraft({
+  topic,
+  beatIndex,
+  outline,
+  platform,
+  voiceProfile,
+  retrieval,
+  conversationSoFar,
+  userIntent,
+}: {
+  topic: string;
+  beatIndex: number;
+  outline: { beat: string }[];
+  platform: 'newsletter' | 'linkedin';
+  // Optional in v2 — soft fallback when missing.
+  voiceProfile?: ProposalVoiceProfile;
+  retrieval: ProposalRetrievalItem[];
+  conversationSoFar?: string;
+  // The user's stated intent for this beat. The whole point of v2.
+  userIntent: string;
+}): Promise<BeatDraftResult> {
+  const beat = outline[beatIndex]?.beat?.trim();
+  if (!beat) {
+    throw new Error(`generateBeatDraft: beat at index ${beatIndex} is empty`);
+  }
+
+  const trimmedTopic = topic.slice(0, 1000);
+  const trimmedConvo = conversationSoFar?.slice(0, 4000);
+  const trimmedIntent = userIntent.slice(0, 1500).trim();
+
+  const outlineFrame = outline
+    .map((b, i) => {
+      const marker = i === beatIndex ? '→ THIS BEAT' : '  ';
+      return `${marker} ${String(i + 1).padStart(2, '0')} ${b.beat}`;
+    })
+    .join('\n');
+
+  const retrievalBlock =
+    retrieval.length === 0
+      ? '(no retrieval items — write from intent + outline only)'
+      : retrieval
+          .slice(0, 6)
+          .map((h) => {
+            const body = (h.body ?? '').slice(0, BEAT_DRAFT_HIT_BODY_MAX).trim();
+            const head = h.title ? `${h.label}: "${h.title}"` : h.label;
+            return body.length > 0 ? `(${head}) ${body}` : `(${head})`;
+          })
+          .join('\n\n');
+
+  // Phase 16: shorter than generateSectionDraft. The intent is "say
+  // this one thing" — 2-4 sentences, not a full section.
+  const platformLength =
+    platform === 'newsletter'
+      ? '50-90 words. 2-4 sentences. One coherent paragraph that pays off the user\'s stated intent.'
+      : '30-60 words. 2-3 short lines, LinkedIn-style — short rhythm, line breaks for emphasis. Not a paragraph block.';
+
+  const voiceBlock = voiceProfile
+    ? renderVoiceProfileBlock(voiceProfile)
+    : '(no voice profile — lean on retrieval and the user\'s stated intent for voice cues. Avoid generic AI cadences. Avoid "I notice", "It seems", "Great question", preamble of any kind.)';
+
+  const conversationFrame = trimmedConvo
+    ? `\n\n<conversation_so_far>\n${trimmedConvo}\n</conversation_so_far>\n`
+    : '';
+
+  const outputSchema = z.object({
+    prose: z
+      .string()
+      .min(15)
+      .max(1200)
+      .describe(
+        'The drafted prose for this single beat — paying off the user\'s stated intent in their voice. No headings, no bullet markers. Plain paragraph(s) only.'
+      ),
+  });
+
+  const prompt = `You are drafting one short section of a piece. The user has TOLD you what they want to say here. Your job: write 2-4 sentences that pay off that intent in their voice. NOT the whole piece. NOT a summary. Just this one beat.
+
+<topic>
+${trimmedTopic}
+</topic>
+
+<outline>
+${outlineFrame}
+</outline>${conversationFrame}
+
+<voice_profile>
+${voiceBlock}
+</voice_profile>
+
+<retrieval>
+${retrievalBlock}
+</retrieval>
+
+<user_intent_for_this_beat>
+${trimmedIntent}
+</user_intent_for_this_beat>
+
+Voice rules:
+  - The user's stated intent is the FRAME. Don't ignore it. Don't drift into a different point. Honor what they said they want to say.
+  - Write IN the user's voice (per the voice profile). If the profile flags words/moves to avoid, do not use them.
+  - No preamble. No "Here's a draft." Open with the prose itself.
+  - No headings, no markdown structure. Plain paragraphs only.
+  - ${platformLength}
+  - Don't pad. Don't recap the outline. Just this beat.
+  - If retrieval surfaces the user's own past framing on this, lean on it — but in their voice, not as a quote.
+
+Now produce the structured output.`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(BEAT_DRAFT_MODEL as any),
+    schema: outputSchema,
+    prompt,
+    maxTokens: 600,
+    temperature: 0.7,
+  });
+
+  return {
+    prose: (object.prose ?? '').trim(),
+  };
+}

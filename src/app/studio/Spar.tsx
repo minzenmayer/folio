@@ -43,9 +43,11 @@ import {
   proposeFromTopic,
   commitProposal,
   draftSection,
+  draftBeat,
   type ProposeFromTopicResult,
   type ProposeAngle,
   type DraftSectionResult,
+  type DraftBeatResult,
 } from './actions';
 
 type Phase = 'idle' | 'thinking' | 'spar' | 'error';
@@ -92,6 +94,18 @@ export function Spar() {
     reason: 'no_voice_profile' | 'invalid_input' | 'error';
     message: string;
   } | null>(null);
+  // Phase 16 (2026-05-05): per-beat user intent + UI expansion state
+  // for the new "what do you want to say here?" input. Anchored beats
+  // (separate from drafted) are tracked in a Set; clicking a beat pill
+  // body anchors / unanchors. usedFallbackVoice flags beats whose
+  // draft was generated without a voice profile so the UI can show a
+  // soft "Build voice profile to refine →" note.
+  const [beatIntents, setBeatIntents] = useState<Record<number, string>>({});
+  const [beatExpanded, setBeatExpanded] = useState<Set<number>>(new Set());
+  const [anchoredBeats, setAnchoredBeats] = useState<Set<number>>(new Set());
+  const [beatFallbackVoice, setBeatFallbackVoice] = useState<Set<number>>(
+    new Set()
+  );
 
   const [isSubmitting, startSubmitTransition] = useTransition();
   const [isCommitting, startCommitTransition] = useTransition();
@@ -115,6 +129,13 @@ export function Spar() {
       setSections({});
       setSectionPendingIndex(null);
       setSectionError(null);
+      // Phase 16: same drift problem applies to beat intents +
+      // expansion + anchors + voice-fallback flags. Clear on each
+      // retrieval so they only pair with the current outline.
+      setBeatIntents({});
+      setBeatExpanded(new Set());
+      setAnchoredBeats(new Set());
+      setBeatFallbackVoice(new Set());
       startSubmitTransition(async () => {
         try {
           const res = await proposeFromTopic({
@@ -201,6 +222,10 @@ export function Spar() {
     setSections({});
     setSectionPendingIndex(null);
     setSectionError(null);
+    setBeatIntents({});
+    setBeatExpanded(new Set());
+    setAnchoredBeats(new Set());
+    setBeatFallbackVoice(new Set());
     setTimeout(() => topicTextareaRef.current?.focus(), 0);
   }, [isSubmitting, isCommitting]);
 
@@ -308,7 +333,111 @@ export function Spar() {
     setSectionError((prev) =>
       prev?.beatIndex === beatIndex ? null : prev
     );
+    setBeatFallbackVoice((prev) => {
+      if (!prev.has(beatIndex)) return prev;
+      const next = new Set(prev);
+      next.delete(beatIndex);
+      return next;
+    });
   }, []);
+
+  // Phase 16 — beat anchoring is independent of drafting. Click a
+  // beat pill body to anchor / unanchor; anchored beats survive
+  // regenerateOutline (slice 4) and render filled in the plan ribbon
+  // (slice 6). For now the state lives only in client memory + carries
+  // into commitProposal (slice 5) via the data-tb-beat-status attr.
+  const toggleAnchorBeat = useCallback((beatIndex: number) => {
+    setAnchoredBeats((prev) => {
+      const next = new Set(prev);
+      if (next.has(beatIndex)) next.delete(beatIndex);
+      else next.add(beatIndex);
+      return next;
+    });
+  }, []);
+
+  // Expand / collapse the per-beat intent input ("what do you want
+  // to say here?"). Expanding a beat does NOT auto-anchor it — the
+  // user can still anchor via the pill body click — but it DOES
+  // pre-create an empty intent string so the controlled textarea
+  // stays controlled even before the first keystroke.
+  const toggleExpandBeat = useCallback((beatIndex: number) => {
+    setBeatExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(beatIndex)) next.delete(beatIndex);
+      else next.add(beatIndex);
+      return next;
+    });
+    setBeatIntents((prev) =>
+      prev[beatIndex] !== undefined ? prev : { ...prev, [beatIndex]: '' }
+    );
+  }, []);
+
+  const setBeatIntent = useCallback((beatIndex: number, text: string) => {
+    setBeatIntents((prev) => ({ ...prev, [beatIndex]: text }));
+  }, []);
+
+  // Phase 16 primary draft path. Submit fires draftBeat with the user's
+  // stated intent. On success, splice prose into sections; on soft
+  // fallback (no voice profile), flag the beat so the UI can render
+  // the "Build voice profile to refine →" note.
+  const onSubmitBeatIntent = useCallback(
+    (beatIndex: number) => {
+      if (!proposal) return;
+      const intent = (beatIntents[beatIndex] ?? '').trim();
+      if (intent.length === 0) return;
+      const platform: 'newsletter' | 'linkedin' =
+        platformOverride ??
+        (proposal.platformGuess === 'linkedin' ? 'linkedin' : 'newsletter');
+      setSectionPendingIndex(beatIndex);
+      setSectionError(null);
+      startDraftSectionTransition(async () => {
+        try {
+          const res: DraftBeatResult = await draftBeat({
+            topic: proposal.topic,
+            outline: proposal.outline,
+            beatIndex,
+            platform,
+            userIntent: intent,
+            conversationSoFar:
+              conversation.length > 0
+                ? renderConversation(conversation)
+                : undefined,
+          });
+          if (res.ok) {
+            setSections((prev) => ({ ...prev, [beatIndex]: res.prose }));
+            setBeatExpanded((prev) => {
+              const next = new Set(prev);
+              next.delete(beatIndex);
+              return next;
+            });
+            setBeatFallbackVoice((prev) => {
+              const next = new Set(prev);
+              if (res.usedFallbackVoice) next.add(beatIndex);
+              else next.delete(beatIndex);
+              return next;
+            });
+          } else {
+            setSectionError({
+              beatIndex,
+              // draftBeat doesn't surface no_voice_profile (soft fallback);
+              // collapse its reasons onto the existing union.
+              reason: res.reason === 'invalid_input' ? 'invalid_input' : 'error',
+              message: res.message,
+            });
+          }
+        } catch (err) {
+          setSectionError({
+            beatIndex,
+            reason: 'error',
+            message: err instanceof Error ? err.message : 'draft failed',
+          });
+        } finally {
+          setSectionPendingIndex(null);
+        }
+      });
+    },
+    [proposal, platformOverride, conversation, beatIntents]
+  );
 
   const handleOpenPage = useCallback(() => {
     if (!proposal) return;
@@ -408,6 +537,14 @@ export function Spar() {
           sectionError={sectionError}
           onDraftBeat={onDraftBeat}
           onDismissSection={onDismissSection}
+          beatIntents={beatIntents}
+          setBeatIntent={setBeatIntent}
+          beatExpanded={beatExpanded}
+          toggleExpandBeat={toggleExpandBeat}
+          anchoredBeats={anchoredBeats}
+          toggleAnchorBeat={toggleAnchorBeat}
+          beatFallbackVoice={beatFallbackVoice}
+          onSubmitBeatIntent={onSubmitBeatIntent}
         />
       )}
 
@@ -661,6 +798,14 @@ function SparView({
   sectionError,
   onDraftBeat,
   onDismissSection,
+  beatIntents,
+  setBeatIntent,
+  beatExpanded,
+  toggleExpandBeat,
+  anchoredBeats,
+  toggleAnchorBeat,
+  beatFallbackVoice,
+  onSubmitBeatIntent,
 }: {
   proposal: Extract<ProposeFromTopicResult, { ok: true }>;
   conversation: ConversationTurn[];
@@ -684,6 +829,14 @@ function SparView({
     | null;
   onDraftBeat: (beatIndex: number) => void;
   onDismissSection: (beatIndex: number) => void;
+  beatIntents: Record<number, string>;
+  setBeatIntent: (beatIndex: number, text: string) => void;
+  beatExpanded: Set<number>;
+  toggleExpandBeat: (beatIndex: number) => void;
+  anchoredBeats: Set<number>;
+  toggleAnchorBeat: (beatIndex: number) => void;
+  beatFallbackVoice: Set<number>;
+  onSubmitBeatIntent: (beatIndex: number) => void;
 }) {
   const platform: 'newsletter' | 'linkedin' =
     platformOverride ??
@@ -825,9 +978,17 @@ function SparView({
                 error={
                   sectionError?.beatIndex === i ? sectionError : null
                 }
-                onDraft={() => onDraftBeat(i)}
+                onDraftAnyway={() => onDraftBeat(i)}
                 onDismiss={() => onDismissSection(i)}
                 disableDraftButton={isThinking || isCommitting}
+                isAnchored={anchoredBeats.has(i)}
+                onToggleAnchor={() => toggleAnchorBeat(i)}
+                isExpanded={beatExpanded.has(i)}
+                onToggleExpand={() => toggleExpandBeat(i)}
+                intentText={beatIntents[i] ?? ''}
+                onIntentChange={(t) => setBeatIntent(i, t)}
+                onSubmitIntent={() => onSubmitBeatIntent(i)}
+                usedFallbackVoice={beatFallbackVoice.has(i)}
               />
             ))}
           </ol>
@@ -921,7 +1082,27 @@ function SparView({
   );
 }
 
-// ─── Beat row (with optional drafted section) ─────
+// ─── Beat row — Phase 16 pill shape with intent input + drafted card ──
+//
+// 2026-05-05. Replaces the Phase 15a Draft-section button with a
+// pill-shaped beat row + per-piece micro-drafting flow:
+//
+//   [01] beat text                           ⚑   →
+//        ↑ click body to anchor              ↑   ↑
+//        (anchored beats survive rethink)    │   click chevron to
+//                                             │   open intent input
+//                                             green dot when anchored
+//
+// Expanded state slides an inline textarea under the beat:
+//   "What do you want to say here?"
+//   [Submit] [Draft anyway] [Cancel]
+//
+// Drafted state shows a card under the pill with Refine / Redraft /
+// Dismiss controls. Refine reopens the intent input pre-filled.
+//
+// "Draft anyway" is the legacy no-intent path (calls draftSection
+// via onDraftAnyway), retained for users who want a take without
+// supplying intent first.
 
 function BeatRow({
   index,
@@ -929,36 +1110,96 @@ function BeatRow({
   drafted,
   isPending,
   error,
-  onDraft,
+  onDraftAnyway,
   onDismiss,
   disableDraftButton,
+  isAnchored,
+  onToggleAnchor,
+  isExpanded,
+  onToggleExpand,
+  intentText,
+  onIntentChange,
+  onSubmitIntent,
+  usedFallbackVoice,
 }: {
   index: number;
   beat: string;
   drafted: string | undefined;
   isPending: boolean;
   error: { reason: 'no_voice_profile' | 'invalid_input' | 'error'; message: string } | null;
-  onDraft: () => void;
+  onDraftAnyway: () => void;
   onDismiss: () => void;
   disableDraftButton: boolean;
+  isAnchored: boolean;
+  onToggleAnchor: () => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  intentText: string;
+  onIntentChange: (t: string) => void;
+  onSubmitIntent: () => void;
+  usedFallbackVoice: boolean;
 }) {
+  const intentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const trimmedIntent = intentText.trim();
+
+  // Focus the textarea on expand. Mirrors the pattern used elsewhere
+  // in the file (response textarea in SparView). Defer past paint so
+  // the element is mounted.
+  useEffect(() => {
+    if (!isExpanded) return;
+    const id = setTimeout(() => intentTextareaRef.current?.focus(), 30);
+    return () => clearTimeout(id);
+  }, [isExpanded]);
+
+  const onIntentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (trimmedIntent.length > 0 && !disableDraftButton) onSubmitIntent();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      onToggleExpand();
+    }
+  };
+
+  // Anchored / pending fill states. Anchored uses the same green
+  // palette as anchored angle pills so the visual language matches.
+  const pillFill = isAnchored
+    ? 'bg-[#dcfce7] border-[#15803d]'
+    : isExpanded
+      ? 'bg-paper-2 border-rule-strong'
+      : 'bg-paper border-rule hover:border-ink/40 hover:bg-paper-2';
+
   return (
-    <li className="">
-      <div className="grid grid-cols-[24px_1fr_auto] gap-2 items-baseline">
-        <span className="font-mono text-[10px] tracking-[0.04em] text-tag pt-1">
+    <li>
+      {/* Pill row — body click toggles anchor; chevron toggles intent input. */}
+      <div
+        className={`grid grid-cols-[28px_1fr_auto] gap-2 items-center rounded-soft border transition-colors ${pillFill} px-3 py-2`}
+      >
+        <span className="font-mono text-[10px] tracking-[0.04em] text-tag font-medium">
           {String(index + 1).padStart(2, '0')}
         </span>
-        <span className="font-sans text-[14px] text-ink leading-[1.45]">
+
+        <button
+          type="button"
+          onClick={onToggleAnchor}
+          aria-pressed={isAnchored}
+          disabled={disableDraftButton}
+          className="text-left font-sans text-[14px] text-ink leading-[1.45] truncate disabled:cursor-not-allowed"
+          title={isAnchored ? 'Click to unanchor' : 'Click to anchor this beat'}
+        >
           {beat}
-        </span>
+        </button>
+
         {!drafted && !isPending && (
           <button
             type="button"
-            onClick={onDraft}
+            onClick={onToggleExpand}
             disabled={disableDraftButton}
-            className="font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-3 py-1 border border-rule hover:border-ink hover:bg-paper-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+            aria-expanded={isExpanded}
+            aria-label={isExpanded ? 'Close intent input' : 'Open intent input'}
+            className="font-mono text-[12px] text-tag hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-6 h-6 flex items-center justify-center"
           >
-            Draft section
+            {isExpanded ? '×' : '→'}
           </button>
         )}
         {isPending && (
@@ -966,7 +1207,62 @@ function BeatRow({
             Drafting…
           </span>
         )}
+        {drafted && !isPending && (
+          <span
+            className="font-mono text-[12px] text-[#15803d]"
+            aria-label="Drafted"
+            title="Drafted"
+          >
+            ✓
+          </span>
+        )}
       </div>
+
+      {/* Intent input — slides under the beat when expanded. */}
+      {isExpanded && !drafted && (
+        <div className="ml-[32px] mt-2 rounded-soft bg-paper-2 border border-rule px-3 py-2">
+          <p className="font-sans text-[12.5px] text-ink leading-[1.4] mb-1.5 font-medium">
+            What do you want to say here?
+          </p>
+          <textarea
+            ref={intentTextareaRef}
+            value={intentText}
+            onChange={(e) => onIntentChange(e.target.value)}
+            onKeyDown={onIntentKeyDown}
+            rows={2}
+            placeholder="The point you want this beat to make…"
+            aria-label="Intent for this beat"
+            disabled={isPending || disableDraftButton}
+            className="w-full resize-none bg-transparent font-sans text-[13px] leading-[1.5] text-ink placeholder:text-tag focus:outline-none disabled:opacity-60"
+          />
+          <div className="flex items-center justify-between mt-1 gap-3">
+            <p className="font-mono text-[10px] tracking-[0.04em] text-tag">
+              ⌘+Enter
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onDraftAnyway}
+                disabled={disableDraftButton || isPending}
+                title="Draft without supplying intent (uses voice profile only)"
+                className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag hover:text-ink disabled:opacity-50 transition-colors"
+              >
+                Draft anyway
+              </button>
+              <button
+                type="button"
+                onClick={onSubmitIntent}
+                disabled={
+                  trimmedIntent.length === 0 || disableDraftButton || isPending
+                }
+                className="font-mono text-[10px] tracking-[0.16em] uppercase rounded-soft px-3 py-1 bg-ink text-bg hover:bg-ink-soft disabled:bg-rule disabled:text-tag disabled:cursor-not-allowed transition-colors"
+              >
+                {isPending ? 'Drafting…' : 'Submit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="ml-[32px] mt-2 rounded-soft border border-rule bg-paper-2 px-3 py-2">
@@ -995,8 +1291,18 @@ function BeatRow({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={onDraft}
+                onClick={onToggleExpand}
                 disabled={disableDraftButton}
+                title="Reopen intent input to refine"
+                className="font-mono text-[9px] tracking-[0.16em] uppercase text-tag hover:text-ink transition-colors"
+              >
+                Refine
+              </button>
+              <button
+                type="button"
+                onClick={onDraftAnyway}
+                disabled={disableDraftButton}
+                title="Regenerate without intent"
                 className="font-mono text-[9px] tracking-[0.16em] uppercase text-tag hover:text-ink transition-colors"
               >
                 Redraft
@@ -1019,6 +1325,12 @@ function BeatRow({
                 {para.trim()}
               </p>
             ))}
+            {usedFallbackVoice && (
+              <p className="font-sans text-[12px] text-tag leading-[1.5] mt-2 italic">
+                No voice profile yet — drafted from retrieval +
+                intent. <Link href="/studio/voice" className="underline underline-offset-2 hover:text-ink">Build voice profile to refine →</Link>
+              </p>
+            )}
           </div>
         </div>
       )}

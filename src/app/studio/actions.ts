@@ -80,6 +80,7 @@ import {
   generateReflection,
   generateProposal,
   generateSectionDraft,
+  generateBeatDraft,
   type ReflectionVoiceMode,
   type ProposalRetrievalItem,
   type ProposalResult,
@@ -1561,6 +1562,124 @@ export async function draftSection(
     };
   } catch (err) {
     console.error('[draftSection] generateSectionDraft failed', err);
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'draft failed',
+    };
+  }
+}
+
+// ─── draftBeat — Phase 16 · per-piece micro-drafting ─────────────────
+//
+// 2026-05-05. New primary path for the Spar's per-beat drafting.
+// Difference from draftSection: the user has typed an INTENT for the
+// beat ("what do you want to say here?") and we draft 2-4 sentences
+// that pay off that intent, in their voice. draftSection (no-intent)
+// stays available as a secondary "Draft anyway" affordance for users
+// who want a take without supplying intent first.
+//
+// Voice profile fallback is SOFTER than draftSection. Missing voice
+// profile is not a hard-block here — the user has already provided
+// useful framing through their intent, so the function leans on
+// retrieval voice cues + the intent and proceeds. The action returns
+// ok:true with a flag so the UI can still surface "build a voice
+// profile to make this sound more like you" as a soft note.
+
+const draftBeatSchema = z.object({
+  topic: z.string().min(1).max(2000),
+  outline: z
+    .array(z.object({ beat: z.string().min(1).max(800) }))
+    .min(1)
+    .max(8),
+  beatIndex: z.number().int().min(0).max(7),
+  platform: z.enum(['newsletter', 'linkedin']),
+  userIntent: z.string().min(1).max(1500),
+  conversationSoFar: z.string().max(8000).optional(),
+});
+
+export type DraftBeatResult =
+  | {
+      ok: true;
+      beatIndex: number;
+      prose: string;
+      // Soft signal — true when no voice profile existed for the
+      // platform and we used retrieval-only voice cues. UI shows a
+      // small "Build voice profile to refine →" note.
+      usedFallbackVoice: boolean;
+    }
+  | {
+      ok: false;
+      reason: 'invalid_input' | 'error';
+      message: string;
+    };
+
+export async function draftBeat(input: unknown): Promise<DraftBeatResult> {
+  let parsed: z.infer<typeof draftBeatSchema>;
+  try {
+    parsed = draftBeatSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+
+  // Voice profile is optional in v2's beat-drafting path. Missing
+  // profile flips the soft-fallback flag; we still draft.
+  const profileBundle = await getVoiceProfile(user.id);
+  const platformProfile =
+    parsed.platform === 'linkedin'
+      ? profileBundle.linkedin
+      : profileBundle.longform;
+  const usedFallbackVoice = !platformProfile;
+
+  // Per-beat retrieval — same pattern as draftSection. Beat text is
+  // narrower than the topic, so the retrieval lands closer to what
+  // the user said they want to say.
+  const beat = parsed.outline[parsed.beatIndex]?.beat ?? parsed.topic;
+  let hits: SimilarHit[] = [];
+  try {
+    hits = await findSimilar({
+      text: `${beat}\n${parsed.userIntent}`,
+      kinds: [...SIMILAR_KINDS],
+      limit: 6,
+    });
+  } catch (err) {
+    console.warn('[draftBeat] findSimilar failed', err);
+    hits = [];
+  }
+
+  const retrievalItems: ProposalRetrievalItem[] = hits.map((h, i) => ({
+    index: i + 1,
+    bucket: bucket({ kind: h.kind, sourceKind: h.sourceKind ?? null }),
+    label: labelForHit(h),
+    title: h.title,
+    body: bodyForHit(h),
+  }));
+
+  try {
+    const result = await generateBeatDraft({
+      topic: parsed.topic,
+      beatIndex: parsed.beatIndex,
+      outline: parsed.outline,
+      platform: parsed.platform,
+      voiceProfile: platformProfile,
+      retrieval: retrievalItems,
+      conversationSoFar: parsed.conversationSoFar,
+      userIntent: parsed.userIntent,
+    });
+    return {
+      ok: true,
+      beatIndex: parsed.beatIndex,
+      prose: result.prose,
+      usedFallbackVoice,
+    };
+  } catch (err) {
+    console.error('[draftBeat] generateBeatDraft failed', err);
     return {
       ok: false,
       reason: 'error',
