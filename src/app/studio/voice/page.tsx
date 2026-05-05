@@ -12,7 +12,7 @@
 
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, voiceProfiles } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { listCanonicalCandidates } from './actions';

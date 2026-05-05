@@ -44,6 +44,7 @@ import {
   draftSection,
   type ProposeFromTopicResult,
   type ProposeAngle,
+  type DraftSectionResult,
 } from './actions';
 
 type Phase = 'idle' | 'thinking' | 'spar' | 'error';

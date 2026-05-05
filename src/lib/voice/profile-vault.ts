@@ -16,7 +16,7 @@
 //
 // Spec: ~/Desktop/Thoughtbed/phase15a_voice_id_spec.md
 
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import {
   db,
   newsletterIssues,

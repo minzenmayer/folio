@@ -18,7 +18,7 @@
 
 'use server';
 
-import { eq, and, desc, sql, ilike, or } from 'drizzle-orm';
+import { eq, and, desc, ilike, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import {
@@ -203,10 +203,12 @@ export async function listCanonicalCandidates(
   const user = await requireUser();
   const parsed = listCandidatesSchema.parse(input);
   const platformKinds = sourceKindsForPlatform(parsed.platform);
+  // platformKinds is a narrower readonly tuple per platform; k is the
+  // full source-kind enum. Widen the array's element type for .includes
+  // so TS doesn't reject the cross-union compare.
+  const platformKindStrs = platformKinds as readonly string[];
   const wantedKinds = parsed.sourceKind
-    ? ([parsed.sourceKind] as const).filter((k) =>
-        platformKinds.includes(k)
-      )
+    ? ([parsed.sourceKind] as const).filter((k) => platformKindStrs.includes(k))
     : platformKinds;
 
   if (wantedKinds.length === 0) {
@@ -338,7 +340,7 @@ export async function listCanonicalCandidates(
 
   // Tallies for the page header.
   const platformCanonicalIds = canonicalRows.filter((r) =>
-    platformKinds.includes(r.sourceKind as typeof platformKinds[number])
+    platformKindStrs.includes(r.sourceKind)
   ).length;
 
   return {
