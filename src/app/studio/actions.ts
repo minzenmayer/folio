@@ -1582,9 +1582,12 @@ export async function draftSection(
 //     right voice). Linkedin still gets section H2s in 15b — body-only
 //     fast-path is the escape-hatch composeNew path, not this one.
 //
-// No section-draft button in 15b (Option 2 from the build prompt) so
-// no per-beat prose to splice in. When 15a + section-drafts ship, the
-// signature gains an optional sections map and beats get filled in.
+// Phase 15a slice B3 (2026-05-05): commitProposal now accepts an
+// optional sections map keyed by beat index — drafted prose under
+// each beat's H2 header in the new draft. The Spar surface
+// passes this map when the user has hit "Draft section" on one or
+// more beats. Empty/missing entries fall back to an empty paragraph
+// (the existing 15b behavior).
 
 const commitProposalSchema = z.object({
   topic: z.string().min(1).max(2000),
@@ -1593,14 +1596,47 @@ const commitProposalSchema = z.object({
     .min(0)
     .max(8),
   platform: z.enum(['newsletter', 'linkedin']).default('newsletter'),
+  // Phase 15a slice B3: sections keyed by beat index → prose. Optional;
+  // empty / missing entries fall through to the empty-paragraph
+  // placeholder (the original 15b behavior). Stringly-typed keys
+  // because z.record requires string keys; we coerce to int at the
+  // splice site.
+  sections: z.record(z.string(), z.string().max(8000)).optional(),
 });
 
 export async function commitProposal(input: unknown) {
   const user = await requireUser();
-  const { topic, outline, platform } = commitProposalSchema.parse(input);
+  const { topic, outline, platform, sections } =
+    commitProposalSchema.parse(input);
 
   const trimmedTopic = topic.trim().slice(0, 280);
   const beats = outline.map((b) => b.beat.trim()).filter((b) => b.length > 0);
+
+  // Resolve drafted prose per beat. The Spar surface's beat indices
+  // are 0-based and align with `outline` (server received a copy). We
+  // splice prose into proseByBeat[i] only when `outline[i].beat`
+  // survived the trim+filter above and the user actually drafted it.
+  const proseByOriginalIndex: Record<number, string> = {};
+  if (sections) {
+    for (const [k, v] of Object.entries(sections)) {
+      const idx = Number.parseInt(k, 10);
+      if (Number.isInteger(idx) && idx >= 0 && idx < outline.length) {
+        const trimmed = (v ?? '').trim();
+        if (trimmed.length > 0) proseByOriginalIndex[idx] = trimmed;
+      }
+    }
+  }
+  // Build a parallel array of prose aligned to the post-filter `beats`.
+  // Skip-the-empty-beat filter above means we have to rebuild the
+  // mapping in lockstep — for each original outline index, only
+  // include the prose if the matching beat survived.
+  const beatsWithProse: Array<{ beat: string; prose?: string }> = [];
+  for (let i = 0; i < outline.length; i++) {
+    const beatText = outline[i].beat.trim();
+    if (beatText.length === 0) continue;
+    const prose = proseByOriginalIndex[i];
+    beatsWithProse.push({ beat: beatText, prose });
+  }
 
   // Build a Tiptap doc:
   //   newsletter → H1 = topic, H2 per beat with an empty paragraph below
@@ -1610,10 +1646,13 @@ export async function commitProposal(input: unknown) {
   let initialDoc: { type: 'doc'; content: Array<Record<string, unknown>> };
   if (platform === 'linkedin') {
     const content: Array<Record<string, unknown>> = [];
-    if (beats.length > 0) {
+    const linkedinBeats = beatsWithProse.map((b) => b.beat);
+    const draftedItems = beatsWithProse.filter((b) => b.prose);
+    if (linkedinBeats.length > 0 && draftedItems.length === 0) {
+      // No drafted prose — keep the bullet outline scaffold.
       content.push({
         type: 'bulletList',
-        content: beats.map((b) => ({
+        content: linkedinBeats.map((b) => ({
           type: 'listItem',
           content: [
             {
@@ -1623,6 +1662,32 @@ export async function commitProposal(input: unknown) {
           ],
         })),
       });
+    } else if (draftedItems.length > 0) {
+      // At least one beat drafted — render prose for drafted beats
+      // and a one-line placeholder for un-drafted ones, so the user
+      // walks into a body that's substantially ready to refine.
+      for (const item of beatsWithProse) {
+        if (item.prose) {
+          const paragraphs = item.prose
+            .split(/\n\s*\n/)
+            .map((p) => p.trim())
+            .filter((p) => p.length > 0);
+          for (const para of paragraphs) {
+            content.push({
+              type: 'paragraph',
+              content: [{ type: 'text', text: para }],
+            });
+          }
+        } else {
+          // Un-drafted beat → keep it as a paragraph cue, italicized
+          // through plain text (Tiptap will render as plain). User
+          // will rewrite or delete.
+          content.push({
+            type: 'paragraph',
+            content: [{ type: 'text', text: \`[\${item.beat}]\` }],
+          });
+        }
+      }
     }
     content.push({ type: 'paragraph' });
     initialDoc = { type: 'doc', content };
@@ -1634,15 +1699,31 @@ export async function commitProposal(input: unknown) {
         content: [{ type: 'text', text: trimmedTopic }],
       },
     ];
-    for (const b of beats) {
+    for (const item of beatsWithProse) {
       content.push({
         type: 'heading',
         attrs: { level: 2 },
-        content: [{ type: 'text', text: b }],
+        content: [{ type: 'text', text: item.beat }],
       });
-      content.push({ type: 'paragraph' });
+      if (item.prose) {
+        // Split drafted prose on blank lines into separate paragraphs
+        // so Tiptap renders the structure correctly. Single line
+        // breaks stay inline within a paragraph.
+        const paragraphs = item.prose
+          .split(/\n\s*\n/)
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0);
+        for (const para of paragraphs) {
+          content.push({
+            type: 'paragraph',
+            content: [{ type: 'text', text: para }],
+          });
+        }
+      } else {
+        content.push({ type: 'paragraph' });
+      }
     }
-    if (beats.length === 0) content.push({ type: 'paragraph' });
+    if (beatsWithProse.length === 0) content.push({ type: 'paragraph' });
     initialDoc = { type: 'doc', content };
   }
 
