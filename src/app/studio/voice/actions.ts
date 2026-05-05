@@ -460,7 +460,7 @@ export async function uploadTrainingFile(
 
   // Cap check (mirrors addTrainingSample's logic).
   const [{ count }] = await db
-    .select({ count: sql<number>\`count(*)::int\` })
+    .select({ count: sql<number>`count(*)::int` })
     .from(voiceTrainingSamples)
     .where(
       and(
@@ -472,7 +472,7 @@ export async function uploadTrainingFile(
     return {
       ok: false,
       reason: 'cap_reached',
-      message: \`Already at the \${MAX_SAMPLES}-sample cap for this platform. Remove one first.\`,
+      message: `Already at the ${MAX_SAMPLES}-sample cap for this platform. Remove one first.`,
     };
   }
 
