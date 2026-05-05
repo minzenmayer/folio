@@ -23,6 +23,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useEditorContext } from './EditorContext';
 
 type BeatPill = {
@@ -100,6 +101,20 @@ export function PlanRibbon() {
           </li>
         ))}
       </ul>
+      {/* Phase 16 slice 8 polish: Replan affordance. Links back to
+          /studio so the user can start a fresh spar without losing
+          the editor (browser back / new tab keeps the draft alive).
+          Seeding the spar from the draft's anchors is a future-phase
+          improvement; v2 ships with the link only. */}
+      <div className="mt-3 pt-3 border-t border-rule">
+        <Link
+          href="/studio"
+          className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors"
+          title="Open the spar to rethink the plan"
+        >
+          ↻ Replan
+        </Link>
+      </div>
     </aside>
   );
 }

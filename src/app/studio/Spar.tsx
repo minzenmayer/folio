@@ -523,13 +523,33 @@ export function Spar() {
             conversation.length > 0 ? renderConversation(conversation) : undefined,
         });
         if (res.ok) {
+          // Phase 16 slice 8 polish: attempt to re-anchor beats whose
+          // text came back the same (or near-same) after regenerate.
+          // The LLM pin asks for verbatim/near-verbatim, so an exact
+          // or normalized-equal match is the "anchor survived" signal.
+          // Anything that drifted out gets dropped from anchoredBeats
+          // and the user can re-anchor what they want from the new
+          // outline.
+          const norm = (t: string) =>
+            t.trim().toLowerCase().replace(/\s+/g, ' ');
+          const anchoredNormalized = new Set(
+            anchoredText.map((t) => norm(t))
+          );
+          const reAnchored = new Set<number>();
+          res.outline.forEach((b, i) => {
+            if (anchoredNormalized.has(norm(b.beat))) reAnchored.add(i);
+          });
+
           setProposal((prev) =>
             prev ? { ...prev, outline: res.outline } : prev
           );
+          // Drafted prose is keyed by index; index drift means we
+          // can't safely keep prose. Clear sections + per-beat state
+          // but preserve the recovered anchor flags.
           setSections({});
           setBeatIntents({});
           setBeatExpanded(new Set());
-          setAnchoredBeats(new Set());
+          setAnchoredBeats(reAnchored);
           setBeatFallbackVoice(new Set());
           setSectionPendingIndex(null);
           setSectionError(null);
