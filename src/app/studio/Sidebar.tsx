@@ -62,20 +62,14 @@ const NAV_ITEMS: Array<{
   },
   {
     label: 'Garden',
-    subtitle: "ideas you've planted",
-    // The route stays /studio/ideas (DB tables, server actions, etc.
-    // unchanged). Sidebar label is "Garden" to match the brand.
-    href: '/studio/ideas',
-    matches: (p) => p.startsWith('/studio/ideas'),
-  },
-  {
-    // Sprint 15 Wave 4 / Phase 7: browse view for extracted_ideas (the
-    // curated layer extractIdeas() pulls out of newsletters + vault
-    // notes during sync). Garden = hand-authored ideas. Insights =
-    // claims the system found in your sources.
-    label: 'Insights',
-    subtitle: 'claims from your sources',
-    href: '/studio/insights',
+    subtitle: "ideas you're growing",
+    // Phase 14b (2026-05-04): unified Garden absorbs the old Insights
+    // surface. Old /studio/ideas + /studio/insights routes 301 here.
+    href: '/studio/garden',
+    matches: (p) =>
+      p.startsWith('/studio/garden') ||
+      p.startsWith('/studio/ideas') ||
+      p.startsWith('/studio/insights'),
   },
   {
     label: 'Knowledge',
