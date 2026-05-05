@@ -427,14 +427,37 @@ export function Spar() {
 
 // ─── Idle ─────────────────────────────────────
 
-const STARTER_PROMPTS: Array<{ label: string; prefix: string }> = [
-  { label: 'Write a newsletter about…', prefix: 'Write a newsletter about ' },
-  { label: 'Write a LinkedIn post about…', prefix: 'Write a LinkedIn post about ' },
-  { label: 'Write a sermon about…', prefix: 'Write a sermon about ' },
-  { label: 'Write a blog post about…', prefix: 'Write a blog post about ' },
-  { label: 'Write an email about…', prefix: 'Write an email about ' },
-  { label: 'Write more like my recent pieces', prefix: '' },
-];
+type StarterMode = 'writing' | 'ideas' | 'research';
+
+const STARTERS_BY_MODE: Record<
+  StarterMode,
+  Array<{ label: string; prefix: string }>
+> = {
+  writing: [
+    { label: 'Write a newsletter about…', prefix: 'Write a newsletter about ' },
+    { label: 'Write a LinkedIn post about…', prefix: 'Write a LinkedIn post about ' },
+    { label: 'Write a sermon about…', prefix: 'Write a sermon about ' },
+    { label: 'Write a blog post about…', prefix: 'Write a blog post about ' },
+    { label: 'Write an email about…', prefix: 'Write an email about ' },
+    { label: 'Write more like my recent pieces', prefix: 'Write more like my recent pieces' },
+  ],
+  ideas: [
+    { label: 'Help me brainstorm new content angles', prefix: 'Help me brainstorm new content angles on ' },
+    { label: 'Search my space for some new ideas', prefix: 'Search my space for new ideas on ' },
+    { label: 'What topics haven\'t I covered yet?', prefix: "What topics haven\'t I covered yet around " },
+  ],
+  research: [
+    { label: 'Help me explore a topic before I write about it', prefix: 'Help me explore the topic of ' },
+    { label: 'What can you pull from my knowledge on…', prefix: 'What can you pull from my knowledge on ' },
+    { label: 'Help me find a fresh angle on…', prefix: 'Help me find a fresh angle on ' },
+  ],
+};
+
+const MODE_LABELS: Record<StarterMode, string> = {
+  writing: 'Writing',
+  ideas: 'Ideas',
+  research: 'Research',
+};
 
 function IdleView({
   textareaRef,
@@ -453,19 +476,9 @@ function IdleView({
   canSubmit: boolean;
   isPending: boolean;
 }) {
+  const [mode, setMode] = useState<StarterMode>('writing');
+
   const onStarter = (prefix: string) => {
-    if (prefix.length === 0) {
-      // 'Write more like my recent pieces' — fire submit immediately
-      // with that as the topic; the partner reads it as an open prompt
-      // and pulls from recent corpus.
-      setTopic('Write more like my recent pieces');
-      // defer one tick so canSubmit picks up the new topic
-      setTimeout(() => {
-        const ta = textareaRef.current;
-        if (ta) ta.focus();
-      }, 0);
-      return;
-    }
     setTopic(prefix);
     setTimeout(() => {
       const ta = textareaRef.current;
@@ -477,6 +490,8 @@ function IdleView({
       }
     }, 0);
   };
+
+  const starters = STARTERS_BY_MODE[mode];
 
   return (
     <>
@@ -490,26 +505,54 @@ function IdleView({
         aria-label="Topic"
         className="w-full resize-none bg-transparent px-5 pt-5 pb-2 font-sans text-[16px] leading-[1.55] text-ink placeholder:text-tag focus:outline-none"
       />
-      <div className="flex items-center gap-3 px-5 pb-4 pt-1">
-        <p className="font-sans text-[12.5px] text-ink-soft flex-1 min-w-0">
-          ⌘+Enter to spar. Pick a starter below or write your own.
-        </p>
+
+      {/* Mode chips + arrow send button */}
+      <div className="flex items-center gap-2 px-5 pb-4 pt-1">
+        <div role="tablist" aria-label="Starter mode" className="flex items-center gap-1.5 flex-1 min-w-0">
+          {(Object.keys(STARTERS_BY_MODE) as StarterMode[]).map((m) => {
+            const selected = m === mode;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setMode(m)}
+                className={`font-sans text-[12.5px] rounded-soft px-3 py-1.5 transition-colors ${
+                  selected
+                    ? 'bg-ink text-bg'
+                    : 'bg-transparent text-tag hover:text-ink hover:bg-paper-2'
+                }`}
+              >
+                {MODE_LABELS[m]}
+              </button>
+            );
+          })}
+        </div>
         <button
           type="button"
           onClick={onSubmit}
           disabled={!canSubmit}
-          className="font-mono text-[11px] tracking-[0.18em] uppercase font-medium rounded-soft px-4 py-2 bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors"
+          aria-label={isPending ? 'Thinking' : 'Send'}
+          className="w-9 h-9 rounded-full flex items-center justify-center bg-ink text-bg hover:bg-ink-soft disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed transition-colors shrink-0"
         >
-          {isPending ? 'Thinking…' : 'Spar'}
+          {isPending ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin" aria-hidden>
+              <path d="M21 12a9 9 0 1 1-6.2-8.55" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+          )}
         </button>
       </div>
 
-      {/* Starter prompts — pre-fill the textarea so the user finishes
-          the topic in their own words. Click ≠ submit; user still
-          types the rest of the sentence. */}
+      {/* Starter list per active mode */}
       <div className="border-t border-rule">
         <ul className="divide-y divide-rule">
-          {STARTER_PROMPTS.map((p) => (
+          {starters.map((p) => (
             <li key={p.label}>
               <button
                 type="button"
