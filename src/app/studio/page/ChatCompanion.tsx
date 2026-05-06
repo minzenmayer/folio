@@ -59,21 +59,31 @@ type Status =
 // rendered inline. The auto-feed (Status above) lives BELOW the
 // turn log — those are the system's running observations from your
 // editor; the turn log is anything the user explicitly asked for.
+// Phase 22 slice 7 (2026-05-06): static thinking trace shown in
+// a 'Worked for X.Xs ↗' expandable header. Each line is a step
+// the assistant ran. Static breadcrumb v1; no live streaming.
+type ThinkingTrace = {
+  durationMs: number;
+  lines: string[];
+};
+
 type ChatTurn =
   | { id: string; kind: 'user'; text: string }
-  | { id: string; kind: 'thoughtbed'; text: string }
+  | { id: string; kind: 'thoughtbed'; text: string; trace?: ThinkingTrace }
   | { id: string; kind: 'tool'; label: string; body: string }
   | {
       id: string;
       kind: 'related';
       query: string;
       hits: SimilarHit[];
+      trace?: ThinkingTrace;
     }
   | {
       id: string;
       kind: 'originality';
       basedOnChars: number;
       matches: SimilarHit[];
+      trace?: ThinkingTrace;
     }
   | {
       // Phase 22 slice 4 (2026-05-06): an artifact preview turn
@@ -93,6 +103,7 @@ type ChatTurn =
       kind: 'options';
       heading: string;
       options: { label: string; body: string }[];
+      trace?: ThinkingTrace;
     };
 
 // Phase 21 slice 8 (2026-05-06): supported slash commands.
@@ -294,6 +305,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
           kind: 'thoughtbed',
           text: 'Searching your Garden…',
         });
+        const startedAt = Date.now();
         try {
           const hits = await findSimilar({
             text: queryText,
@@ -306,6 +318,14 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
             kind: 'related',
             query: queryText.slice(0, 80),
             hits,
+            trace: {
+              durationMs: Date.now() - startedAt,
+              lines: [
+                `Embedded query (${queryText.length} chars).`,
+                `Searched ${SIMILAR_KINDS.length} retrieval kinds across your space.`,
+                `Returned the top ${hits.length} by similarity.`,
+              ],
+            },
           });
         } catch (err) {
           const message =
@@ -339,6 +359,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
               ? `Reading what you have. Drafting hook options for ${PLATFORM_LABEL[platform]}…`
               : `Reading what you have. Drafting closer options for ${PLATFORM_LABEL[platform]}…`,
         });
+        const hookStartedAt = Date.now();
         try {
           const result =
             cmd === '/hook'
@@ -360,6 +381,14 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
                 ? `${result.options.length} hook options`
                 : `${result.options.length} closer options`,
             options: result.options,
+            trace: {
+              durationMs: Date.now() - hookStartedAt,
+              lines: [
+                `Loaded the ${PLATFORM_LABEL[platform]} skill (rhetorical patterns + voice rules).`,
+                `Read draft (${compositeDraft.length} chars).`,
+                `Generated ${result.options.length} options. Each labeled with a rhetorical pattern.`,
+              ],
+            },
           });
         } catch (err) {
           const message =
@@ -394,6 +423,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
           kind: 'thoughtbed',
           text: 'Checking against your published archive…',
         });
+        const origStartedAt = Date.now();
         try {
           const result = await originalityCheck({ text: queryText });
           if (!result.ok) {
@@ -409,6 +439,14 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
             kind: 'originality',
             basedOnChars: result.basedOnChars,
             matches: result.matches,
+            trace: {
+              durationMs: Date.now() - origStartedAt,
+              lines: [
+                `Embedded check text (${result.basedOnChars} chars).`,
+                'Searched your published archive (newsletter + LinkedIn).',
+                `Threshold: 0.65 cosine. ${result.matches.length} crossed it.`,
+              ],
+            },
           });
         } catch (err) {
           const message =
@@ -879,6 +917,38 @@ function sourceLabel(hit: SimilarHit): string {
   }
 }
 
+// Phase 22 slice 7 (2026-05-06): expandable thinking trace
+// header. Reads 'Worked for X.Xs ↗' / '↘' depending on state.
+// Click to expand; lines render as a small mono breadcrumb list.
+function ThinkingTraceHeader({ trace }: { trace: ThinkingTrace }) {
+  const [open, setOpen] = useState(false);
+  const seconds = (trace.durationMs / 1000).toFixed(1);
+  return (
+    <div className="pl-7 -mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors flex items-center gap-1"
+      >
+        Worked for {seconds}s {open ? '↘' : '↗'}
+      </button>
+      {open && (
+        <ul className="mt-1.5 ml-3 flex flex-col gap-0.5">
+          {trace.lines.map((line, i) => (
+            <li
+              key={i}
+              className="font-mono text-[9.5px] text-tag/80 leading-[1.5]"
+            >
+              · {line}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Phase 21 slice 8 (2026-05-06): turn renderer. Switches on the
 // turn kind. User turns get a small 'You' bubble; thoughtbed turns
 // reuse the existing ThoughtbedTurn frame; tool results render
@@ -944,7 +1014,12 @@ function TurnView({
   }
 
   if (turn.kind === 'options') {
-    return <OptionsTurn turn={turn} />;
+    return (
+      <>
+        {turn.trace && <ThinkingTraceHeader trace={turn.trace} />}
+        <OptionsTurn turn={turn} />
+      </>
+    );
   }
 
   if (turn.kind === 'artifact-preview') {
@@ -954,6 +1029,7 @@ function TurnView({
   if (turn.kind === 'originality') {
     return (
       <>
+        {turn.trace && <ThinkingTraceHeader trace={turn.trace} />}
         <ThoughtbedTurn>
           <p className="font-sans text-[12.5px] text-ink-soft leading-[1.55] m-0">
             {turn.matches.length === 0
@@ -982,6 +1058,7 @@ function TurnView({
   // related — embedded card list under a Thoughtbed turn
   return (
     <>
+      {turn.trace && <ThinkingTraceHeader trace={turn.trace} />}
       <ThoughtbedTurn>
         <p className="font-sans text-[12.5px] text-ink-soft leading-[1.55] m-0">
           {turn.hits.length === 0
