@@ -35,47 +35,78 @@ export default async function StudioHome() {
   const clerk = await currentUser();
   const firstName = clerk?.firstName || user.name?.split(' ')[0] || 'there';
 
-  const [counts] = await db
-    .select({
-      inbox: sql<number>`(
-        SELECT COUNT(*) FROM ${captures}
-        WHERE ${captures.userId} = ${user.id}
-        AND ${captures.status} = 'inbox'
-      )`,
-      ideaCount: sql<number>`(
-        SELECT COUNT(*) FROM ${ideas}
-        WHERE ${ideas.userId} = ${user.id}
-      )`,
-      draftCount: sql<number>`(
-        SELECT COUNT(*) FROM ${drafts}
-        WHERE ${drafts.userId} = ${user.id}
-      )`,
-    })
-    .from(captures)
-    .limit(1);
+  // Each query in its own try/catch with a safe fallback. If any
+  // single load fails (transient DB hiccup, schema drift, anything),
+  // the page still renders with that section degraded instead of
+  // taking down the whole composer.
+  let counts:
+    | { inbox: number; ideaCount: number; draftCount: number }
+    | undefined;
+  try {
+    const rows = await db
+      .select({
+        inbox: sql<number>`(
+          SELECT COUNT(*) FROM ${captures}
+          WHERE ${captures.userId} = ${user.id}
+          AND ${captures.status} = 'inbox'
+        )`,
+        ideaCount: sql<number>`(
+          SELECT COUNT(*) FROM ${ideas}
+          WHERE ${ideas.userId} = ${user.id}
+        )`,
+        draftCount: sql<number>`(
+          SELECT COUNT(*) FROM ${drafts}
+          WHERE ${drafts.userId} = ${user.id}
+        )`,
+      })
+      .from(captures)
+      .limit(1);
+    counts = rows[0];
+  } catch (err) {
+    console.warn('[studio/page] counts query failed', err);
+  }
 
-  const recentDrafts = await db
-    .select({
-      id: drafts.id,
-      title: drafts.title,
-      updatedAt: drafts.updatedAt,
-    })
-    .from(drafts)
-    .where(eq(drafts.userId, user.id))
-    .orderBy(desc(drafts.updatedAt))
-    .limit(5);
+  let recentDrafts: Array<{
+    id: string;
+    title: string | null;
+    updatedAt: Date | null;
+  }> = [];
+  try {
+    recentDrafts = await db
+      .select({
+        id: drafts.id,
+        title: drafts.title,
+        updatedAt: drafts.updatedAt,
+      })
+      .from(drafts)
+      .where(eq(drafts.userId, user.id))
+      .orderBy(desc(drafts.updatedAt))
+      .limit(5);
+  } catch (err) {
+    console.warn('[studio/page] recentDrafts query failed', err);
+  }
 
-  const recentIdeas = await db
-    .select({
-      id: ideas.id,
-      title: ideas.title,
-      maturity: ideas.maturity,
-      lastVisitedAt: ideas.lastVisitedAt,
-    })
-    .from(ideas)
-    .where(eq(ideas.userId, user.id))
-    .orderBy(desc(ideas.lastVisitedAt))
-    .limit(5);
+  let recentIdeas: Array<{
+    id: string;
+    title: string;
+    maturity: string;
+    lastVisitedAt: Date | null;
+  }> = [];
+  try {
+    recentIdeas = await db
+      .select({
+        id: ideas.id,
+        title: ideas.title,
+        maturity: ideas.maturity,
+        lastVisitedAt: ideas.lastVisitedAt,
+      })
+      .from(ideas)
+      .where(eq(ideas.userId, user.id))
+      .orderBy(desc(ideas.lastVisitedAt))
+      .limit(5);
+  } catch (err) {
+    console.warn('[studio/page] recentIdeas query failed', err);
+  }
 
   const inboxCount = Number(counts?.inbox ?? 0);
   const ideaCount = Number(counts?.ideaCount ?? 0);
