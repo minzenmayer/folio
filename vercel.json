@@ -16,10 +16,6 @@
     {
       "path": "/api/cron/gmail-sync",
       "schedule": "30 9 * * *"
-    },
-    {
-      "path": "/api/cron/garden-digest",
-      "schedule": "0 4 * * *"
     }
   ]
 }

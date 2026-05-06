@@ -59,8 +59,19 @@ export default async function GardenPage({
   const user = await requireUser();
   const sp = (await searchParams) ?? {};
 
-  // Read or compute today's digest.
-  let digest = await readTodaysDigest(user.id);
+  // Phase 19.x speed-up (2026-05-06): parallel-load today's digest +
+  // the full Garden items in one round-trip. They're independent —
+  // digest only feeds the GardenDigest hydration step below. If
+  // digest is missing, we compute it after the parallel load.
+  const [digestRead, allItemsInitial] = await Promise.all([
+    readTodaysDigest(user.id),
+    listGardenItems(user.id, {
+      sort: 'ripeness',
+      temperatures: ['hot', 'warm', 'cool', 'cold'],
+    }),
+  ]);
+  let allItems = allItemsInitial;
+  let digest = digestRead;
   if (!digest) {
     const picks = await computeDigest(user.id);
     let juxtapositionId: string | null = null;
@@ -75,14 +86,6 @@ export default async function GardenPage({
     }
     digest = { picks, juxtapositionId };
   }
-
-  // Hydrate digest picks with full GardenItem data.
-  // (let-binding so the inline maturation fallback below can re-fetch
-  // after lifts so the same render shows updated maturity/temperature.)
-  let allItems = await listGardenItems(user.id, {
-    sort: 'ripeness',
-    temperatures: ['hot', 'warm', 'cool', 'cold'],
-  });
 
   let itemMap = new Map<string, (typeof allItems)[number]>();
   for (const it of allItems) itemMap.set(`${it.kind}|${it.id}`, it);
@@ -138,10 +141,15 @@ export default async function GardenPage({
   // empty, compute on-demand once (the cron will catch up daily but
   // the first user after migration shouldn't see a blank surface).
   let clusterSnapshots: ClusterSnapshot[] = await readClustersForToday(user.id);
-  // On-demand cluster compute when today's snapshot is missing.
-  // Wrapped in try/catch — when migration 0015 isn't applied,
-  // persistClusters silently fails and clusterSnapshots stays [].
-  if (clusterSnapshots.length === 0 && allItems.length > 0) {
+  // Phase 19.x compute toggle (2026-05-06): the on-demand cluster
+  // compute fallback is now opt-in via env var. Reads from cache
+  // only by default. Re-enable by setting CLUSTER_COMPUTE_INLINE=true
+  // in Vercel env (or remove the gate when compute headroom returns).
+  if (
+    process.env.CLUSTER_COMPUTE_INLINE === 'true' &&
+    clusterSnapshots.length === 0 &&
+    allItems.length > 0
+  ) {
     try {
       const computed = await computeClusters(user.id);
       const persisted = await persistClusters(user.id, new Date(), computed);
@@ -153,12 +161,13 @@ export default async function GardenPage({
     }
   }
 
-  // Phase 18 hotfix (2026-05-05) — maturation fires INDEPENDENTLY of
-  // cluster persistence. Signals 1, 2, 4, 5 work without idea_clusters
-  // (signal 3 just contributes nothing when membership is empty).
-  // Idempotent: each idea only writes if a temperature/maturity
-  // changed. The cron is canonical; this is the immediacy hatch.
-  if (allItems.length > 0) {
+  // Phase 19.x compute toggle (2026-05-06): maturation no longer fires
+  // on every Garden visit. It loads the entire ideas table +
+  // extracted_ideas + drafts and runs in-memory cosine — way too
+  // expensive per page-load. Now gated behind MATURATION_INLINE env
+  // var; user can still trigger via 'Mature now' button which calls
+  // runMaturationNow directly.
+  if (process.env.MATURATION_INLINE === 'true' && allItems.length > 0) {
     try {
       const matReport = await runMaturationPass(user.id);
       if (matReport.lifted > 0) {
@@ -243,19 +252,25 @@ export default async function GardenPage({
   // one of them throws at runtime (transient DB hiccup, missing
   // schema, etc.). Each fallback keeps the corresponding zone
   // hidden / inert without taking down the whole surface.
+  // Phase 19.x speed-up (2026-05-06): seedStatus + edgeMatches in one
+  // round-trip. Both are independent reads. Promise.allSettled keeps
+  // either failure isolated to its own zone.
+  const [seedStatusRes, edgeMatchesRes] = await Promise.allSettled([
+    getSeedStatus(),
+    findEdgeMatches(user.id),
+  ]);
   let seedStatus: Awaited<ReturnType<typeof getSeedStatus>>;
-  try {
-    seedStatus = await getSeedStatus();
-  } catch (err) {
-    console.warn('[garden/page] getSeedStatus failed', err);
+  if (seedStatusRes.status === 'fulfilled') {
+    seedStatus = seedStatusRes.value;
+  } else {
+    console.warn('[garden/page] getSeedStatus failed', seedStatusRes.reason);
     seedStatus = { totalEligible: 0, alreadyClaimed: 0, seeded: true };
   }
-
   let edgeMatches: Awaited<ReturnType<typeof findEdgeMatches>> = [];
-  try {
-    edgeMatches = await findEdgeMatches(user.id);
-  } catch (err) {
-    console.warn('[garden/page] findEdgeMatches failed', err);
+  if (edgeMatchesRes.status === 'fulfilled') {
+    edgeMatches = edgeMatchesRes.value;
+  } else {
+    console.warn('[garden/page] findEdgeMatches failed', edgeMatchesRes.reason);
   }
 
   return (
