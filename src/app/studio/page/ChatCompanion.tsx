@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
 import { findSimilar, type SimilarHit } from '../actions';
+import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 import { useRailCollapse } from './useRailCollapse';
 import { usePlatform, PLATFORM_LABEL } from './usePlatform';
@@ -48,7 +49,7 @@ type ChatCompanionProps = {
 };
 
 export function ChatCompanion({ draftId }: ChatCompanionProps) {
-  const { editor } = useEditorContext();
+  const { editor, insertThoughtBubble } = useEditorContext();
   const { state: collapseState, toggleCollapsed } = useRailCollapse();
   const isCollapsed = collapseState === 'collapsed';
   const { platform } = usePlatform();
@@ -128,16 +129,67 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
     runRetrieval(text);
   }, [editor, runRetrieval]);
 
-  // Slice 7 wires this to insertThoughtBubble. Slice 6 just tracks
-  // local state and toggles the card's "in editor" flag.
-  const onPullCard = useCallback((hit: SimilarHit) => {
-    setPulledIdeaIds((prev) => {
-      if (prev.has(hit.id)) return prev;
-      const next = new Set(prev);
-      next.add(hit.id);
-      return next;
-    });
-  }, []);
+  // Phase 21 slice 7 (2026-05-06): Pull-into-editor handoff.
+  // Routes idea / extracted_idea hits through insertThoughtBubble
+  // (which dedupes against existing bubbles for the same ideaId
+  // and scrolls to them). Other kinds (drafts, captures, etc.)
+  // fall back to a blockquote insert so they still drop something
+  // useful into the prose. Fires markIdeaPulledIntoDraft on
+  // 'idea' for the implicit-claim signal Phase 17 wired.
+  const onPullCard = useCallback(
+    (hit: SimilarHit) => {
+      if (!editor) return;
+
+      if (hit.kind === 'idea' || hit.kind === 'extracted_idea') {
+        const title = (hit.title ?? '').trim();
+        const preview = (
+          hit.kind === 'extracted_idea' && hit.claimFull
+            ? hit.claimFull
+            : hit.snippet ?? ''
+        ).trim();
+
+        const result = insertThoughtBubble({
+          source: 'idea',
+          ideaId: hit.id,
+          kind: hit.kind,
+          title,
+          preview,
+        });
+        if (!result.ok) return;
+
+        if (hit.kind === 'idea') {
+          markIdeaPulledIntoDraft(hit.id).catch((err) => {
+            console.warn('[chat] markIdeaPulledIntoDraft failed', err);
+          });
+        }
+      } else {
+        const text = (hit.snippet ?? '').trim() || (hit.title ?? '').trim();
+        if (text.length > 0) {
+          editor
+            .chain()
+            .focus()
+            .insertContent({
+              type: 'blockquote',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [{ type: 'text', text }],
+                },
+              ],
+            })
+            .run();
+        }
+      }
+
+      setPulledIdeaIds((prev) => {
+        if (prev.has(hit.id)) return prev;
+        const next = new Set(prev);
+        next.add(hit.id);
+        return next;
+      });
+    },
+    [editor, insertThoughtBubble]
+  );
 
   return (
     <aside
