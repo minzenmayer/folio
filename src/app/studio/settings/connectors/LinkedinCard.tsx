@@ -99,7 +99,7 @@ export function LinkedinCard({ initialStatus }: { initialStatus: LinkedinStatus 
         setActionError(res.message ?? 'Connect failed.');
         return;
       }
-      setActionMessage('Connected. Pulling posts now — this can take a few minutes.');
+      setActionMessage('Connected. Pulling posts now. This can take a few minutes.');
       setProfileUrl('');
       setShowForm(false);
       refresh();
@@ -166,7 +166,7 @@ export function LinkedinCard({ initialStatus }: { initialStatus: LinkedinStatus 
           </div>
         </div>
         <p className="font-sans text-[13px] leading-[1.55] text-ink-soft">
-          Your LinkedIn posts. We scrape your public profile via Apify — no LinkedIn login required, no posting on your behalf.
+          Your LinkedIn posts. We scrape your public profile via Apify. No LinkedIn login required, no posting on your behalf.
         </p>
         <form onSubmit={runConnect} className="flex flex-col gap-2 mt-1">
           <label className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag">

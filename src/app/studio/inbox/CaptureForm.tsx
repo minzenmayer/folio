@@ -51,7 +51,7 @@ export function CaptureForm() {
           <input
             value={source}
             onChange={(e) => setSource(e.target.value)}
-            placeholder="Source (optional) — URL, person, book, anywhere"
+            placeholder="Source (optional). URL, person, book, anywhere"
             className="w-full bg-paper-2 border border-rule rounded-soft px-3 py-2 font-sans text-[13px] text-ink-soft placeholder:text-tag focus:outline-none focus:border-ink"
           />
         </div>
@@ -63,7 +63,7 @@ export function CaptureForm() {
           onClick={() => setShowSourceField((s) => !s)}
           className="font-sans text-[12.5px] text-tag hover:text-ink transition-colors"
         >
-          {showSourceField ? '— Hide source' : '+ Add source'}
+          {showSourceField ? '− Hide source' : '+ Add source'}
         </button>
         <div className="flex items-center gap-3">
           <span className="font-mono text-[10px] text-tag tracking-[0.04em]">

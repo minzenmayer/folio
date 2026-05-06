@@ -19,7 +19,7 @@ const SOURCES = [
     id: 'linkedin',
     label: 'LinkedIn',
     blurb:
-      'Your published LinkedIn posts. Scraped from your public profile via Apify — no LinkedIn login required.',
+      'Your published LinkedIn posts. Scraped from your public profile via Apify. No LinkedIn login required.',
     state: 'live',
   },
   {
@@ -33,21 +33,21 @@ const SOURCES = [
     id: 'gdrive',
     label: 'Google Drive',
     blurb:
-      'Selected docs land as captures. Pick which folders Thoughtbed reads — nothing automatic.',
+      'Selected docs land as captures. Pick which folders Thoughtbed reads. Nothing automatic.',
     state: 'soon',
   },
   {
     id: 'gmail',
     label: 'Gmail',
     blurb:
-      'Subscribed newsletters detected via OAuth (read-only). You triage which ones land in the corpus from /studio/insights — Reflect surfaces them while you write.',
+      'Subscribed newsletters detected via OAuth (read-only). You triage which ones land in the corpus from /studio/insights. Reflect surfaces them while you write.',
     state: 'live',
   },
   {
     id: 'voiceid',
     label: 'Voice ID',
     blurb:
-      'Your distinct rhythm, vocabulary, and shape — modeled from what you have already written. Reflection writes from this, never around it.',
+      'Your distinct rhythm, vocabulary, and shape. Modeled from what you have already written. Reflection writes from this, not around it.',
     state: 'soon',
   },
 ];
@@ -64,7 +64,7 @@ export default async function KnowledgePage() {
             Knowledge
           </h1>
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[60ch]">
-            The Inbox is the primary loop — anything you paste lands there.
+            The Inbox is the primary loop. Anything you paste lands there.
             Knowledge is everything else: data sources that flow in
             automatically so Thoughtbed knows your voice, your archive, and
             the writers you read.

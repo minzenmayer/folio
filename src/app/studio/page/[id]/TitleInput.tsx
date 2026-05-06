@@ -143,7 +143,7 @@ export function TitleInput({
         value={value ?? ''}
         onChange={handleChange}
         onBlur={handleBlur}
-        placeholder="Title — what's this about?"
+        placeholder="Title. What's this about?"
         aria-label="Title"
         className="w-full bg-transparent border-none outline-none font-serif text-[clamp(28px,4vw,40px)] leading-[1.1] text-ink placeholder:italic placeholder:text-tag/60 placeholder:font-light focus:ring-0 px-0 py-1"
       />

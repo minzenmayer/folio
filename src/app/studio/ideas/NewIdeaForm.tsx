@@ -32,7 +32,7 @@ export function NewIdeaForm() {
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Title — your shorthand for this idea"
+          placeholder="Title. Your shorthand for this idea"
           className="w-full bg-transparent font-sans text-[18px] font-medium text-ink placeholder:text-tag focus:outline-none"
           aria-label="Idea title"
         />
@@ -43,7 +43,7 @@ export function NewIdeaForm() {
           <textarea
             value={essence}
             onChange={(e) => setEssence(e.target.value)}
-            placeholder="Essence — one or two sentences. What is this, in your own words?"
+            placeholder="Essence. One or two sentences. What is this, in your own words?"
             rows={3}
             className="w-full resize-none bg-paper-2 border border-rule rounded-soft px-3 py-2 font-sans text-[14px] text-ink-soft placeholder:text-tag focus:outline-none focus:border-ink leading-[1.5]"
           />
@@ -56,7 +56,7 @@ export function NewIdeaForm() {
           onClick={() => setShowEssence((s) => !s)}
           className="font-sans text-[12.5px] text-tag hover:text-ink transition-colors"
         >
-          {showEssence ? '— Hide essence' : '+ Add essence'}
+          {showEssence ? '− Hide essence' : '+ Add essence'}
         </button>
         <button
           type="submit"

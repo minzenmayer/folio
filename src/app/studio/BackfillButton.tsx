@@ -126,8 +126,8 @@ export function BackfillButton() {
       </div>
       <p className="font-sans text-[12.5px] text-tag mt-3 max-w-[60ch]">
         Backfill embeddings sweeps rows where the embedding is null. Extract
-        ideas runs the curation formula across already-ingested sources —
-        idempotent per source, so it's safe to re-run when the formula changes.
+        ideas runs the curation formula across already-ingested sources.
+        Idempotent per source, so it's safe to re-run when the formula changes.
       </p>
     </div>
   );

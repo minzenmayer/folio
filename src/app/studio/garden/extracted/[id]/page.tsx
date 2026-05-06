@@ -37,15 +37,15 @@ export default async function ExtractedIdeaPage({
   let sourceTitle = 'a source';
   if (row.sourceKind === 'newsletter_issue' && row.newsletterIssueId) {
     const [n] = await db.select({ title: newsletterIssues.title }).from(newsletterIssues).where(eq(newsletterIssues.id, row.newsletterIssueId)).limit(1);
-    if (n) sourceTitle = `your newsletter — ${n.title}`;
+    if (n) sourceTitle = `your newsletter · ${n.title}`;
   } else if (row.sourceKind === 'obsidian_note' && row.obsidianNoteId) {
     const [n] = await db.select({ title: obsidianNotes.title }).from(obsidianNotes).where(eq(obsidianNotes.id, row.obsidianNoteId)).limit(1);
-    if (n) sourceTitle = `vault — ${n.title}`;
+    if (n) sourceTitle = `vault · ${n.title}`;
   } else if (row.sourceKind === 'linkedin_post' && row.linkedinPostId) {
     sourceTitle = 'LinkedIn';
   } else if (row.sourceKind === 'gmail_message' && row.gmailMessageId) {
     const [n] = await db.select({ subject: gmailMessages.subject }).from(gmailMessages).where(eq(gmailMessages.id, row.gmailMessageId)).limit(1);
-    if (n) sourceTitle = `Gmail — ${n.subject ?? 'newsletter'}`;
+    if (n) sourceTitle = `Gmail · ${n.subject ?? 'newsletter'}`;
   }
 
   return (

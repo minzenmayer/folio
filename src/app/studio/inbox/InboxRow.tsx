@@ -123,7 +123,7 @@ export function InboxRow({ capture, ideas }: InboxRowProps) {
 
           <div>
             <div className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag font-medium mb-2">
-              Or — promote to a new idea
+              Or, promote to a new idea
             </div>
             {showPromote ? (
               <form onSubmit={handlePromote} className="flex gap-2">

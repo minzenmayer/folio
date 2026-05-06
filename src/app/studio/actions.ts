@@ -953,7 +953,7 @@ export async function reflect(input: unknown): Promise<ReflectResult> {
     return {
       ok: false,
       reason: 'no_text',
-      message: 'Nothing to reflect on yet — start writing.',
+      message: 'Nothing to reflect on yet. Start writing.',
     };
   }
   if (draftText.length < MIN_REFLECT_CHARS) {

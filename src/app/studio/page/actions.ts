@@ -713,7 +713,7 @@ export async function publishDraftToBeehiiv(
     return {
       ok: false,
       reason: 'empty_draft',
-      message: 'Draft is empty — nothing to publish.',
+      message: 'Draft is empty. Nothing to publish.',
     };
   }
 

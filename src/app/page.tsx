@@ -69,11 +69,11 @@ export default function Home() {
               <em className="italic font-normal text-accent">thinks.</em>
             </h2>
             <p className="font-serif text-[19px] leading-[1.65] text-ink-soft mb-6">
-              Most "second brain" tools store. They don't produce. Most AI
-              writing tools generate. They don't think with you. Thoughtbed
-              sits in the seam. The place where a thought matures into
-              writing, slowly, with care, in a way you can feel yourself
-              change.
+              Notes apps store what you paste and forget about it. AI
+              writing tools spit out copy you didn't think your way into.
+              Thoughtbed sits between them. A place where a thought has
+              time to mature before it becomes a draft, and where the
+              draft remembers how you got there.
             </p>
             <p className="font-serif text-[19px] leading-[1.65] text-ink-soft">
               When you write inside Thoughtbed, the garden in the right
@@ -82,10 +82,9 @@ export default function Home() {
                 your own captures, your matured ideas, your past drafts.
                 Your voice.
               </em>{' '}
-              Never from a generic playbook. Never from the public web.
-              The bed gets denser the more you live in it. The system
-              becomes more <em className="italic text-ink">you</em> over
-              time.
+              It only knows what you've written. The bed gets denser the
+              more you live in it. The system becomes more{' '}
+              <em className="italic text-ink">you</em> over time.
             </p>
           </div>
         </div>
@@ -178,8 +177,8 @@ export default function Home() {
               </em>
             </h2>
             <p className="font-serif text-[20px] leading-[1.45] text-ink-soft max-w-[56ch] font-light">
-              A closed loop with four stages. What you write becomes substrate
-              for what you write next. The bed is alive.
+              Four stages, looped back on themselves. What you write becomes
+              raw material for what you write next.
             </p>
           </div>
 

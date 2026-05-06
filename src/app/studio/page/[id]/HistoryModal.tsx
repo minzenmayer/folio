@@ -158,7 +158,7 @@ export function HistoryModal({
               ▸ History
             </div>
             <p className="font-serif italic text-[13px] text-tag">
-              The recent trail of this draft. Restore is non-destructive — it
+              The recent trail of this draft. Restore is non-destructive. It
               spawns a new entry on top.
             </p>
           </div>

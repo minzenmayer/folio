@@ -580,7 +580,7 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
     case 'failed':
       return (
         <span className="text-accent" title={status.message}>
-          · save failed — type to retry
+          · save failed. Type to retry
         </span>
       );
     case 'conflict':
@@ -630,7 +630,7 @@ function ConflictBanner({
           Overwrite with mine
         </button>
         <span className="font-serif italic text-[12px] text-tag ml-1">
-          — overwriting replaces the other session's changes.
+          Overwriting replaces the other session's changes.
         </span>
       </div>
     </div>
@@ -678,7 +678,7 @@ function RecoveryBanner({
           Discard
         </button>
         <span className="font-serif italic text-[12px] text-tag ml-1">
-          — discard drops the local copy permanently.
+          Discard drops the local copy permanently.
         </span>
       </div>
     </div>

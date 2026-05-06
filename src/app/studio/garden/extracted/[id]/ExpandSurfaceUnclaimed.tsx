@@ -112,7 +112,7 @@ export function ExpandSurfaceUnclaimed({ ext }: { ext: Ext }) {
               Make it mine
             </div>
             <p className="font-sans text-[13px] text-[#633806] leading-[1.55] mb-3">
-              Add a sentence in your own words. That turns this from an extracted claim into one of your ideas — it gets a body, a temperature bump, and earns a spot in the digest.
+              Add a sentence in your own words. That turns this from an extracted claim into one of your ideas. It gets a body, a temperature bump, and a spot in the digest.
             </p>
             <textarea
               value={claimText}

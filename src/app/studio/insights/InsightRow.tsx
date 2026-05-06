@@ -121,7 +121,7 @@ export function InsightRow({ row, view }: { row: Row; view: View }) {
         {snoozedAndRipe && (
           <span
             className="font-mono text-[9px] tracking-[0.22em] uppercase text-accent bg-paper-2 border border-rule rounded-full px-2 py-0.5"
-            title="Snooze ended — back in your queue"
+            title="Snooze ended. Back in your queue."
           >
             ripe
           </span>

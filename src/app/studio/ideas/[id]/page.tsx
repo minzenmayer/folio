@@ -231,7 +231,7 @@ export default async function IdeaDetailPage({
                 Nothing's resonating yet.
               </p>
               <p className="font-sans text-[12px] text-tag">
-                Capture more, write more — sources surface as the archive
+                Capture more, write more. Sources surface as the archive
                 grows.
               </p>
             </div>
@@ -271,9 +271,9 @@ export default async function IdeaDetailPage({
         {/* Future placeholder sections */}
         <div className="space-y-4 opacity-60">
           {[
-            { label: 'Threads', sub: 'where you think out loud — Sprint 5+' },
-            { label: 'Artifacts', sub: 'things you build around this — Sprint 5+' },
-            { label: 'Connected ideas', sub: 'supports · extends · echoes · contradicts — Sprint 8+' },
+            { label: 'Threads', sub: 'where you think out loud. Sprint 5+' },
+            { label: 'Artifacts', sub: 'things you build around this. Sprint 5+' },
+            { label: 'Connected ideas', sub: 'supports · extends · echoes · contradicts. Sprint 8+' },
           ].map((row) => (
             <div key={row.label}>
               <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">

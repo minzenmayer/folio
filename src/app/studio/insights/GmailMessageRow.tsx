@@ -135,7 +135,7 @@ export function GmailMessageRow({ row }: GmailMessageRowProps) {
           kind: 'success',
           text:
             n > 0
-              ? `Added. ${n} idea${n === 1 ? '' : 's'} pulled from this — review them in the Ideas tab.`
+              ? `Added. ${n} idea${n === 1 ? '' : 's'} pulled from this. Review them in the Ideas tab.`
               : 'Added to your garden.',
         });
       }

@@ -1624,7 +1624,7 @@ export async function ignoreGmailSender(
     return {
       ok: false,
       reason: 'no_domain',
-      message: "Can't determine sender domain — try 'Skip This One' instead.",
+      message: "Can't determine sender domain. Try 'Skip This One' instead.",
     };
   }
 

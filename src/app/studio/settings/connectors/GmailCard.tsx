@@ -94,7 +94,7 @@ export function GmailCard({ initialStatus }: { initialStatus: GmailStatus }) {
         `${window.location.pathname}?${params.toString()}`
       );
     } else if (ok) {
-      setActionMessage('Connected. Pulling newsletters now — this can take a few minutes.');
+      setActionMessage('Connected. Pulling newsletters now. This can take a few minutes.');
       params.delete('gmail_connected');
       window.history.replaceState(
         {},
@@ -160,7 +160,7 @@ export function GmailCard({ initialStatus }: { initialStatus: GmailStatus }) {
               Gmail
             </h3>
             <p className="font-sans text-[12px] text-tag mt-0.5">
-              The newsletters you read — triage queue, then Reflect rail.
+              The newsletters you read. Triage queue, then Reflect rail.
             </p>
           </div>
         </div>

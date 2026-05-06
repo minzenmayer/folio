@@ -1619,8 +1619,11 @@ function BeatRow({
             ))}
             {usedFallbackVoice && (
               <p className="font-sans text-[12px] text-tag leading-[1.5] mt-2 italic">
-                No voice profile yet — drafted from retrieval +
-                intent. <Link href="/studio/voice" className="underline underline-offset-2 hover:text-ink">Build voice profile to refine →</Link>
+                No voice profile yet. Drafted from retrieval and
+                your intent.{' '}
+                <Link href="/studio/voice" className="underline underline-offset-2 hover:text-ink">
+                  Build voice profile to refine →
+                </Link>
               </p>
             )}
           </div>

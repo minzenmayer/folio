@@ -204,8 +204,8 @@ export default async function StudioHome() {
                   Capture
                 </span>
                 <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
-                  <span className="text-ink font-medium">Inbox</span> — paste a
-                  thought, a quote, anything you don't want to lose.
+                  <span className="text-ink font-medium">Inbox.</span> Paste
+                  a thought, a quote, anything you don't want to lose.
                 </p>
               </li>
               <li className="grid grid-cols-[100px_1fr] gap-6 items-baseline border-b border-rule pb-4">
@@ -213,9 +213,9 @@ export default async function StudioHome() {
                   Connect
                 </span>
                 <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
-                  <span className="text-ink font-medium">Library</span> —
-                  captures connect to ideas, drafts, and each other while you
-                  sleep.
+                  <span className="text-ink font-medium">Library.</span>{' '}
+                  Captures connect to ideas, drafts, and each other while
+                  you sleep.
                 </p>
               </li>
               <li className="grid grid-cols-[100px_1fr] gap-6 items-baseline">
@@ -223,8 +223,8 @@ export default async function StudioHome() {
                   Write
                 </span>
                 <p className="font-sans text-[14px] text-ink-soft leading-[1.55]">
-                  <span className="text-ink font-medium">The partner</span> —
-                  drop in a topic, spar through angles, then open a page
+                  <span className="text-ink font-medium">The partner.</span>{' '}
+                  Drop in a topic, spar through angles, then open a page
                   with the outline already in place.
                 </p>
               </li>

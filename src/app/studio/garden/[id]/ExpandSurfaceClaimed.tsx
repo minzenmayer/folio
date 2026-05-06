@@ -144,7 +144,7 @@ export function ExpandSurfaceClaimed({
               onClick={() => setEditingEssence(true)}
               className="font-serif text-[15px] leading-[1.55] text-ink cursor-text"
             >
-              {essence || <span className="italic text-tag">Click to add essence — one paragraph that captures the heart of this idea.</span>}
+              {essence || <span className="italic text-tag">Click to add essence. One paragraph that captures the heart of this idea.</span>}
             </p>
           )}
         </div>
@@ -169,7 +169,7 @@ export function ExpandSurfaceClaimed({
               onClick={() => setEditingBody(true)}
               className="font-sans text-[14px] leading-[1.65] text-ink whitespace-pre-wrap cursor-text"
             >
-              {body || <span className="italic text-tag">Click to add a body — long-form text that grows over time as you merge new claims in.</span>}
+              {body || <span className="italic text-tag">Click to add a body. Long-form text that grows over time as you merge new claims in.</span>}
             </div>
           )}
         </div>
@@ -210,10 +210,10 @@ export function ExpandSurfaceClaimed({
             <p className="font-sans text-[13px] text-ink-soft">
               Promoted from{' '}
               <span className="text-ink">
-                {provenance.kind === 'newsletter_issue' ? 'your newsletter — ' : ''}
-                {provenance.kind === 'obsidian_note' ? 'vault — ' : ''}
-                {provenance.kind === 'linkedin_post' ? 'LinkedIn — ' : ''}
-                {provenance.kind === 'gmail_message' ? 'Gmail — ' : ''}
+                {provenance.kind === 'newsletter_issue' ? 'your newsletter · ' : ''}
+                {provenance.kind === 'obsidian_note' ? 'vault · ' : ''}
+                {provenance.kind === 'linkedin_post' ? 'LinkedIn · ' : ''}
+                {provenance.kind === 'gmail_message' ? 'Gmail · ' : ''}
                 {provenance.title}
               </span>
             </p>

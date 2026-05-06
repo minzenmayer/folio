@@ -32,8 +32,8 @@ export default async function InboxPage() {
           </h1>
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {inboxCaptures.length === 0
-              ? "Nothing yet. Capture something below — anything you don't want to lose."
-              : `${inboxCaptures.length} unfiled ${inboxCaptures.length === 1 ? 'item' : 'items'}. File when you're ready, or leave them — Thoughtbed connects them on its own either way.`}
+              ? "Nothing yet. Capture something below. Anything you don't want to lose."
+              : `${inboxCaptures.length} unfiled ${inboxCaptures.length === 1 ? 'item' : 'items'}. File when you're ready, or leave them. Thoughtbed connects them on its own either way.`}
           </p>
         </div>
 

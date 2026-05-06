@@ -244,12 +244,12 @@ export function AssistantRailLive({
         </div>
         {awake ? (
           <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5]">
-            What your space is humming with — surfaced as you write. Click a
+            What your space is humming with, surfaced as you write. Click a
             row to drop it into the draft.
           </p>
         ) : (
           <p className="font-sans text-[12.5px] text-tag leading-[1.5]">
-            Self-pilot — resonance is off. Toggle <strong className="text-ink">On</strong>{' '}
+            Self-pilot. Resonance is off. Toggle <strong className="text-ink">On</strong>{' '}
             when you want sources surfacing.
           </p>
         )}
@@ -323,8 +323,8 @@ function BodyForStatus({
             Quiet
           </span>
           <p className="font-sans text-[12.5px] text-tag leading-[1.55]">
-            Nothing in your space resonates with this yet. Keep going —
-            sources surface as you build the archive.
+            Nothing in your space resonates with this yet. Keep going.
+            Sources surface as you build the archive.
           </p>
         </div>
       );
@@ -335,7 +335,7 @@ function BodyForStatus({
           className="font-sans text-[12.5px] text-ink leading-[1.55]"
           title={status.message}
         >
-          Sources unavailable for a moment. Keep typing — it'll retry.
+          Sources unavailable for a moment. Keep typing and it'll retry.
         </p>
       );
 
@@ -427,7 +427,7 @@ function HitRow({
             className="font-mono text-[9px] tracking-[0.22em] uppercase text-tag hover:text-ink transition-colors focus:outline-none focus:ring-1 focus:ring-rule-strong rounded-soft"
             aria-expanded={expanded}
           >
-            {expanded ? '— less' : '+ more'}
+            {expanded ? '− less' : '+ more'}
           </button>
           {expanded && (
             <div className="mt-2 space-y-2">

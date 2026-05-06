@@ -83,7 +83,7 @@ export function PlanRibbon() {
 
   return (
     <aside
-      aria-label="Plan ribbon — anchored beats from the spar"
+      aria-label="Plan ribbon. Anchored beats from the spar."
       className="border-b border-rule px-5 py-4 bg-paper-2"
     >
       <div className="flex items-baseline justify-between gap-3 mb-2">
@@ -161,7 +161,7 @@ function PlanPill({ pill, index }: { pill: BeatPill; index: number }) {
           {String(index + 1).padStart(2, '0')}
         </span>
         <span className="font-sans text-[12.5px] leading-[1.4] line-clamp-2 break-words">
-          {pill.beat || '—'}
+          {pill.beat || '(empty)'}
         </span>
       </div>
       <div className="mt-1 flex items-center gap-1 font-mono text-[9px] tracking-[0.18em] uppercase text-tag">

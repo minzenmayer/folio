@@ -15,7 +15,7 @@ export function AssistantRail() {
           ▸ The closed loop
         </div>
         <p className="font-serif italic text-[14px] text-ink-soft leading-[1.5]">
-          Your Inbox and Library will surface here as you write — pulling
+          Your Inbox and Library will surface here as you write. Pulling
           captures, ideas, and your own past sentences into the margin.
         </p>
       </div>

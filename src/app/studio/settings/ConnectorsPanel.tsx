@@ -42,7 +42,7 @@ const SOON_CONNECTORS: ConnectorCard[] = [
     name: 'Google Drive',
     glyph: 'GD',
     blurb:
-      'Selected docs land as captures. Pick which folders Thoughtbed reads — nothing automatic.',
+      'Selected docs land as captures. Pick which folders Thoughtbed reads. Nothing automatic.',
   },
 ];
 

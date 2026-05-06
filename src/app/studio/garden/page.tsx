@@ -141,7 +141,7 @@ export default async function GardenPage({
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {allItems.length === 0
               ? 'Your Garden is empty. Plant something in Capture, or wait for sources to bring claims you can claim.'
-              : `${allItems.length} ${allItems.length === 1 ? 'idea' : 'ideas'} in your Garden — claimed and unclaimed, all in one place.`}
+              : `${allItems.length} ${allItems.length === 1 ? 'idea' : 'ideas'} in your Garden. Claimed and unclaimed, all in one place.`}
           </p>
         </div>
 
