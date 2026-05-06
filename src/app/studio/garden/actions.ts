@@ -161,6 +161,27 @@ export async function markVisited(ideaId: string): Promise<void> {
   revalidate();
 }
 
+// ── Phase 19.2 (2026-05-05) ───────────────────────────────────────
+// markAsWritingMaterial — active learning move. The user clicks
+// 'This is writing material' on an idea card; we flip its
+// claim_kind to 'claimed' so it joins the positive topic-fit pool
+// on the next maturation pass. Symmetric with set_aside (which
+// adds to the negative pool).
+
+export async function markAsWritingMaterial(
+  ideaId: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const user = await requireUser();
+  const updated = await db
+    .update(ideas)
+    .set({ claimKind: 'claimed' })
+    .where(and(eq(ideas.id, ideaId), eq(ideas.userId, user.id)))
+    .returning({ id: ideas.id });
+  if (updated.length === 0) return { ok: false, reason: 'not found' };
+  revalidate();
+  return { ok: true };
+}
+
 // ── Phase 17 (2026-05-05) ─────────────────────────────────────────
 // markIdeaPulledIntoDraft — implicit-claim signal. When an idea is
 // pulled into a draft via the Reflect rail, the user is endorsing

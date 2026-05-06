@@ -182,7 +182,7 @@ export function computeTopicFit(
 export type TopicFitCeiling = 'cool' | 'warm' | null;
 
 export function topicFitCeiling(score: number): TopicFitCeiling {
-  if (score < 0.3) return 'cool';
+  if (score < 0.25) return 'cool';
   if (score < 0.5) return 'warm';
   return null;
 }
