@@ -30,6 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
 import { findSimilar, reflect, type SimilarHit } from '../actions';
 import { RailIdeaPill } from './RailIdeaPill';
+import { useRailCollapse } from './useRailCollapse';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 
@@ -86,11 +87,13 @@ export function AssistantRailLive({
   const { editor, insertIdeaBubble } = useEditorContext();
 
   const [awake, setAwake] = useState(mode !== 'self-pilot');
-  // Phase 20 slice 1: visual collapse state. Slice 6 lifts this into a
-  // dedicated hook (useRailCollapse) with localStorage persistence and a
-  // 56px collapsed strip. For now the collapsed branch just hides the body
-  // so we can ship the header redesign in isolation.
-  const [collapsedLocal, setCollapsedLocal] = useState(false);
+  // Phase 20 slice 6: three-state collapse, persisted to localStorage.
+  // 'collapsed' renders a 56px strip with the top-3 idea glyphs vertical;
+  // clicking a glyph expands the rail AND scrolls that pill into view.
+  // 'hidden' maps onto the self-pilot dormant mode and is governed by
+  // the On/Off toggle below — chevron only cycles expanded <-> collapsed.
+  const { state: collapseState, toggleCollapsed } = useRailCollapse();
+  const isCollapsed = collapseState === 'collapsed';
   // Phase 20 slice 5: track which ideas have been pulled into the draft
   // this session. The pill flips its label to 'Jump to bubble' once
   // pulled; clicking it again scrolls to the existing bubble instead of
@@ -292,16 +295,18 @@ export function AssistantRailLive({
 
   return (
     <aside
-      className="border-l border-rule bg-bg flex flex-col"
+      className="border-l border-rule bg-bg flex flex-col w-full"
       aria-label="Resonance"
     >
       <div className="px-5 pt-6 pb-4 border-b border-rule">
         <div className="flex items-center gap-2 mb-2">
-          <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
-            Resonance
-          </h2>
-          <div className="ml-auto flex items-center gap-1.5">
-            {awake && (
+          {!isCollapsed && (
+            <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+              Resonance
+            </h2>
+          )}
+          <div className={`${isCollapsed ? 'mx-auto' : 'ml-auto'} flex items-center gap-1.5`}>
+            {!isCollapsed && awake && (
               <button
                 type="button"
                 onClick={refreshIdeas}
@@ -313,7 +318,7 @@ export function AssistantRailLive({
                 Refresh
               </button>
             )}
-            {mode === 'self-pilot' && (
+            {!isCollapsed && mode === 'self-pilot' && (
               <button
                 type="button"
                 onClick={() => setAwake((v) => !v)}
@@ -328,34 +333,35 @@ export function AssistantRailLive({
                 {awake ? 'On' : 'Off'}
               </button>
             )}
-            {/* Phase 20 slice 1: collapse chevron. Local visual state for now;
-                slice 6 lifts to useRailCollapse with localStorage. */}
+            {/* Phase 20 slice 6: collapse chevron, persisted via
+                useRailCollapse. Cycles expanded <-> collapsed. */}
             <button
               type="button"
-              onClick={() => setCollapsedLocal((v) => !v)}
-              aria-pressed={collapsedLocal}
-              aria-label={collapsedLocal ? 'Expand rail' : 'Collapse rail'}
-              title={collapsedLocal ? 'Expand rail' : 'Collapse rail'}
+              onClick={toggleCollapsed}
+              aria-pressed={isCollapsed}
+              aria-label={isCollapsed ? 'Expand rail' : 'Collapse rail'}
+              title={isCollapsed ? 'Expand rail' : 'Collapse rail'}
               className="text-tag hover:text-ink transition-colors rounded-soft p-1 -mr-1"
             >
-              <ChevronGlyph direction={collapsedLocal ? 'left' : 'right'} />
+              <ChevronGlyph direction={isCollapsed ? 'left' : 'right'} />
             </button>
           </div>
         </div>
-        {awake ? (
-          <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5]">
-            What your space is humming with, surfaced as you write. Click a
-            row to drop it into the draft.
-          </p>
-        ) : (
-          <p className="font-sans text-[12.5px] text-tag leading-[1.5]">
-            Self-pilot. Resonance is off. Toggle <strong className="text-ink">On</strong>{' '}
-            when you want sources surfacing.
-          </p>
-        )}
+        {!isCollapsed &&
+          (awake ? (
+            <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5]">
+              What your space is humming with, surfaced as you write. Click a
+              row to drop it into the draft.
+            </p>
+          ) : (
+            <p className="font-sans text-[12.5px] text-tag leading-[1.5]">
+              Self-pilot. Resonance is off. Toggle <strong className="text-ink">On</strong>{' '}
+              when you want sources surfacing.
+            </p>
+          ))}
       </div>
 
-      {awake && !collapsedLocal && (
+      {awake && !isCollapsed && (
         <div className="flex-1 px-5 py-6 overflow-y-auto flex flex-col gap-6">
           {reflection.kind !== 'idle' && (
             <ReflectionPanel
@@ -375,9 +381,34 @@ export function AssistantRailLive({
         </div>
       )}
 
-      {(!awake || collapsedLocal) && <div className="flex-1" />}
+      {/* Phase 20 slice 6: 56px collapsed strip. Shows the top-3 idea
+          glyphs vertically; clicking one expands the rail AND scrolls
+          that pill into view via the matching <li id> set in the
+          expanded body. Falls back to plain expand when the editor is
+          quiet (no hits to glyph). */}
+      {awake && isCollapsed && (
+        <div className="flex-1 px-2 py-4 flex flex-col items-center gap-3 overflow-hidden">
+          <CollapsedStrip
+            status={status}
+            onGlyphClick={(hit) => {
+              toggleCollapsed();
+              // Defer scroll to after the rail re-renders expanded.
+              setTimeout(() => {
+                const target = document.getElementById(
+                  `tb-pill-${hit.kind}-${hit.id}`
+                );
+                if (target && typeof target.scrollIntoView === 'function') {
+                  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }, 60);
+            }}
+          />
+        </div>
+      )}
 
-      {!collapsedLocal && (
+      {!awake && <div className="flex-1" />}
+
+      {!isCollapsed && (
         <div className="px-5 py-3 font-mono text-[10px] tracking-[0.16em] uppercase text-tag/80 flex items-center gap-2">
           {awake ? (
             <FootnoteForStatus status={status} />
@@ -455,7 +486,7 @@ function BodyForStatus({
       return (
         <ul className="flex flex-col gap-1.5">
           {status.hits.map((hit, i) => (
-            <li key={`${hit.kind}-${hit.id}`}>
+            <li key={`${hit.kind}-${hit.id}`} id={`tb-pill-${hit.kind}-${hit.id}`}>
               {/* Phase 20 slice 2: minimal pill replaces the verbose row.
                   Slice 3 layers heat-color rank on top. Slice 5 swaps
                   onPull to insert an ideaBubble node. Slice 8 wires
@@ -638,3 +669,75 @@ function ChevronGlyph({ direction }: { direction: 'left' | 'right' }) {
     </svg>
   );
 }
+
+// Phase 20 slice 6: 56px collapsed-strip body. Renders the top-3 hottest
+// idea glyphs vertically. Each glyph is a small button — click expands
+// the rail and scrolls the matching pill into view (caller wires both).
+// Non-idea hits (drafts, captures, etc.) are skipped here so the strip
+// reads as a "Garden ideas at a glance" affordance, not a generic
+// retrieval list. If there are no idea hits we render a single dimmed
+// dot so the strip never collapses to a zero-height column.
+function CollapsedStrip({
+  status,
+  onGlyphClick,
+}: {
+  status: Status;
+  onGlyphClick: (hit: SimilarHit) => void;
+}) {
+  const ideaHits =
+    status.kind === 'ok'
+      ? status.hits
+          .filter((h) => h.kind === 'idea' || h.kind === 'extracted_idea')
+          .slice(0, 3)
+      : [];
+
+  if (ideaHits.length === 0) {
+    return (
+      <span
+        aria-hidden="true"
+        className="w-2 h-2 rounded-full bg-rule"
+        title="Quiet for now"
+      />
+    );
+  }
+
+  return (
+    <ul className="flex flex-col items-center gap-3">
+      {ideaHits.map((hit, i) => {
+        const rank: 'hot' | 'ready' = i < 2 ? 'hot' : 'ready';
+        return (
+          <li key={`${hit.kind}-${hit.id}`}>
+            <button
+              type="button"
+              onClick={() => onGlyphClick(hit)}
+              title={hit.title ?? 'Idea'}
+              aria-label={`Open: ${hit.title ?? 'idea'}`}
+              className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-paper-2 transition-colors"
+            >
+              {rank === 'hot' ? (
+                <span className="text-glyph-hot">
+                  <svg width="14" height="14" viewBox="0 0 12 12" aria-hidden="true">
+                    <path
+                      d="M6 1.4 C 4 1.4 2.6 2.7 2.6 4.5 C 2.6 5.6 3.1 6.4 3.7 7 V 8.2 H 8.3 V 7 C 8.9 6.4 9.4 5.6 9.4 4.5 C 9.4 2.7 8 1.4 6 1.4 Z"
+                      fill="currentColor"
+                      stroke="currentColor"
+                      strokeWidth="0.8"
+                      strokeLinejoin="round"
+                    />
+                    <line x1="4.2" y1="9.2" x2="7.8" y2="9.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+                    <line x1="4.7" y1="10.4" x2="7.3" y2="10.4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+                  </svg>
+                </span>
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                  <circle cx="5" cy="5" r="2" className="fill-tag" />
+                </svg>
+              )}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+

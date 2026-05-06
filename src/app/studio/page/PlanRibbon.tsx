@@ -25,6 +25,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useEditorContext } from './EditorContext';
+import { useRailCollapse } from './useRailCollapse';
 
 type BeatPill = {
   id: string;
@@ -35,6 +36,11 @@ type BeatPill = {
 
 export function PlanRibbon() {
   const { editor } = useEditorContext();
+  // Phase 20 slice 6: PlanRibbon shares the rail's collapse state. When
+  // the user collapses or hides the rail, the ribbon goes with it — both
+  // surfaces are in the same right column and the spec calls them out
+  // as one unit.
+  const { state: collapseState } = useRailCollapse();
   // We don't subscribe to editor.state directly — instead we bump a
   // local tick counter on transactions so React re-renders.
   const [tick, setTick] = useState(0);
@@ -80,6 +86,8 @@ export function PlanRibbon() {
     // a header that would just be a label without content.
     return null;
   }
+  // Phase 20 slice 6: hide alongside the rail when collapsed/hidden.
+  if (collapseState !== 'expanded') return null;
 
   return (
     <aside
