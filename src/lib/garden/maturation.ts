@@ -58,7 +58,11 @@ import type { Maturity, Temperature } from './types';
 //     long and average-pool poorly against single-claim embeddings
 //   draft-resonance maturity: 0.78 (was 0.85)
 //   recent days: 60 (was 30) — wider window for sparse writers
-const COSINE_RESONANCE_THRESHOLD = 0.72;
+// Phase 18 hotfix (2026-05-05): lowered resonance to 0.65 — bottom of
+// the 'related but distinct' band for text-embedding-3-small. Catches
+// 'same theme, different angle' across sources even when the user's
+// corpus skews heavily to one source kind.
+const COSINE_RESONANCE_THRESHOLD = 0.65;
 const COSINE_DRAFT_THRESHOLD_TEMP = 0.65;
 const COSINE_DRAFT_THRESHOLD_MAT = 0.78;
 const DRAFT_RECENT_DAYS = 60;
@@ -386,6 +390,11 @@ export async function runMaturationPass(
     try {
     let nextTemp = idea.temperature;
     let nextMat = idea.maturity;
+    // Phase 18 hotfix (2026-05-05): track maturity lifts per pass.
+    // 2+ in one pass = stacked-signal evidence the idea is really
+    // resonating; force temperature to 'hot.' Provides a path to
+    // hot without requiring 3+ temperature lifts to stack.
+    let maturityLifts = 0;
 
     // ── Signal 1: depth+breadth on entry ───────────────────
     if (idea.depthSignal !== null) {
@@ -401,11 +410,17 @@ export async function runMaturationPass(
       ) {
         const before = nextMat;
         nextMat = maxMaturity(nextMat, 'ready');
-        if (nextMat !== before) s1Hit = true;
+        if (nextMat !== before) {
+          s1Hit = true;
+          maturityLifts += 1;
+        }
       } else if (idea.depthSignal >= 0.6) {
         const before = nextMat;
         nextMat = maxMaturity(nextMat, 'shaping');
-        if (nextMat !== before) s1Hit = true;
+        if (nextMat !== before) {
+          s1Hit = true;
+          maturityLifts += 1;
+        }
       } else if (idea.depthSignal < 0.6) {
         if (maturityIndex(nextMat) < maturityIndex('forming')) {
           nextMat = 'forming';
@@ -430,7 +445,9 @@ export async function runMaturationPass(
       report.signal2Hits += 1;
     }
     if (distinctKinds.size >= 3) {
+      const before = nextMat;
       nextMat = bumpMaturity(nextMat, 1);
+      if (nextMat !== before) maturityLifts += 1;
     }
 
     // ── Signal 3: cluster density ──────────────────────────
@@ -440,7 +457,9 @@ export async function runMaturationPass(
       report.signal3Hits += 1;
     }
     if (cluster && cluster.isRep && cluster.size >= 5) {
+      const before = nextMat;
       nextMat = bumpMaturity(nextMat, 1);
+      if (nextMat !== before) maturityLifts += 1;
     }
 
     // ── Signal 4: draft-resonance ──────────────────────────
@@ -454,7 +473,9 @@ export async function runMaturationPass(
       report.signal4Hits += 1;
     }
     if (maxDraftCos >= COSINE_DRAFT_THRESHOLD_MAT) {
+      const before = nextMat;
       nextMat = bumpMaturity(nextMat, 1);
+      if (nextMat !== before) maturityLifts += 1;
     }
 
     // ── Signal 5: connectedness ────────────────────────────
@@ -463,7 +484,19 @@ export async function runMaturationPass(
       nextTemp = bumpTemperature(nextTemp, 1);
       report.signal5Hits += 1;
     }
-    if (ec >= 5) nextMat = bumpMaturity(nextMat, 1);
+    if (ec >= 5) {
+      const before = nextMat;
+      nextMat = bumpMaturity(nextMat, 1);
+      if (nextMat !== before) maturityLifts += 1;
+    }
+
+    // Phase 18 hotfix: stacked-signal rule. If 2+ maturity lifts fired
+    // in this pass, the idea is REALLY resonating — promote to hot
+    // regardless of temperature bumps. This gives a real path to
+    // hot without requiring 3 stacked temperature lifts.
+    if (maturityLifts >= 2 && nextTemp !== 'set_aside') {
+      nextTemp = 'hot';
+    }
 
     // Apply only if something changed. Don't touch pinned-hot ideas;
     // they're user-pinned and shouldn't move.
