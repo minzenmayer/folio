@@ -15,7 +15,6 @@ import { useState } from 'react';
 import Link from 'next/link';
 import type { GardenItem } from '@/lib/garden/types';
 import { TempPill, MaturityDots } from './pills';
-import { AddNoteInline } from './AddNoteInline';
 
 const SOURCE_LABEL: Record<string, string> = {
   newsletter_issue: 'CSL',
@@ -122,13 +121,6 @@ export function ClusterCard({ cluster }: { cluster: ClusterRender }) {
             </span>
           )}
         </div>
-        {/* Phase 19.3 — quick add inline. Only on claimed reps; for
-            extracted-idea reps, the user goes through Make-it-mine. */}
-        {cluster.rep.isClaimed && (
-          <div className="mt-3">
-            <AddNoteInline ideaId={cluster.rep.id} />
-          </div>
-        )}
       </div>
 
       {expanded && others.length > 0 && (

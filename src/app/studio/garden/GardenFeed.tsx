@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import type { GardenItem } from '@/lib/garden/types';
 import { TempPill, MaturityDots } from './pills';
-import { AddNoteInline } from './AddNoteInline';
 
 const SOURCE_LABEL: Record<string, string> = {
   newsletter_issue: 'newsletter',
@@ -40,14 +39,14 @@ export function GardenFeed({ items }: { items: GardenItem[] }) {
   return (
     <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
       {items.map((item) => (
-        <li key={`${item.kind}-${item.id}`} className="relative">
+        <li key={`${item.kind}-${item.id}`}>
           <Link
             href={
               item.isClaimed
                 ? `/studio/garden/${item.id}`
                 : `/studio/garden/extracted/${item.id}`
             }
-            className="block py-4 px-5 pb-3 hover:bg-paper-2 transition-colors group"
+            className="block py-4 px-5 hover:bg-paper-2 transition-colors group"
           >
             <div className="flex gap-3 items-baseline mb-1">
               <h2 className="font-sans font-medium text-[15px] leading-[1.35] tracking-tight text-ink group-hover:underline underline-offset-4 decoration-rule-strong">
@@ -84,11 +83,6 @@ export function GardenFeed({ items }: { items: GardenItem[] }) {
               )}
             </div>
           </Link>
-          {item.isClaimed && (
-            <div className="px-5 pb-3 -mt-1">
-              <AddNoteInline ideaId={item.id} />
-            </div>
-          )}
         </li>
       ))}
     </ul>

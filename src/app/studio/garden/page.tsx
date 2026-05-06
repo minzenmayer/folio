@@ -39,9 +39,6 @@ import type { ClusterRender } from './ClusterCard';
 import { findEdgeMatches } from '@/lib/garden/edge-prompts';
 import { EdgePromptZone } from './EdgePromptZone';
 import { MatureNowButton } from './MatureNowButton';
-import { loadOnTheRise } from '@/lib/garden/on-the-rise';
-import { OnTheRise } from './OnTheRise';
-import { SearchBar } from './SearchBar';
 
 // Always render fresh — temperature changes are per-action and we
 // invalidate paths from server actions, but pages also benefit from
@@ -64,10 +61,6 @@ export default async function GardenPage({
 
   // Read or compute today's digest.
   let digest = await readTodaysDigest(user.id);
-  // Phase 19.3 (2026-05-05): re-compute when cache is non-null but
-  // empty. Happens when the cron ran before any ideas were claimed
-  // — cached run has zero picks, treat as cache-miss.
-  if (digest && digest.picks.length === 0) digest = null;
   if (!digest) {
     const picks = await computeDigest(user.id);
     let juxtapositionId: string | null = null;
@@ -268,7 +261,7 @@ export default async function GardenPage({
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {allItems.length === 0
               ? 'Your Garden is empty. Plant something in Capture, or wait for sources to bring claims you can claim.'
-              : `Here's what's most ready to write today. ${allItems.length} ideas total — browse them all below.`}
+              : `${allItems.length} ${allItems.length === 1 ? 'idea' : 'ideas'} in your Garden. Claimed and unclaimed, all in one place.`}
           </p>
         </div>
 
@@ -286,24 +279,9 @@ export default async function GardenPage({
           <GardenDigest items={digestItems} juxtaposition={juxtaposition} />
         )}
 
-        {/* Phase 19.3 — on-the-rise grid. Hot / ready / recently-warmed
-            cards spark curiosity before the user scrolls into the
-            broader browse surface. */}
-        <OnTheRise items={await loadOnTheRise(user.id)} />
-
-        {/* Browse separator */}
-        <div className="mt-12 mb-4 flex items-baseline justify-between gap-3 border-t border-rule pt-6">
-          <h2 className="font-sans text-[20px] font-semibold tracking-tight text-ink">
-            Browse
-          </h2>
-          <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag">
-            All {allItems.length}
-          </p>
-        </div>
-
-        {/* Smart search */}
-        <SearchBar />
-
+        {/* Phase 17: cluster vs list toggle + filter chips share the
+            row above the feed surfaces. Cluster view is the default;
+            list view ships the existing ranked feed. */}
         <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
           <FilterChips active={activeFilter} />
           <ViewToggle active={activeView} />
