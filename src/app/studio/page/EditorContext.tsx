@@ -15,6 +15,11 @@
 // the context. The rail calls it instead of building the Tiptap chain
 // itself; that keeps the bubble-insert call shape (and the
 // scroll-to-existing-bubble fallback) in one place.
+//
+// Phase 20.5 (2026-05-06): renamed to `insertThoughtBubble`. Same
+// behavior, but the unified node spec carries a `source` attr so plan
+// beats can use the same shape. The duplicate-check walks
+// thoughtBubble nodes whose ideaId matches.
 
 'use client';
 
@@ -26,39 +31,42 @@ import {
   type ReactNode,
 } from 'react';
 import type { Editor } from '@tiptap/react';
-import type { IdeaBubbleAttrs } from './IdeaBubbleExtension';
+import type { ThoughtBubbleAttrs } from './ThoughtBubbleExtension';
 
-export type InsertIdeaBubbleResult =
+export type InsertThoughtBubbleResult =
   | { ok: true; inserted: true }
-  // Fallback when there's no editor yet — the rail can still update its
-  // own client-side 'pulled' set so the pill flips visually.
   | { ok: false; reason: 'no_editor' };
 
 type EditorCtxValue = {
   editor: Editor | null;
   setEditor: (editor: Editor | null) => void;
   /**
-   * Phase 20 slice 5: insert an ideaBubble node ABOVE the current block,
-   * OR scroll an existing bubble for the same ideaId into view if one
-   * already lives in the doc. Returns ok:true once the editor has done
-   * either of those.
+   * Insert a thoughtBubble node ABOVE the current block. For
+   * source='idea', if a bubble for the same ideaId already lives in
+   * the doc, we scroll to it instead of inserting a duplicate. For
+   * source='plan' (one bubble per beat) we always insert; the caller
+   * (commitProposal) is responsible for not double-writing.
    */
-  insertIdeaBubble: (attrs: IdeaBubbleAttrs) => InsertIdeaBubbleResult;
+  insertThoughtBubble: (attrs: ThoughtBubbleAttrs) => InsertThoughtBubbleResult;
 };
 
 const EditorCtx = createContext<EditorCtxValue | null>(null);
 
 /**
- * Walk the doc looking for an ideaBubble node whose ideaId matches.
- * Returns the position of the FIRST match (rare edge case: two bubbles
- * for the same idea — shouldn't happen, but if it does we land on the
- * earlier one). Null when no match.
+ * Walk the doc looking for a thoughtBubble with source='idea' whose
+ * ideaId matches. Returns the position of the first match, null
+ * otherwise. Plan bubbles are not deduped here — beat IDs are unique
+ * per draft and commitProposal owns the write.
  */
-function findExistingBubblePos(editor: Editor, ideaId: string): number | null {
+function findExistingIdeaBubblePos(editor: Editor, ideaId: string): number | null {
   let found: number | null = null;
   editor.state.doc.descendants((node, pos) => {
     if (found !== null) return false;
-    if (node.type.name === 'ideaBubble' && node.attrs.ideaId === ideaId) {
+    if (
+      node.type.name === 'thoughtBubble' &&
+      node.attrs.source === 'idea' &&
+      node.attrs.ideaId === ideaId
+    ) {
       found = pos;
       return false;
     }
@@ -67,47 +75,37 @@ function findExistingBubblePos(editor: Editor, ideaId: string): number | null {
   return found;
 }
 
-/**
- * Provider for the editor instance. Wrap the part of the route tree that
- * needs to read or write the live editor (typically the route's grid).
- *
- * Keep the provider as close to its consumers as possible — the lifetime
- * of the editor instance equals the lifetime of the wrapped subtree.
- */
 export function EditorContextProvider({ children }: { children: ReactNode }) {
   const [editor, setEditor] = useState<Editor | null>(null);
 
-  const insertIdeaBubble = useCallback(
-    (attrs: IdeaBubbleAttrs): InsertIdeaBubbleResult => {
+  const insertThoughtBubble = useCallback(
+    (attrs: ThoughtBubbleAttrs): InsertThoughtBubbleResult => {
       if (!editor) return { ok: false, reason: 'no_editor' };
 
-      const existing = findExistingBubblePos(editor, attrs.ideaId);
-      if (existing !== null) {
-        // Already in the doc — focus + scroll into view, don't duplicate.
-        const dom = editor.view.nodeDOM(existing) as HTMLElement | null;
-        if (dom && typeof dom.scrollIntoView === 'function') {
-          dom.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (attrs.source === 'idea' && attrs.ideaId) {
+        const existing = findExistingIdeaBubblePos(editor, attrs.ideaId);
+        if (existing !== null) {
+          const dom = editor.view.nodeDOM(existing) as HTMLElement | null;
+          if (dom && typeof dom.scrollIntoView === 'function') {
+            dom.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return { ok: true, inserted: true };
         }
-        return { ok: true, inserted: true };
       }
 
-      editor.chain().focus().insertIdeaBubble(attrs).run();
+      editor.chain().focus().insertThoughtBubble(attrs).run();
       return { ok: true, inserted: true };
     },
     [editor]
   );
 
   return (
-    <EditorCtx.Provider value={{ editor, setEditor, insertIdeaBubble }}>
+    <EditorCtx.Provider value={{ editor, setEditor, insertThoughtBubble }}>
       {children}
     </EditorCtx.Provider>
   );
 }
 
-/**
- * Hook to read the shared editor. Throws if used outside the provider —
- * we want the misuse to be loud rather than silently producing dead refs.
- */
 export function useEditorContext(): EditorCtxValue {
   const ctx = useContext(EditorCtx);
   if (!ctx) {

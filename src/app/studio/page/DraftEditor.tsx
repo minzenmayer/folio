@@ -39,7 +39,10 @@
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Heading from '@tiptap/extension-heading';
-import { IdeaBubbleExtension } from './IdeaBubbleExtension';
+import {
+  ThoughtBubbleExtension,
+  migrateIdeaBubbleToThoughtBubble,
+} from './ThoughtBubbleExtension';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateDraft } from './actions';
@@ -364,12 +367,19 @@ export function DraftEditor({
     extensions: [
       StarterKit.configure({ heading: false }),
       ThoughtbedHeading,
-      // Phase 20 slice 4 (2026-05-06): custom node for "From your Garden"
-      // thought-bubbles. Slice 5 calls insertIdeaBubble from the rail.
-      IdeaBubbleExtension,
+      // Phase 20.5 (2026-05-06): unified thoughtBubble node — same
+      // shape for rail-pulled ideas (source='idea') and spar-handoff
+      // plan beats (source='plan'). Replaces the brief Phase 20
+      // ideaBubble extension; old saved nodes migrate at load.
+      ThoughtBubbleExtension,
     ],
     immediatelyRender: false,
-    content: initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] },
+    // Phase 20.5: rename any persisted `ideaBubble` nodes to
+    // `thoughtBubble` with source 'idea' before Tiptap sees them.
+    content:
+      (migrateIdeaBubbleToThoughtBubble(
+        initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] }
+      ) as any),
     onUpdate: ({ editor: ed }) => {
       scheduleSave(ed.getJSON());
     },

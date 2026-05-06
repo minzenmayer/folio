@@ -84,7 +84,7 @@ export function AssistantRailLive({
   draftId: string;
   mode?: GardenRailMode;
 }) {
-  const { editor, insertIdeaBubble } = useEditorContext();
+  const { editor, insertThoughtBubble } = useEditorContext();
 
   const [awake, setAwake] = useState(mode !== 'self-pilot');
   // Phase 20 slice 6: three-state collapse, persisted to localStorage.
@@ -188,7 +188,8 @@ export function AssistantRailLive({
             : hit.snippet ?? ''
         ).trim();
 
-        const result = insertIdeaBubble({
+        const result = insertThoughtBubble({
+          source: 'idea',
           ideaId: hit.id,
           kind: hit.kind,
           title,
@@ -234,7 +235,7 @@ export function AssistantRailLive({
         })
         .run();
     },
-    [editor, insertIdeaBubble]
+    [editor, insertThoughtBubble]
   );
 
   // Phase 20: Refresh button in the rail header. Fires findSimilar with
