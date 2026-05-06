@@ -16,7 +16,6 @@ import {
   bringBack,
 } from '../actions';
 import { demoteAutoClaim } from '../seed-actions';
-import { markAsWritingMaterial } from '../actions';
 
 interface Idea {
   id: string;
@@ -267,58 +266,35 @@ export function ExpandSurfaceClaimed({
                 {busy === 'set' ? 'Setting aside…' : 'Set aside'}
               </button>
               {idea.claimKind === 'auto_claimed' && (
-                <>
-                  <button
-                    onClick={() => {
-                      if (pending) return;
-                      setBusy('writing');
-                      start(async () => {
-                        try {
-                          await markAsWritingMaterial(idea.id);
-                          router.refresh();
-                        } catch (err) {
-                          console.warn('[ExpandSurfaceClaimed] mark failed', err);
-                        } finally {
-                          setBusy(null);
-                        }
-                      });
-                    }}
-                    disabled={pending}
-                    title="Confirms this is real writing material. The idea joins your positive corpus so the system learns to surface similar ideas."
-                    className="font-sans text-[13px] px-3 py-[6px] rounded-md bg-ink text-paper border border-ink hover:bg-ink-soft disabled:opacity-50 ml-auto"
-                  >
-                    {busy === 'writing' ? 'Marking…' : 'This is writing material'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (pending) return;
-                      if (
-                        typeof window !== 'undefined' &&
-                        !window.confirm(
-                          'Demote this idea? It moves back to unclaimed and the partner Garden card disappears.'
-                        )
-                      ) {
-                        return;
+                <button
+                  onClick={() => {
+                    if (pending) return;
+                    if (
+                      typeof window !== 'undefined' &&
+                      !window.confirm(
+                        'Demote this idea? It moves back to unclaimed and the partner Garden card disappears.'
+                      )
+                    ) {
+                      return;
+                    }
+                    setBusy('demote');
+                    start(async () => {
+                      try {
+                        await demoteAutoClaim({ ideaId: idea.id });
+                        router.push('/studio/garden');
+                      } catch (err) {
+                        console.warn('[ExpandSurfaceClaimed] demote failed', err);
+                      } finally {
+                        setBusy(null);
                       }
-                      setBusy('demote');
-                      start(async () => {
-                        try {
-                          await demoteAutoClaim({ ideaId: idea.id });
-                          router.push('/studio/garden');
-                        } catch (err) {
-                          console.warn('[ExpandSurfaceClaimed] demote failed', err);
-                        } finally {
-                          setBusy(null);
-                        }
-                      });
-                    }}
-                    disabled={pending}
-                    title="Reverses the auto-claim. The source extracted idea returns to the unclaimed lane."
-                    className="font-sans text-[13px] px-3 py-[6px] rounded-md bg-paper text-tag border border-rule hover:border-rule-strong hover:text-ink disabled:opacity-50"
-                  >
-                    {busy === 'demote' ? 'Demoting…' : 'Demote'}
-                  </button>
-                </>
+                    });
+                  }}
+                  disabled={pending}
+                  title="Reverses the auto-claim. The source extracted idea returns to the unclaimed lane."
+                  className="font-sans text-[13px] px-3 py-[6px] rounded-md bg-paper text-tag border border-rule hover:border-rule-strong hover:text-ink disabled:opacity-50 ml-auto"
+                >
+                  {busy === 'demote' ? 'Demoting…' : 'Demote'}
+                </button>
               )}
             </>
           )}

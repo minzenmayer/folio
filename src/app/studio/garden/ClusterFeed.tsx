@@ -13,13 +13,11 @@ export function ClusterFeed({ clusters }: { clusters: ClusterRender[] }) {
     return (
       <div className="text-center py-12 border border-dashed border-rule rounded-card bg-paper">
         <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-2">
-          No clusters match this filter
+          No clusters yet
         </div>
         <p className="font-sans text-[14px] text-tag">
-          Try removing the filter, or switch to{' '}
-          <span className="font-medium text-ink">List</span> view above for
-          the flat feed. Clusters group ideas by theme; not every filtered
-          subset has clusters yet.
+          Clusters compute overnight. Check back tomorrow, or switch to list
+          view above for the flat feed.
         </p>
       </div>
     );

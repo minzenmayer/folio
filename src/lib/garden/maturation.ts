@@ -410,24 +410,14 @@ export async function runMaturationPass(
     report.errors.push(`loadTopicFitContext: ${(err as Error).message}`);
   }
 
-  // Phase 19.2 (2026-05-05): pyramid cap. Build a target list per
-  // idea, then sort by composite score, then apply hard caps:
-  // top K can be hot, next M can be ready, rest is capped at warm.
-  // Eliminates the 'flood at the top' problem — strict leaderboard.
-  type Target = {
-    idea: IdeaCand;
-    nextTemp: Temperature;
-    nextMat: Maturity;
-    composite: number; // depth × fit, plus signal bonuses
-    fit: number;
-    maturityLifts: number;
-  };
-  const targets: Target[] = [];
-
   for (const idea of ideasList) {
     try {
     let nextTemp = idea.temperature;
     let nextMat = idea.maturity;
+    // Phase 18 hotfix (2026-05-05): track maturity lifts per pass.
+    // 2+ in one pass = stacked-signal evidence the idea is really
+    // resonating; force temperature to 'hot.' Provides a path to
+    // hot without requiring 3+ temperature lifts to stack.
     let maturityLifts = 0;
 
     // ── Signal 1: depth+breadth on entry ───────────────────
@@ -592,108 +582,27 @@ export async function runMaturationPass(
       nextMat = idea.maturity;
     }
 
-    // Composite score for ranking. depth × fit is the primary;
-    // tiebreak by signal count (more signals = stronger signal).
-    const depth = idea.depthSignal ?? 0;
-    const signalBonus =
-      (distinctKinds.size >= 2 ? 0.05 : 0) +
-      (cluster && cluster.size >= 3 ? 0.05 : 0) +
-      (maxDraftCos >= COSINE_DRAFT_THRESHOLD_TEMP ? 0.05 : 0) +
-      (ec >= 3 ? 0.05 : 0);
-    const composite = depth * fit + signalBonus;
-
-    targets.push({
-      idea,
-      nextTemp,
-      nextMat,
-      composite,
-      fit,
-      maturityLifts,
-    });
-    } catch (err) {
-      report.errors.push(`evaluate ${idea.id}: ${(err as Error).message}`);
-    }
-  }
-
-  // Phase 19.2 pyramid cap. Sort all targets by composite desc.
-  // Top HOT_CAP can be hot. Top (HOT_CAP + READY_CAP) can be ready.
-  // Anything below that loses any formula-given hot/ready and gets
-  // demoted to its appropriate ceiling (warm or below).
-  //
-  // Caps tuned to a 'top-of-pyramid' shape:
-  //   hot:   max(10, ceil(1.5% of inspected))
-  //   ready: max(30, ceil(5% of inspected))
-  // So a 1000-idea garden gets ~15 hot + ~50 ready. A 100-idea
-  // garden gets the floor of 10 hot + 30 ready. Strict cap.
-  const HOT_CAP = Math.max(10, Math.ceil(targets.length * 0.015));
-  const READY_CAP = Math.max(30, Math.ceil(targets.length * 0.05));
-
-  const ranked = [...targets].sort((a, b) => b.composite - a.composite);
-  const hotIds = new Set<string>();
-  const readyIds = new Set<string>();
-  for (let i = 0; i < ranked.length; i++) {
-    if (i < HOT_CAP) {
-      hotIds.add(ranked[i].idea.id);
-    } else if (i < HOT_CAP + READY_CAP) {
-      readyIds.add(ranked[i].idea.id);
-    }
-  }
-
-  // Apply caps + write to DB.
-  for (const t of targets) {
-    let { nextTemp, nextMat } = t;
-    const isInHotPool = hotIds.has(t.idea.id);
-    const isInReadyPool = readyIds.has(t.idea.id);
-
-    // Demotion: if the formula said hot but this idea isn't in the
-    // hot pool, downgrade to warm. Same for ready → shaping.
-    if (nextTemp === 'hot' && !isInHotPool) {
-      nextTemp = 'warm';
-    }
-    if (nextMat === 'ready' && !isInHotPool && !isInReadyPool) {
-      nextMat = 'shaping';
-    }
-    // Promotion: hot pool members get their temperature lifted to
-    // hot if not already (and not pinned/set_aside).
-    if (
-      isInHotPool &&
-      t.idea.temperature !== 'hot' &&
-      t.idea.temperature !== 'set_aside'
-    ) {
-      nextTemp = 'hot';
-      // Also ensure maturity is at least 'ready' for hot-pool items.
-      if (maturityIndex(nextMat) < maturityIndex('ready')) {
-        nextMat = 'ready';
-      }
-    }
-    if (isInReadyPool && maturityIndex(nextMat) < maturityIndex('shaping')) {
-      // Ready-pool members get at least 'shaping' maturity.
-      nextMat = 'shaping';
-    }
-
-    if (
-      nextTemp !== t.idea.temperature ||
-      nextMat !== t.idea.maturity
-    ) {
+    if (nextTemp !== idea.temperature || nextMat !== idea.maturity) {
       try {
         await db
           .update(ideas)
           .set({
             temperature: nextTemp,
             maturity: nextMat,
-            ...(nextTemp !== t.idea.temperature
+            ...(nextTemp !== idea.temperature
               ? { temperatureUpdatedAt: new Date() }
               : {}),
           })
-          .where(
-            and(eq(ideas.userId, userId), eq(ideas.id, t.idea.id))
-          );
+          .where(and(eq(ideas.userId, userId), eq(ideas.id, idea.id)));
         report.lifted += 1;
       } catch (err) {
         report.errors.push(
-          `lift ${t.idea.id}: ${(err as Error).message}`
+          `lift ${idea.id}: ${(err as Error).message}`
         );
       }
+    }
+    } catch (err) {
+      report.errors.push(`evaluate ${idea.id}: ${(err as Error).message}`);
     }
   }
 
