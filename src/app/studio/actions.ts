@@ -2286,3 +2286,73 @@ export async function exploreIdeas(
     return { ok: false, reason: 'error', message };
   }
 }
+
+// ─── originalityCheck — Phase 21 slice 10 ──────────────────────────
+//
+// Runs findSimilar against the user's PUBLISHED archive
+// (newsletter_issue + linkedin_post) with a high-similarity threshold
+// and returns matches the chat companion renders as a tool result.
+// Lets the user check whether the post they're drafting is going to
+// duplicate something they've already published.
+//
+// Threshold: 0.65 cosine similarity. Tuned conservatively — anything
+// higher and we miss real overlaps where the writer rephrased the
+// same idea; anything lower and we surface noise. The chat surface
+// shows a friendly null-result when nothing crosses the threshold.
+
+const ORIGINALITY_THRESHOLD = 0.65;
+const ORIGINALITY_LIMIT = 6;
+const ORIGINALITY_MIN_CHARS = 40;
+
+const originalityCheckSchema = z.object({
+  text: z.string().min(1).max(8000),
+});
+
+export type OriginalityCheckResult =
+  | {
+      ok: true;
+      matches: SimilarHit[];
+      basedOnChars: number;
+      threshold: number;
+    }
+  | {
+      ok: false;
+      reason: 'too_short' | 'error';
+      message: string;
+    };
+
+export async function originalityCheck(
+  input: unknown
+): Promise<OriginalityCheckResult> {
+  await requireUser();
+  const data = originalityCheckSchema.parse(input);
+  const text = data.text.trim();
+  if (text.length < ORIGINALITY_MIN_CHARS) {
+    return {
+      ok: false,
+      reason: 'too_short',
+      message: `Need at least ${ORIGINALITY_MIN_CHARS} characters to run a meaningful check.`,
+    };
+  }
+
+  try {
+    const hits = await findSimilar({
+      text,
+      kinds: ['newsletter_issue', 'linkedin_post'],
+      limit: ORIGINALITY_LIMIT,
+    });
+    const matches = hits
+      .filter((h) => h.similarity >= ORIGINALITY_THRESHOLD)
+      .slice(0, ORIGINALITY_LIMIT);
+    return {
+      ok: true,
+      matches,
+      basedOnChars: text.length,
+      threshold: ORIGINALITY_THRESHOLD,
+    };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'originality check failed';
+    return { ok: false, reason: 'error', message };
+  }
+}

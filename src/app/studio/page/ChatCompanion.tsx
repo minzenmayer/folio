@@ -26,7 +26,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
-import { findSimilar, type SimilarHit } from '../actions';
+import { findSimilar, originalityCheck, type SimilarHit } from '../actions';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 import { useRailCollapse } from './useRailCollapse';
@@ -59,6 +59,12 @@ type ChatTurn =
       kind: 'related';
       query: string;
       hits: SimilarHit[];
+    }
+  | {
+      id: string;
+      kind: 'originality';
+      basedOnChars: number;
+      matches: SimilarHit[];
     };
 
 // Phase 21 slice 8 (2026-05-06): supported slash commands.
@@ -234,12 +240,51 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
       }
 
       if (cmd === '/originality') {
+        // Phase 21 slice 10: runs originalityCheck against the
+        // user's published archive (newsletter_issue + linkedin_post)
+        // and renders matches as an originality turn. Defaults to
+        // checking against the most recent auto-feed query if no
+        // explicit text was passed.
+        const queryText = arg.length > 0 ? arg : lastQueryRef.current;
+        if (queryText.trim().length < MIN_QUERY_CHARS) {
+          appendTurn({
+            id: newId(),
+            kind: 'thoughtbed',
+            text:
+              'Pass me some words to check. Try /originality <a sentence or paragraph from your draft>.',
+          });
+          return;
+        }
         appendTurn({
           id: newId(),
           kind: 'thoughtbed',
-          text:
-            'Originality check wires in the next slice. For now I can re-run /related against your archive — try /related <your sentence>.',
+          text: 'Checking against your published archive…',
         });
+        try {
+          const result = await originalityCheck({ text: queryText });
+          if (!result.ok) {
+            appendTurn({
+              id: newId(),
+              kind: 'thoughtbed',
+              text: result.message,
+            });
+            return;
+          }
+          appendTurn({
+            id: newId(),
+            kind: 'originality',
+            basedOnChars: result.basedOnChars,
+            matches: result.matches,
+          });
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'check failed';
+          appendTurn({
+            id: newId(),
+            kind: 'thoughtbed',
+            text: `Couldn't run the check (${message}). Try again in a moment.`,
+          });
+        }
         return;
       }
 
@@ -745,6 +790,34 @@ function TurnView({
           </p>
         </div>
       </ThoughtbedTurn>
+    );
+  }
+
+  if (turn.kind === 'originality') {
+    return (
+      <>
+        <ThoughtbedTurn>
+          <p className="font-sans text-[12.5px] text-ink-soft leading-[1.55] m-0">
+            {turn.matches.length === 0
+              ? 'Nothing in your published archive overlaps. Fresh territory.'
+              : `${turn.matches.length} ${turn.matches.length === 1 ? 'piece' : 'pieces'} in your archive cover similar ground:`}
+          </p>
+        </ThoughtbedTurn>
+        {turn.matches.map((hit) => {
+          const cardId = `orig-${turn.id}-${hit.kind}-${hit.id}`;
+          return (
+            <IdeaCard
+              key={cardId}
+              hit={hit}
+              expanded={expandedCardId === cardId}
+              pulled={pulledIdeaIds.has(hit.id)}
+              onExpand={() => onExpand(cardId)}
+              onCollapse={onCollapse}
+              onPull={() => onPull(hit)}
+            />
+          );
+        })}
+      </>
     );
   }
 
