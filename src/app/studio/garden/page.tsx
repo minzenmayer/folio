@@ -38,6 +38,7 @@ import { ViewToggle } from './ViewToggle';
 import type { ClusterRender } from './ClusterCard';
 import { findEdgeMatches } from '@/lib/garden/edge-prompts';
 import { EdgePromptZone } from './EdgePromptZone';
+import { MatureNowButton } from './MatureNowButton';
 
 // Always render fresh — temperature changes are per-action and we
 // invalidate paths from server actions, but pages also benefit from
@@ -137,57 +138,59 @@ export default async function GardenPage({
   // empty, compute on-demand once (the cron will catch up daily but
   // the first user after migration shouldn't see a blank surface).
   let clusterSnapshots: ClusterSnapshot[] = await readClustersForToday(user.id);
+  // On-demand cluster compute when today's snapshot is missing.
+  // Wrapped in try/catch — when migration 0015 isn't applied,
+  // persistClusters silently fails and clusterSnapshots stays [].
   if (clusterSnapshots.length === 0 && allItems.length > 0) {
     try {
       const computed = await computeClusters(user.id);
       const persisted = await persistClusters(user.id, new Date(), computed);
       if (persisted > 0) {
         clusterSnapshots = await readClustersForToday(user.id);
-        // Phase 18 (2026-05-05) — fire the maturation pass right
-        // after the clusters land so signal #3 has data and the user
-        // sees lifted ideas immediately. Only runs once per user per
-        // day via this path (next visit hits the cluster cache and
-        // skips). The 04:00 UTC cron handles the daily rhythm.
-        try {
-          const matReport = await runMaturationPass(user.id);
-          if (matReport.lifted > 0) {
-            // Re-fetch items so the updated maturity/temperature
-            // render in the same response. Rebuild itemMap so the
-            // cluster hydration below picks up the new values.
-            allItems = await listGardenItems(user.id, {
-              sort: 'ripeness',
-              temperatures: ['hot', 'warm', 'cool', 'cold'],
-            });
-            itemMap = new Map<string, (typeof allItems)[number]>();
-            for (const it of allItems) itemMap.set(`${it.kind}|${it.id}`, it);
-          }
-        } catch (err) {
-          console.warn('[garden/page] inline maturation failed', err);
-        }
       }
     } catch (err) {
       console.warn('[garden/page] on-demand cluster compute failed', err);
     }
   }
 
-  // Hydrate cluster snapshots into ClusterRender shape.
-  const clusters: ClusterRender[] = clusterSnapshots.map((cs) => {
-    const repItem = itemMap.get(`${cs.repKind}|${cs.repId}`);
-    if (!repItem) return null;
-    const memberItems = cs.members
-      .map((m) => itemMap.get(`${m.kind}|${m.id}`))
-      .filter((m): m is NonNullable<typeof m> => !!m);
-    return {
-      id: cs.id,
-      rep: repItem,
-      theme: cs.theme,
-      members: memberItems,
-    };
-  }).filter((c): c is ClusterRender => c !== null);
+  // Phase 18 hotfix (2026-05-05) — maturation fires INDEPENDENTLY of
+  // cluster persistence. Signals 1, 2, 4, 5 work without idea_clusters
+  // (signal 3 just contributes nothing when membership is empty).
+  // Idempotent: each idea only writes if a temperature/maturity
+  // changed. The cron is canonical; this is the immediacy hatch.
+  if (allItems.length > 0) {
+    try {
+      const matReport = await runMaturationPass(user.id);
+      if (matReport.lifted > 0) {
+        // Re-fetch items so the updated maturity/temperature render
+        // in the same response. Rebuild itemMap so cluster hydration
+        // below picks up the new values.
+        allItems = await listGardenItems(user.id, {
+          sort: 'ripeness',
+          temperatures: ['hot', 'warm', 'cool', 'cold'],
+        });
+        itemMap = new Map<string, (typeof allItems)[number]>();
+        for (const it of allItems) itemMap.set(`${it.kind}|${it.id}`, it);
+      }
+    } catch (err) {
+      console.warn('[garden/page] inline maturation failed', err);
+    }
+  }
 
-  // Apply filter chips for the feed below.
+  // Apply filter chips. The filter affects BOTH cluster view (via
+  // matchesFilter on the representative) and flat-list view (via
+  // feedItems). activeView decides which shape renders.
   const activeFilter = sp.filter ?? 'all';
   const activeView: 'cluster' | 'list' = sp.view === 'list' ? 'list' : 'cluster';
+
+  function matchesFilter(it: (typeof allItems)[number]): boolean {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'hot') return it.temperature === 'hot';
+    if (activeFilter === 'ready') return it.maturity === 'ready';
+    if (activeFilter === 'unclaimed') return !it.isClaimed;
+    return true;
+  }
+
   let feedItems = allItems;
   if (activeFilter === 'hot') {
     feedItems = allItems.filter((i) => i.temperature === 'hot');
@@ -201,13 +204,51 @@ export default async function GardenPage({
     });
   }
 
+  // Hydrate cluster snapshots into ClusterRender shape, then filter
+  // by activeFilter (a cluster matches when its representative does).
+  const clusters: ClusterRender[] = clusterSnapshots.map((cs) => {
+    const repItem = itemMap.get(`${cs.repKind}|${cs.repId}`);
+    if (!repItem) return null;
+    const memberItems = cs.members
+      .map((m) => itemMap.get(`${m.kind}|${m.id}`))
+      .filter((m): m is NonNullable<typeof m> => !!m);
+    return {
+      id: cs.id,
+      rep: repItem,
+      theme: cs.theme,
+      members: memberItems,
+    };
+  }).filter((c): c is ClusterRender => c !== null && matchesFilter(c.rep));
+
+  // When set_aside is filtered, cluster view doesn't have a meaningful
+  // shape (clusters are computed against pending + claimed; set_aside
+  // is hidden from clustering). Fall back to the flat list of set
+  // aside items in cluster view too — by stuffing them as solo
+  // pseudo-clusters so the surface still renders something.
+  if (activeFilter === 'set_aside') {
+    clusters.length = 0;
+    for (const it of feedItems) {
+      clusters.push({
+        id: `pseudo-${it.kind}-${it.id}`,
+        rep: it,
+        theme: null,
+        members: [it],
+      });
+    }
+  }
+
+
+
   return (
     <section>
       <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
         <div className="mb-8">
-          <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink mb-2">
-            Garden
-          </h1>
+          <div className="flex items-baseline justify-between gap-3 mb-2">
+            <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink">
+              Garden
+            </h1>
+            <MatureNowButton />
+          </div>
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {allItems.length === 0
               ? 'Your Garden is empty. Plant something in Capture, or wait for sources to bring claims you can claim.'

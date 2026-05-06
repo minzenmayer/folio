@@ -9,6 +9,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/auth';
 import { pushToReady as libPushToReady } from '@/lib/garden/edge-prompts';
+import { runMaturationPass } from '@/lib/garden/maturation';
 
 export async function pushToReadyAction(input: {
   ideaId: string;
@@ -18,4 +19,22 @@ export async function pushToReadyAction(input: {
   await libPushToReady(user.id, input.ideaId);
   revalidatePath('/studio/garden');
   return { ok: true };
+}
+
+// Phase 18 manual trigger. Surfaces in the Garden header so the user
+// can fire the maturation pass without waiting for the daily cron.
+export async function runMaturationNow(): Promise<
+  { ok: true; lifted: number; inspected: number } | { ok: false; reason: string }
+> {
+  try {
+    const user = await requireUser();
+    const res = await runMaturationPass(user.id);
+    revalidatePath('/studio/garden');
+    return { ok: true, lifted: res.lifted, inspected: res.inspected };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : 'maturation failed',
+    };
+  }
 }
