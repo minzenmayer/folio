@@ -16,6 +16,8 @@ import {
   bringBack,
 } from '../actions';
 import { demoteAutoClaim } from '../seed-actions';
+import { WriteFromIdeaButton } from '../WriteFromIdeaButton';
+import { AddNoteInline } from '../AddNoteInline';
 
 interface Idea {
   id: string;
@@ -184,6 +186,9 @@ export function ExpandSurfaceClaimed({
               {body || <span className="italic text-tag">Click to add a body. Long-form text that grows over time as you merge new claims in.</span>}
             </div>
           )}
+          <div className="mt-3">
+            <AddNoteInline kind="idea" id={idea.id} />
+          </div>
         </div>
 
         {/* Linked ideas */}
@@ -234,6 +239,7 @@ export function ExpandSurfaceClaimed({
 
         {/* Actions */}
         <div className="pt-4 border-t border-rule flex gap-2 flex-wrap">
+          <WriteFromIdeaButton kind="idea" id={idea.id} variant="prominent" />
           {idea.temperature === 'set_aside' ? (
             <button
               onClick={() => action('back')}

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import type { GardenItem } from '@/lib/garden/types';
 import { TempPill, MaturityDots } from './pills';
+import { WriteFromIdeaButton } from './WriteFromIdeaButton';
 
 const SOURCE_LABEL: Record<string, string> = {
   newsletter_issue: 'newsletter',
@@ -39,14 +40,17 @@ export function GardenFeed({ items }: { items: GardenItem[] }) {
   return (
     <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">
       {items.map((item) => (
-        <li key={`${item.kind}-${item.id}`}>
+        <li
+          key={`${item.kind}-${item.id}`}
+          className="py-4 px-5 hover:bg-paper-2 transition-colors group"
+        >
           <Link
             href={
               item.isClaimed
                 ? `/studio/garden/${item.id}`
                 : `/studio/garden/extracted/${item.id}`
             }
-            className="block py-4 px-5 hover:bg-paper-2 transition-colors group"
+            className="block"
           >
             <div className="flex gap-3 items-baseline mb-1">
               <h2 className="font-sans font-medium text-[15px] leading-[1.35] tracking-tight text-ink group-hover:underline underline-offset-4 decoration-rule-strong">
@@ -65,24 +69,27 @@ export function GardenFeed({ items }: { items: GardenItem[] }) {
                 {item.preview}
               </p>
             )}
-            <div className="flex gap-2 flex-wrap items-center">
-              <TempPill t={item.temperature} />
-              {item.isClaimed && <MaturityDots m={item.maturity} />}
-              {item.themes.slice(0, 2).map((th) => (
-                <span
-                  key={th}
-                  className="font-mono text-[10px] px-2 py-[2px] rounded bg-paper-2 text-tag"
-                >
-                  {th}
-                </span>
-              ))}
-              {!item.isClaimed && (
-                <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-tag/70 ml-1">
-                  unclaimed
-                </span>
-              )}
-            </div>
           </Link>
+          <div className="flex gap-2 flex-wrap items-center">
+            <TempPill t={item.temperature} />
+            {item.isClaimed && <MaturityDots m={item.maturity} />}
+            {item.themes.slice(0, 2).map((th) => (
+              <span
+                key={th}
+                className="font-mono text-[10px] px-2 py-[2px] rounded bg-paper-2 text-tag"
+              >
+                {th}
+              </span>
+            ))}
+            {!item.isClaimed && (
+              <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-tag/70 ml-1">
+                unclaimed
+              </span>
+            )}
+            <span className="ml-auto">
+              <WriteFromIdeaButton kind={item.kind} id={item.id} />
+            </span>
+          </div>
         </li>
       ))}
     </ul>

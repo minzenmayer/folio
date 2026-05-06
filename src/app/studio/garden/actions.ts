@@ -7,11 +7,13 @@
 
 import { revalidatePath } from 'next/cache';
 import { and, eq, sql } from 'drizzle-orm';
+import { redirect } from 'next/navigation';
 import {
   db,
   ideas,
   extractedIdeas,
   ideaEdges,
+  drafts,
   gardenJuxtapositions,
   type NewIdea,
 } from '@/db';
@@ -487,4 +489,264 @@ export async function computeJuxtapositionForUser(): Promise<{
   const user = await requireUser();
   const id = await computeNextJuxtaposition(user.id);
   return { ok: true, juxtapositionId: id };
+}
+
+// ── Phase 19.x (2026-05-06) ─────────────────────────────────────
+// composeFromIdea — one-click "Write from idea" hand-off.
+//
+// User clicks the Write button on a Garden card; we create a fresh
+// draft pre-seeded with the idea's title (H1) + essence (opening
+// paragraph) + body (a "Where I've been on this" italicized note),
+// embed the draft, and redirect into the editor in newsletter mode
+// so the rail's Resonance zone wakes up next to the writing.
+//
+// Why this shape: Payton said "I need to go to click a button and
+// just go straight into the writing mode, converting this idea
+// into it." Goal is zero-friction conversion from Garden card to
+// editing surface — no spar, no topic textarea round-trip.
+//
+// Side effects: marks the idea as visited (so ripeness math sees
+// the activity); flips auto_claimed → claimed (pulling into a
+// draft is the implicit-claim signal, same logic as
+// markIdeaPulledIntoDraft).
+
+export async function composeFromIdea(
+  kind: 'idea' | 'extracted_idea',
+  id: string
+): Promise<never> {
+  const user = await requireUser();
+
+  // Load idea + build seed text for the draft. Each kind has a
+  // slightly different shape — ideas have title/essence/body,
+  // extracted_ideas have title/claim/evidence.
+  let title: string;
+  let essence: string | null = null;
+  let body: string | null = null;
+
+  if (kind === 'idea') {
+    const [row] = await db
+      .select({
+        title: ideas.title,
+        essence: ideas.essence,
+        body: ideas.body,
+        claimKind: ideas.claimKind,
+      })
+      .from(ideas)
+      .where(and(eq(ideas.id, id), eq(ideas.userId, user.id)))
+      .limit(1);
+    if (!row) throw new Error('idea not found');
+    title = row.title;
+    essence = row.essence;
+    body = row.body;
+
+    // Implicit-claim flip + visit bump in one update.
+    if (row.claimKind === 'auto_claimed') {
+      await db
+        .update(ideas)
+        .set({ claimKind: 'claimed', lastVisitedAt: new Date() })
+        .where(and(eq(ideas.id, id), eq(ideas.userId, user.id)));
+    } else {
+      await db
+        .update(ideas)
+        .set({ lastVisitedAt: new Date() })
+        .where(and(eq(ideas.id, id), eq(ideas.userId, user.id)));
+    }
+  } else {
+    const [row] = await db
+      .select({
+        title: extractedIdeas.title,
+        claim: extractedIdeas.claim,
+        evidence: extractedIdeas.evidence,
+      })
+      .from(extractedIdeas)
+      .where(
+        and(
+          eq(extractedIdeas.id, id),
+          eq(extractedIdeas.userId, user.id)
+        )
+      )
+      .limit(1);
+    if (!row) throw new Error('extracted idea not found');
+    title = row.title;
+    essence = row.claim;
+    body = row.evidence;
+  }
+
+  // Build the Tiptap seed doc. Title becomes H1. Essence becomes
+  // the opening paragraph. Body — when present — becomes a muted
+  // "Where I've been on this" italicized note, blockquote-style,
+  // so the user sees their prior thinking but the cursor lands
+  // ready to write fresh prose.
+  const docContent: Array<Record<string, unknown>> = [
+    {
+      type: 'heading',
+      attrs: { level: 1 },
+      content: [{ type: 'text', text: title }],
+    },
+  ];
+
+  if (essence && essence.trim().length > 0) {
+    docContent.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: essence.trim() }],
+    });
+  }
+
+  if (body && body.trim().length > 0 && body.trim() !== (essence ?? '').trim()) {
+    docContent.push({
+      type: 'blockquote',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [{ type: 'italic' }],
+              text: body.trim(),
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  // Cursor-ready empty paragraph at the bottom so the editor lands
+  // ready to type instead of inside the seeded prose.
+  docContent.push({ type: 'paragraph' });
+
+  const initialDoc = { type: 'doc', content: docContent };
+
+  const [draft] = await db
+    .insert(drafts)
+    .values({
+      userId: user.id,
+      title,
+      contentJson: initialDoc,
+    })
+    .returning();
+
+  // Embed the seed text so the rail can find adjacent ideas right
+  // away. Failure here isn't a blocker.
+  try {
+    const seedText = [title, essence ?? '', body ?? '']
+      .filter((s) => s && s.length > 0)
+      .join('\n\n');
+    const embedding = await embedText(seedText);
+    await db
+      .update(drafts)
+      .set({ embedding })
+      .where(and(eq(drafts.id, draft.id), eq(drafts.userId, user.id)));
+  } catch (err) {
+    console.warn('[composeFromIdea] embed failed', err);
+  }
+
+  revalidatePath('/studio');
+  revalidatePath('/studio/garden');
+  revalidatePath('/studio/page');
+
+  redirect(`/studio/page/${draft.id}?mode=newsletter`);
+}
+
+// ── Phase 19.x (2026-05-06) ─────────────────────────────────────
+// appendIdeaNote — "Your take" inline addition.
+//
+// User adds their own framing onto an idea card without leaving the
+// Garden. Goal is logical embedding — not blind append. The note
+// becomes a dated "Your take" section added to the bottom of the
+// body, separated from prior content, and the entire body re-embeds
+// so similarity math picks up the new framing.
+//
+// Side effects:
+//   1. Appends "## Your take · YYYY-MM-DD\n{trimmed}" to body.
+//   2. Re-embeds (title + essence + new body) — the note flows
+//      into all retrieval queries downstream.
+//   3. Bumps lastVisitedAt + last_evolved_at (engagement + evolution
+//      signals the maturation engine reads).
+//   4. Flips auto_claimed → claimed (a user adding their own take
+//      is the same endorsement as pulling into a draft — kills the
+//      AUTO badge).
+//
+// Why not just edit body directly? Because edits feel clinical;
+// adding a "Your take" section preserves the original idea while
+// surfacing the user's contribution as a distinct layer. Future
+// notes will stack as additional sections, building a thinking
+// log over time.
+
+export async function appendIdeaNote(opts: {
+  kind: 'idea' | 'extracted_idea';
+  id: string;
+  note: string;
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const user = await requireUser();
+  const trimmed = opts.note.trim();
+  if (trimmed.length === 0) return { ok: false, reason: 'note required' };
+  if (trimmed.length > 4000) return { ok: false, reason: 'note too long' };
+
+  if (opts.kind === 'extracted_idea') {
+    // Extracted ideas don't have a body column — they have evidence.
+    // For now: claim the extracted idea with the note text. This
+    // routes through the normal claim flow so the user gets a real
+    // partner ideas row with their take as the body. Calling
+    // claimExtractedIdea inline keeps the embedding + provenance
+    // logic in one place.
+    return claimExtractedIdea({
+      extractedId: opts.id,
+      claimText: trimmed,
+    }).then((r) => {
+      if (r.ok) return { ok: true } as const;
+      if ('reason' in r) return { ok: false, reason: r.reason } as const;
+      return { ok: false, reason: 'claim suggested merge' } as const;
+    });
+  }
+
+  // Real ideas — append "Your take" section.
+  const [row] = await db
+    .select({
+      title: ideas.title,
+      essence: ideas.essence,
+      body: ideas.body,
+      claimKind: ideas.claimKind,
+    })
+    .from(ideas)
+    .where(and(eq(ideas.id, opts.id), eq(ideas.userId, user.id)))
+    .limit(1);
+  if (!row) return { ok: false, reason: 'idea not found' };
+
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const yourTake = `## Your take · ${today}\n${trimmed}`;
+  const newBody = row.body && row.body.trim().length > 0
+    ? `${row.body.trimEnd()}\n\n${yourTake}`
+    : yourTake;
+
+  // Re-embed using the full text. The "Your take" section becomes
+  // part of the embedding so the rail's similarity queries surface
+  // this idea when the user is writing about adjacent topics.
+  let embedding: number[] | null = null;
+  try {
+    const text = [row.title, row.essence ?? '', newBody]
+      .filter((s) => s && s.length > 0)
+      .join('\n\n');
+    embedding = await embedText(text);
+  } catch (err) {
+    console.warn('[appendIdeaNote] embed failed', err);
+  }
+
+  const patch: Record<string, unknown> = {
+    body: newBody,
+    updatedAt: new Date(),
+    lastVisitedAt: new Date(),
+    lastEvolvedAt: new Date(),
+  };
+  if (row.claimKind === 'auto_claimed') {
+    patch.claimKind = 'claimed';
+  }
+  if (embedding) patch.embedding = embedding;
+
+  await db
+    .update(ideas)
+    .set(patch)
+    .where(and(eq(ideas.id, opts.id), eq(ideas.userId, user.id)));
+
+  revalidate();
+  return { ok: true };
 }

@@ -15,6 +15,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import type { GardenItem } from '@/lib/garden/types';
 import { TempPill, MaturityDots } from './pills';
+import { WriteFromIdeaButton } from './WriteFromIdeaButton';
 
 const SOURCE_LABEL: Record<string, string> = {
   newsletter_issue: 'CSL',
@@ -75,6 +76,10 @@ export function ClusterCard({ cluster }: { cluster: ClusterRender }) {
               Auto
             </span>
           )}
+          <WriteFromIdeaButton
+            kind={cluster.rep.kind}
+            id={cluster.rep.id}
+          />
           {others.length > 0 && (
             <button
               type="button"
@@ -146,6 +151,7 @@ export function ClusterCard({ cluster }: { cluster: ClusterRender }) {
                           ? 'idea'
                           : 'unclaimed'}
                     </span>
+                    <WriteFromIdeaButton kind={m.kind} id={m.id} />
                   </div>
                   {m.preview && (
                     <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5] line-clamp-1">

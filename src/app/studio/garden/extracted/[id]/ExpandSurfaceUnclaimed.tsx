@@ -7,6 +7,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { TempPill } from '../../pills';
+import { WriteFromIdeaButton } from '../../WriteFromIdeaButton';
 import type { Temperature } from '@/lib/garden/types';
 import {
   claimExtractedIdea,
@@ -103,6 +104,10 @@ export function ExpandSurfaceUnclaimed({ ext }: { ext: Ext }) {
           <TempPill t={ext.temperature} />
           <span className="font-mono text-[10px] tracking-[0.06em] text-tag">●○○○ seed</span>
           <span className="ml-auto font-mono text-[10px] tracking-[0.12em] uppercase text-tag/70">unclaimed</span>
+        </div>
+
+        <div className="mb-6">
+          <WriteFromIdeaButton kind="extracted_idea" id={ext.id} variant="prominent" />
         </div>
 
         {/* Make it mine OR merge picker */}
