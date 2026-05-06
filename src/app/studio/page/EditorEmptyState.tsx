@@ -18,10 +18,17 @@
 
 import { useState } from 'react';
 
+export type EntryIntent = 'write' | 'find' | 'refine' | 'think';
+
 type EntryChip = {
-  id: 'write' | 'find' | 'refine' | 'think';
+  id: EntryIntent;
   label: string;
   hint: string;
+};
+
+export type ChatSeed = {
+  intent: EntryIntent;
+  text?: string;
 };
 
 const CHIPS: ReadonlyArray<EntryChip> = [
@@ -36,7 +43,7 @@ export function EditorEmptyState({
   onContinue,
 }: {
   userName?: string | null;
-  onContinue: (seed?: { kind: EntryChip['id']; text?: string }) => void;
+  onContinue: (seed: ChatSeed) => void;
 }) {
   const [text, setText] = useState('');
   const [composing, setComposing] = useState(false);
@@ -47,7 +54,7 @@ export function EditorEmptyState({
     if (composing) return;
     const value = text.trim();
     if (value.length === 0) return;
-    onContinue({ kind: 'write', text: value });
+    onContinue({ intent: 'write', text: value });
   }
 
   return (
@@ -110,7 +117,7 @@ export function EditorEmptyState({
             <button
               key={chip.id}
               type="button"
-              onClick={() => onContinue({ kind: chip.id })}
+              onClick={() => onContinue({ intent: chip.id })}
               className="group flex flex-col items-start gap-0.5 px-3.5 py-2 rounded-card border border-rule bg-paper hover:border-ink hover:bg-paper-2 transition-colors text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
             >
               <span className="font-sans text-[13px] font-medium text-ink leading-[1.2]">

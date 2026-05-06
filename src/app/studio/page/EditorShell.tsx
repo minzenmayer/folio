@@ -16,9 +16,10 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { EditorEmptyState } from './EditorEmptyState';
+import { EditorEmptyState, type ChatSeed } from './EditorEmptyState';
 import { PlatformProvider, type Platform } from './usePlatform';
 import { ArtifactPanelProvider } from './useArtifactPanel';
+import { ChatSeedProvider } from './useChatSeed';
 
 export function EditorShell({
   draftId,
@@ -36,6 +37,7 @@ export function EditorShell({
   artifactPanel: ReactNode;
 }) {
   const [hasInteracted, setHasInteracted] = useState(false);
+  const [seed, setSeed] = useState<ChatSeed | null>(null);
   const showEmpty = (initialIsEmpty ?? false) && !hasInteracted;
 
   // When the draft already had content on first load, default the
@@ -50,13 +52,18 @@ export function EditorShell({
         {showEmpty ? (
           <EditorEmptyState
             userName={userName ?? null}
-            onContinue={() => setHasInteracted(true)}
+            onContinue={(s) => {
+              setSeed(s);
+              setHasInteracted(true);
+            }}
           />
         ) : (
-          <div className="flex flex-col lg:flex-row min-h-[calc(100vh-0px)]">
-            <main className="flex-1 min-w-0 flex flex-col">{chat}</main>
-            {artifactPanel}
-          </div>
+          <ChatSeedProvider initial={seed}>
+            <div className="flex flex-col lg:flex-row min-h-[calc(100vh-0px)]">
+              <main className="flex-1 min-w-0 flex flex-col">{chat}</main>
+              {artifactPanel}
+            </div>
+          </ChatSeedProvider>
         )}
       </ArtifactPanelProvider>
     </PlatformProvider>

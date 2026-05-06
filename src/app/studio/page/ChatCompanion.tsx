@@ -27,6 +27,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
 import { useArtifactPanel } from './useArtifactPanel';
+import { useChatSeed } from './useChatSeed';
+import type { ChatSeed } from './EditorEmptyState';
 import { findSimilar, originalityCheck, type SimilarHit } from '../actions';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
@@ -91,6 +93,7 @@ type ChatCompanionProps = {
 export function ChatCompanion({ draftId }: ChatCompanionProps) {
   const { editor, insertThoughtBubble } = useEditorContext();
   const { openArtifact } = useArtifactPanel();
+  const { consume: consumeSeed } = useChatSeed();
   const { state: collapseState, toggleCollapsed } = useRailCollapse();
   const isCollapsed = collapseState === 'collapsed';
   const { platform } = usePlatform();
@@ -165,6 +168,68 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [editor, runRetrieval]);
+
+  // Phase 22 slice 5 (2026-05-06): consume the seed from
+  // EditorEmptyState (if any) on mount and translate it into an
+  // opening turn. Each chip intent maps to a different opener.
+  const seedConsumedRef = useRef(false);
+  useEffect(() => {
+    if (seedConsumedRef.current) return;
+    const seed = consumeSeed();
+    if (!seed) return;
+    seedConsumedRef.current = true;
+
+    if (seed.intent === 'write') {
+      if (seed.text && seed.text.length > 0) {
+        // User typed something into the empty-state input.
+        appendTurn({ id: newId(), kind: 'user', text: seed.text });
+        appendTurn({
+          id: newId(),
+          kind: 'thoughtbed',
+          text:
+            'Got it. Pick a platform up top (LinkedIn / Newsletter / Blog / Note) and start writing — I\'ll surface things from your Garden as you go. Or ask me to /find a thought to start from.',
+        });
+      } else {
+        appendTurn({
+          id: newId(),
+          kind: 'thoughtbed',
+          text:
+            'Pick a platform up top, then start writing in the editor or tell me what the post is about. I\'ll surface ideas from your Garden as you go.',
+        });
+      }
+      return;
+    }
+
+    if (seed.intent === 'find') {
+      appendTurn({
+        id: newId(),
+        kind: 'thoughtbed',
+        text:
+          'Looking for something ripe in your Garden to start from. Type a few words about the territory you want to explore — I\'ll search there.',
+      });
+      return;
+    }
+
+    if (seed.intent === 'refine') {
+      appendTurn({
+        id: newId(),
+        kind: 'thoughtbed',
+        text:
+          'Paste your draft into the chat (or open the editor and paste there). I\'ll read it, name what\'s working, and offer sharper hooks or closers.',
+      });
+      return;
+    }
+
+    if (seed.intent === 'think') {
+      appendTurn({
+        id: newId(),
+        kind: 'thoughtbed',
+        text:
+          'No artifact, no pressure. Tell me what you\'re turning over and I\'ll spar with you.',
+      });
+      return;
+    }
+  }, [appendTurn, consumeSeed]);
 
   const refreshIdeas = useCallback(() => {
     if (!editor) return;
@@ -891,6 +956,7 @@ function ArtifactPreviewTurn({
   turn: Extract<ChatTurn, { kind: 'artifact-preview' }>;
 }) {
   const { openArtifact } = useArtifactPanel();
+  const { consume: consumeSeed } = useChatSeed();
   return (
     <div className="pl-7 -mt-1">
       <div className="rounded-soft border border-rule bg-paper px-3 py-2.5">
