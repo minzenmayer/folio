@@ -44,6 +44,29 @@ type Status =
   | { kind: 'empty'; basedOnChars: number }
   | { kind: 'error'; message: string };
 
+// Phase 21 slice 8 (2026-05-06): user-driven conversation turns
+// stack on top of the auto-debounced retrieval feed. Each turn is
+// either the user's message, a Thoughtbed reply, or a tool-result
+// rendered inline. The auto-feed (Status above) lives BELOW the
+// turn log — those are the system's running observations from your
+// editor; the turn log is anything the user explicitly asked for.
+type ChatTurn =
+  | { id: string; kind: 'user'; text: string }
+  | { id: string; kind: 'thoughtbed'; text: string }
+  | { id: string; kind: 'tool'; label: string; body: string }
+  | {
+      id: string;
+      kind: 'related';
+      query: string;
+      hits: SimilarHit[];
+    };
+
+// Phase 21 slice 8 (2026-05-06): supported slash commands.
+//   /related <query>  — re-run findSimilar against the user's text
+//   /hook              — propose hook options (slice 11 LLM round)
+//   /closer            — propose closers (slice 11 LLM round)
+//   /originality       — check against user's archive (slice 10)
+
 type ChatCompanionProps = {
   draftId: string;
 };
@@ -59,10 +82,21 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
     () => new Set()
   );
   const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [composing, setComposing] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryStampRef = useRef(0);
   const lastQueryRef = useRef<string>('');
+
+  const newId = () =>
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`;
+  const appendTurn = useCallback((turn: ChatTurn) => {
+    setTurns((prev) => [...prev, turn]);
+  }, []);
 
   const runRetrieval = useCallback(
     async (text: string) => {
@@ -128,6 +162,98 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
     }
     runRetrieval(text);
   }, [editor, runRetrieval]);
+
+  // Phase 21 slice 8: chat input handler. Routes slash commands to
+  // their handlers; everything else lands as a user turn followed
+  // by a placeholder Thoughtbed acknowledgement. The LLM round for
+  // free-form replies wires in slice 11 once the per-platform
+  // skills (slice 9) and originality tool (slice 10) are in place.
+  const handleSend = useCallback(
+    async (raw: string) => {
+      const text = raw.trim();
+      if (text.length === 0) return;
+
+      const isSlash = text.startsWith('/');
+      const cmd = isSlash ? text.split(/\s+/)[0] : null;
+      const arg = isSlash ? text.replace(cmd ?? '', '').trim() : text;
+
+      // Push user's message as a turn first.
+      appendTurn({ id: newId(), kind: 'user', text });
+
+      if (cmd === '/related') {
+        const queryText = arg.length > 0 ? arg : lastQueryRef.current;
+        if (queryText.trim().length < MIN_QUERY_CHARS) {
+          appendTurn({
+            id: newId(),
+            kind: 'thoughtbed',
+            text:
+              'Give me a few more words to search on — paste a sentence or pass one with /related <query>.',
+          });
+          return;
+        }
+        appendTurn({
+          id: newId(),
+          kind: 'thoughtbed',
+          text: 'Searching your Garden…',
+        });
+        try {
+          const hits = await findSimilar({
+            text: queryText,
+            kinds: [...SIMILAR_KINDS],
+            limit: RESULT_LIMIT,
+            excludeDraftId: draftId,
+          });
+          appendTurn({
+            id: newId(),
+            kind: 'related',
+            query: queryText.slice(0, 80),
+            hits,
+          });
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'retrieval failed';
+          appendTurn({
+            id: newId(),
+            kind: 'thoughtbed',
+            text: `That search didn't land (${message}). Try again in a moment.`,
+          });
+        }
+        return;
+      }
+
+      if (cmd === '/hook' || cmd === '/closer') {
+        appendTurn({
+          id: newId(),
+          kind: 'thoughtbed',
+          text:
+            cmd === '/hook'
+              ? 'Hook generator is wiring next slice. For now: write the most specific true sentence about the moment, then put a contrast right after it.'
+              : 'Closer generator is wiring next slice. For now: end on a sentence that lands the through-line of the post in 7 words or fewer.',
+        });
+        return;
+      }
+
+      if (cmd === '/originality') {
+        appendTurn({
+          id: newId(),
+          kind: 'thoughtbed',
+          text:
+            'Originality check wires in the next slice. For now I can re-run /related against your archive — try /related <your sentence>.',
+        });
+        return;
+      }
+
+      // Free-form text. Acknowledge for now; slice 11 wires the
+      // LLM round.
+      appendTurn({
+        id: newId(),
+        kind: 'thoughtbed',
+        text:
+          'I hear you. The free-form reply layer is wiring next; for now try a slash command: /related, /hook, /closer, /originality.',
+      });
+    },
+    [appendTurn, draftId]
+  );
 
   // Phase 21 slice 7 (2026-05-06): Pull-into-editor handoff.
   // Routes idea / extracted_idea hits through insertThoughtBubble
@@ -265,7 +391,39 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
                 />
               );
             })}
+
+          {/* Phase 21 slice 8 (2026-05-06): user-driven turn log
+              renders below the auto-feed. Slash-command results
+              and free-form replies live here. */}
+          {turns.map((t) => (
+            <TurnView
+              key={t.id}
+              turn={t}
+              expandedCardId={expandedCardId}
+              pulledIdeaIds={pulledIdeaIds}
+              onExpand={(id) =>
+                setExpandedCardId((prev) => (prev === id ? null : id))
+              }
+              onCollapse={() => setExpandedCardId(null)}
+              onPull={onPullCard}
+            />
+          ))}
         </div>
+      )}
+
+      {!isCollapsed && (
+        <ChatInput
+          value={inputValue}
+          composing={composing}
+          onChange={setInputValue}
+          onCompositionChange={setComposing}
+          onSend={() => {
+            if (composing) return;
+            const text = inputValue;
+            setInputValue('');
+            handleSend(text);
+          }}
+        />
       )}
 
       {isCollapsed && <div className="flex-1" />}
@@ -524,6 +682,159 @@ function sourceLabel(hit: SimilarHit): string {
     default:
       return 'From your space';
   }
+}
+
+// Phase 21 slice 8 (2026-05-06): turn renderer. Switches on the
+// turn kind. User turns get a small 'You' bubble; thoughtbed turns
+// reuse the existing ThoughtbedTurn frame; tool results render
+// with a label header; related-search results render an embedded
+// IdeaCard list under a Thoughtbed turn.
+function TurnView({
+  turn,
+  expandedCardId,
+  pulledIdeaIds,
+  onExpand,
+  onCollapse,
+  onPull,
+}: {
+  turn: ChatTurn;
+  expandedCardId: string | null;
+  pulledIdeaIds: Set<string>;
+  onExpand: (id: string) => void;
+  onCollapse: () => void;
+  onPull: (hit: SimilarHit) => void;
+}) {
+  if (turn.kind === 'user') {
+    return (
+      <div className="flex gap-2 justify-end">
+        <div className="flex-1 min-w-0" />
+        <div className="max-w-[85%] bg-paper-2 border border-rule rounded-card px-3 py-2">
+          <p className="font-sans text-[12.5px] text-ink leading-[1.55] m-0 whitespace-pre-wrap">
+            {turn.text}
+          </p>
+        </div>
+        <div
+          aria-hidden="true"
+          className="w-5 h-5 rounded-full bg-paper-hot border border-rule flex items-center justify-center font-mono text-[9px] font-medium text-tag shrink-0 mt-0.5"
+        >
+          You
+        </div>
+      </div>
+    );
+  }
+
+  if (turn.kind === 'thoughtbed') {
+    return (
+      <ThoughtbedTurn>
+        <p className="font-sans text-[13px] text-ink-soft leading-[1.55] m-0 whitespace-pre-wrap">
+          {turn.text}
+        </p>
+      </ThoughtbedTurn>
+    );
+  }
+
+  if (turn.kind === 'tool') {
+    return (
+      <ThoughtbedTurn>
+        <div className="rounded-soft border border-rule bg-paper px-3 py-2">
+          <p className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag font-medium m-0 mb-1">
+            {turn.label}
+          </p>
+          <p className="font-sans text-[12px] text-ink-soft leading-[1.55] m-0 whitespace-pre-wrap">
+            {turn.body}
+          </p>
+        </div>
+      </ThoughtbedTurn>
+    );
+  }
+
+  // related — embedded card list under a Thoughtbed turn
+  return (
+    <>
+      <ThoughtbedTurn>
+        <p className="font-sans text-[12.5px] text-ink-soft leading-[1.55] m-0">
+          {turn.hits.length === 0
+            ? `Nothing in your Garden matches "${turn.query}" yet.`
+            : `${turn.hits.length} from your Garden on "${turn.query}":`}
+        </p>
+      </ThoughtbedTurn>
+      {turn.hits.map((hit) => {
+        const cardId = `related-${turn.id}-${hit.kind}-${hit.id}`;
+        return (
+          <IdeaCard
+            key={cardId}
+            hit={hit}
+            expanded={expandedCardId === cardId}
+            pulled={pulledIdeaIds.has(hit.id)}
+            onExpand={() => onExpand(cardId)}
+            onCollapse={onCollapse}
+            onPull={() => onPull(hit)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+// Phase 21 slice 8: chat input. Auto-grows up to 6 lines. Enter
+// sends; Shift+Enter inserts a newline. IME composition is
+// respected so Asian-language input doesn't fire send mid-word.
+// Slash-command suggestions could land here next slice.
+function ChatInput({
+  value,
+  composing,
+  onChange,
+  onCompositionChange,
+  onSend,
+}: {
+  value: string;
+  composing: boolean;
+  onChange: (next: string) => void;
+  onCompositionChange: (next: boolean) => void;
+  onSend: () => void;
+}) {
+  return (
+    <div className="border-t border-rule bg-paper px-3 py-2.5 flex items-end gap-2">
+      <textarea
+        rows={1}
+        placeholder="Reply to Thoughtbed… try /related, /hook, /closer"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onCompositionStart={() => onCompositionChange(true)}
+        onCompositionEnd={() => onCompositionChange(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey && !composing) {
+            e.preventDefault();
+            onSend();
+          }
+        }}
+        className="flex-1 resize-none bg-transparent font-sans text-[13px] text-ink leading-[1.55] focus:outline-none placeholder:text-tag/70 max-h-[120px]"
+      />
+      <button
+        type="button"
+        onClick={onSend}
+        disabled={value.trim().length === 0}
+        aria-label="Send"
+        title="Send (Enter)"
+        className="shrink-0 w-7 h-7 rounded-full bg-ink text-bg flex items-center justify-center hover:bg-accent transition-colors disabled:bg-paper-2 disabled:text-tag disabled:cursor-not-allowed"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <line x1="6" y1="9.5" x2="6" y2="3" />
+          <polyline points="3.5,5.5 6,3 8.5,5.5" />
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 function ChevronGlyph({ direction }: { direction: 'left' | 'right' }) {
