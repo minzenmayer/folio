@@ -417,20 +417,29 @@ function BodyForStatus({
         </p>
       );
 
-    case 'ok':
+    case 'ok': {
+      // Phase 20 slice 3: heat-color rank derived from list position. Hits
+      // come back from findSimilar already sorted by similarity descending,
+      // so we key off index — top 1-2 are 'hot', next two are 'ready', the
+      // rest are 'cool'. Tying rank to rank position (not absolute score)
+      // means the hottest pill always reads as hot even on quiet days when
+      // every score is in the 0.3 range.
+      const rankFor = (i: number): 'hot' | 'ready' | 'cool' =>
+        i < 2 ? 'hot' : i < 4 ? 'ready' : 'cool';
       return (
         <ul className="flex flex-col gap-1.5">
-          {status.hits.map((hit) => (
+          {status.hits.map((hit, i) => (
             <li key={`${hit.kind}-${hit.id}`}>
               {/* Phase 20 slice 2: minimal pill replaces the verbose row.
-                  Hover expands inline; click runs onPull. Slice 3 layers
-                  heat-color rank on top. Slice 5 swaps onPull to insert
-                  an ideaBubble node. Slice 8 wires onOpen to the Garden. */}
-              <RailIdeaPill hit={hit} onPull={onPull} />
+                  Slice 3 layers heat-color rank on top. Slice 5 swaps
+                  onPull to insert an ideaBubble node. Slice 8 wires
+                  onOpen to the Garden surface. */}
+              <RailIdeaPill hit={hit} onPull={onPull} rank={rankFor(i)} />
             </li>
           ))}
         </ul>
       );
+    }
   }
 }
 

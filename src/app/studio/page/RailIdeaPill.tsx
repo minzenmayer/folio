@@ -141,26 +141,67 @@ export function RailIdeaPill({
   );
 }
 
-// Slice 2 placeholder glyph — same shape for every rank. Slice 3 fills
-// in 'hot' (filled lightbulb in glyph-hot), 'ready' (small dot in tag),
-// 'cool' (outline lightbulb in border-rule). Kept inline for now; slice
-// 3 may extract to its own file if it grows.
+// Phase 20 slice 3: three real glyph shapes, keyed off rank.
+//   hot   — filled lightbulb in glyph-hot (#EF9F27).
+//   ready — small dot in text-tag.
+//   cool  — outline lightbulb in border-rule.
+// Kept inline; the pill is the only consumer.
 function PillGlyph({ rank }: { rank: 'hot' | 'ready' | 'cool' }) {
-  void rank;
+  if (rank === 'ready') {
+    return (
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        aria-hidden="true"
+      >
+        <circle cx="6" cy="6" r="2.4" className="fill-tag" />
+      </svg>
+    );
+  }
+
+  // Lightbulb path — bulb body on top, two filament lines, base ticks
+  // at the bottom. Reads at 12px.
+  if (rank === 'hot') {
+    return (
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        aria-hidden="true"
+        className="text-glyph-hot"
+      >
+        <path
+          d="M6 1.4 C 4 1.4 2.6 2.7 2.6 4.5 C 2.6 5.6 3.1 6.4 3.7 7 V 8.2 H 8.3 V 7 C 8.9 6.4 9.4 5.6 9.4 4.5 C 9.4 2.7 8 1.4 6 1.4 Z"
+          fill="currentColor"
+          stroke="currentColor"
+          strokeWidth="0.8"
+          strokeLinejoin="round"
+        />
+        <line x1="4.2" y1="9.2" x2="7.8" y2="9.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+        <line x1="4.7" y1="10.4" x2="7.3" y2="10.4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  // cool — outline bulb in border-rule.
   return (
     <svg
       width="12"
       height="12"
       viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-tag"
       aria-hidden="true"
+      className="text-rule"
     >
-      <circle cx="6" cy="6" r="3.5" />
+      <path
+        d="M6 1.4 C 4 1.4 2.6 2.7 2.6 4.5 C 2.6 5.6 3.1 6.4 3.7 7 V 8.2 H 8.3 V 7 C 8.9 6.4 9.4 5.6 9.4 4.5 C 9.4 2.7 8 1.4 6 1.4 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinejoin="round"
+      />
+      <line x1="4.2" y1="9.2" x2="7.8" y2="9.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+      <line x1="4.7" y1="10.4" x2="7.3" y2="10.4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
     </svg>
   );
 }
