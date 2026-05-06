@@ -1949,9 +1949,9 @@ const commitProposalSchema = z.object({
   // splice site.
   sections: z.record(z.string(), z.string().max(8000)).optional(),
   // Phase 16 slice 5 (2026-05-05): which beats the user had anchored
-  // in the spar. Stamped onto the H2 node as data-tb-beat-status =
-  // 'anchored' so the Plan ribbon (slice 6) can render filled green
-  // for anchored beats. 0-based outline indices.
+  // in the spar. Phase 20.5 (2026-05-06) moved the stamp from H2
+  // nodes onto the new thoughtBubble node's beatStatus attr. PlanRibbon
+  // reads from there. 0-based outline indices.
   anchoredBeatIndices: z.array(z.number().int().min(0).max(7)).max(8).optional(),
 });
 
@@ -2014,93 +2014,54 @@ export async function commitProposal(input: unknown) {
   //                each so the user has a slot to start writing.
   //   linkedin   → no H1; beats become a small bulleted scaffold so the
   //                shape is "outline + body" rather than "title + sections".
-  let initialDoc: { type: 'doc'; content: Array<Record<string, unknown>> };
-  if (platform === 'linkedin') {
-    const content: Array<Record<string, unknown>> = [];
-    const linkedinBeats = beatsWithProse.map((b) => b.beat);
-    const draftedItems = beatsWithProse.filter((b) => b.prose);
-    if (linkedinBeats.length > 0 && draftedItems.length === 0) {
-      // No drafted prose — keep the bullet outline scaffold.
-      content.push({
-        type: 'bulletList',
-        content: linkedinBeats.map((b) => ({
-          type: 'listItem',
-          content: [
-            {
-              type: 'paragraph',
-              content: [{ type: 'text', text: b }],
-            },
-          ],
-        })),
-      });
-    } else if (draftedItems.length > 0) {
-      // At least one beat drafted — render prose for drafted beats
-      // and a one-line placeholder for un-drafted ones, so the user
-      // walks into a body that's substantially ready to refine.
-      for (const item of beatsWithProse) {
-        if (item.prose) {
-          const paragraphs = item.prose
-            .split(/\n\s*\n/)
-            .map((p) => p.trim())
-            .filter((p) => p.length > 0);
-          for (const para of paragraphs) {
-            content.push({
-              type: 'paragraph',
-              content: [{ type: 'text', text: para }],
-            });
-          }
-        } else {
-          // Un-drafted beat → keep it as a paragraph cue, italicized
-          // through plain text (Tiptap will render as plain). User
-          // will rewrite or delete.
-          content.push({
-            type: 'paragraph',
-            content: [{ type: 'text', text: `[${item.beat}]` }],
-          });
-        }
-      }
-    }
-    content.push({ type: 'paragraph' });
-    initialDoc = { type: 'doc', content };
-  } else {
-    const content: Array<Record<string, unknown>> = [
-      {
-        type: 'heading',
-        attrs: { level: 1 },
-        content: [{ type: 'text', text: trimmedTopic }],
-      },
-    ];
-    for (const item of beatsWithProse) {
-      content.push({
-        type: 'heading',
-        attrs: {
-          level: 2,
-          'data-tb-beat-id': item.id,
-          'data-tb-beat-status': item.status,
-        },
-        content: [{ type: 'text', text: item.beat }],
-      });
-      if (item.prose) {
-        // Split drafted prose on blank lines into separate paragraphs
-        // so Tiptap renders the structure correctly. Single line
-        // breaks stay inline within a paragraph.
-        const paragraphs = item.prose
-          .split(/\n\s*\n/)
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0);
-        for (const para of paragraphs) {
-          content.push({
-            type: 'paragraph',
-            content: [{ type: 'text', text: para }],
-          });
-        }
-      } else {
-        content.push({ type: 'paragraph' });
-      }
-    }
-    if (beatsWithProse.length === 0) content.push({ type: 'paragraph' });
-    initialDoc = { type: 'doc', content };
+  // Phase 20.5 (2026-05-06): plan beats land in the editor as
+  // thoughtBubble nodes (source='plan'), not H2 headings or bullet
+  // lists. Same shape across platforms; the only platform difference
+  // is whether the topic gets stamped as an H1 above the plan
+  // (newsletter yes, linkedin no — linkedin reads as body-only).
+  const planBubbleFor = (item: typeof beatsWithProse[number]) => ({
+    type: 'thoughtBubble',
+    attrs: {
+      source: 'plan',
+      ideaId: null,
+      kind: null,
+      beatId: item.id,
+      beatStatus: item.status,
+      title: item.beat,
+      preview: '',
+    },
+  });
+  const proseParagraphs = (prose: string) =>
+    prose
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0)
+      .map((para) => ({
+        type: 'paragraph',
+        content: [{ type: 'text', text: para }],
+      }));
+
+  const content: Array<Record<string, unknown>> = [];
+  if (platform === 'newsletter' && trimmedTopic.length > 0) {
+    content.push({
+      type: 'heading',
+      attrs: { level: 1 },
+      content: [{ type: 'text', text: trimmedTopic }],
+    });
   }
+  for (const item of beatsWithProse) {
+    content.push(planBubbleFor(item));
+    if (item.prose) {
+      content.push(...proseParagraphs(item.prose));
+    } else {
+      content.push({ type: 'paragraph' });
+    }
+  }
+  if (beatsWithProse.length === 0) content.push({ type: 'paragraph' });
+  const initialDoc: {
+    type: 'doc';
+    content: Array<Record<string, unknown>>;
+  } = { type: 'doc', content };
 
   const [draft] = await db
     .insert(drafts)

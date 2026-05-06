@@ -57,15 +57,20 @@ export function PlanRibbon() {
   const pills = useMemo<BeatPill[]>(() => {
     if (!editor) return [];
     const out: BeatPill[] = [];
+    // Phase 20.5 (2026-05-06): plan beats now live in the doc as
+    // thoughtBubble nodes with source='plan'. Phase 16's H2-with-attrs
+    // shape is gone. Beat id, status, and text live on the bubble's
+    // attrs (beatId / beatStatus / title) — read them straight off.
     editor.state.doc.descendants((node, pos) => {
-      if (node.type.name !== 'heading') return;
-      if (node.attrs.level !== 2) return;
-      const id = node.attrs['data-tb-beat-id'];
-      const status = node.attrs['data-tb-beat-status'];
+      if (node.type.name !== 'thoughtBubble') return;
+      if (node.attrs.source !== 'plan') return;
+      const id = node.attrs.beatId;
+      const status = node.attrs.beatStatus;
+      const title = (node.attrs.title as string | null | undefined) ?? '';
       if (!id) return;
       out.push({
         id,
-        beat: node.textContent,
+        beat: title,
         status:
           status === 'anchored' || status === 'drafted' || status === 'floating'
             ? status
