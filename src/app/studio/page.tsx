@@ -32,7 +32,12 @@ export default async function StudioHome() {
   if (!clerkId) redirect('/sign-in');
 
   const user = await requireUser();
-  const clerk = await currentUser();
+  let clerk: Awaited<ReturnType<typeof currentUser>> | null = null;
+  try {
+    clerk = await currentUser();
+  } catch (err) {
+    console.warn('[studio/page] currentUser failed', err);
+  }
   const firstName = clerk?.firstName || user.name?.split(' ')[0] || 'there';
 
   // Each query in its own try/catch with a safe fallback. If any
