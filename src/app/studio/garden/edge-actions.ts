@@ -35,6 +35,7 @@ export async function runMaturationNow(): Promise<
       signal3: number;
       signal4: number;
       signal5: number;
+      signal6: number;
       firstError: string | null;
       seedFirstError: string | null;
       seedEligibleFound: number;
@@ -101,6 +102,7 @@ export async function runMaturationNow(): Promise<
       signal3: res.signal3Hits,
       signal4: res.signal4Hits,
       signal5: res.signal5Hits,
+      signal6: res.signal6Hits,
       firstError: firstError ?? null,
       seedFirstError: firstChunkError ?? null,
       seedEligibleFound: lastEligibleFound,

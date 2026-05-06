@@ -46,7 +46,7 @@ export function MatureNowButton() {
           } else {
             parts.push(`Lifted ${res.lifted} of ${res.inspected}`);
             parts.push(
-              `signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
+              `signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5} · off-topic ${res.signal6}`
             );
           }
           if (res.firstError) {

@@ -49,6 +49,12 @@
 import { and, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import { db, ideas, extractedIdeas, drafts, ideaEdges, ideaClusters } from '@/db';
 import type { Maturity, Temperature } from './types';
+import {
+  loadTopicFitContext,
+  computeTopicFit,
+  topicFitCeiling,
+  type TopicFitContext,
+} from './topic-fit';
 
 // Phase 18 hotfix (2026-05-05): lowered thresholds. The 0.80 cosine
 // was too conservative for corpora with mixed embedding qualities and
@@ -329,6 +335,10 @@ export interface MaturationReport {
   signal3Hits: number;
   signal4Hits: number;
   signal5Hits: number;
+  // Signal 6 (Phase 19): topic-fit ceiling applied. Counts ideas
+  // whose temperature/maturity got CAPPED because they don't
+  // resemble the user's published writing.
+  signal6Hits: number;
   errors: string[];
 }
 
@@ -344,6 +354,7 @@ export async function runMaturationPass(
     signal3Hits: 0,
     signal4Hits: 0,
     signal5Hits: 0,
+    signal6Hits: 0,
     errors: [],
   };
 
@@ -384,6 +395,19 @@ export async function runMaturationPass(
     clusterMembership = cl.membership;
   } catch (err) {
     report.errors.push(`loadTodayClusters: ${(err as Error).message}`);
+  }
+
+  // Phase 19 (2026-05-05): topic-fit context. Loads the user's
+  // published writing corpus (positive) + set-aside ideas
+  // (negative). Per-idea fit is computed inline in the loop below.
+  let topicFitCtx: TopicFitContext = {
+    positivePool: [],
+    negativePool: [],
+  };
+  try {
+    topicFitCtx = await loadTopicFitContext(userId);
+  } catch (err) {
+    report.errors.push(`loadTopicFitContext: ${(err as Error).message}`);
   }
 
   for (const idea of ideasList) {
@@ -490,10 +514,43 @@ export async function runMaturationPass(
       if (nextMat !== before) maturityLifts += 1;
     }
 
+    // Phase 19 (2026-05-05) — TOPIC-FIT GATE. Compute per-idea fit
+    // against the user's published writing corpus + set-aside pool.
+    // Apply as a CEILING: ideas that don't look like writing
+    // material can't reach hot/ready/warm regardless of other
+    // signals. This is the core 'is this writing-worthy' filter.
+    const fit = computeTopicFit(
+      { embedding: idea.embedding.length > 0 ? idea.embedding : null },
+      topicFitCtx
+    );
+    const ceiling = topicFitCeiling(fit);
+    if (ceiling === 'cool') {
+      // Hard ceiling — reset all bumps. The other 5 signals don't
+      // matter if the idea isn't writing material.
+      if (tempIndex(nextTemp) > tempIndex('cool')) {
+        nextTemp = 'cool';
+      }
+      if (maturityIndex(nextMat) > maturityIndex('forming')) {
+        nextMat = 'forming';
+      }
+      maturityLifts = 0; // suppress stacked-signal hot rule
+      report.signal6Hits += 1;
+    } else if (ceiling === 'warm') {
+      // Soft ceiling — keep some progression but cap below hot/ready.
+      if (tempIndex(nextTemp) > tempIndex('warm')) {
+        nextTemp = 'warm';
+      }
+      if (maturityIndex(nextMat) > maturityIndex('shaping')) {
+        nextMat = 'shaping';
+      }
+      maturityLifts = 0;
+      report.signal6Hits += 1;
+    }
+
     // Phase 18 hotfix: stacked-signal rule. If 2+ maturity lifts fired
     // in this pass, the idea is REALLY resonating — promote to hot
-    // regardless of temperature bumps. This gives a real path to
-    // hot without requiring 3 stacked temperature lifts.
+    // regardless of temperature bumps. (Topic-fit ceiling above will
+    // have suppressed this for off-topic ideas.)
     if (maturityLifts >= 2 && nextTemp !== 'set_aside') {
       nextTemp = 'hot';
     }
