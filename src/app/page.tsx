@@ -2,6 +2,7 @@
 // The "garden is opening soon" face. Editorial preview of the product
 // for someone arriving before they sign in.
 // Once authed, redirects sent to /studio (the writing surface).
+// 2026-05-06: cache-bust touch to flush stale CDN content after revert.
 
 import Link from 'next/link';
 import { Masthead } from '@/components/Masthead';
