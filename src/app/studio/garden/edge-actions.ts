@@ -10,6 +10,7 @@ import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/auth';
 import { pushToReady as libPushToReady } from '@/lib/garden/edge-prompts';
 import { runMaturationPass } from '@/lib/garden/maturation';
+import { runSeedChunk } from './seed-actions';
 
 export async function pushToReadyAction(input: {
   ideaId: string;
@@ -26,6 +27,7 @@ export async function pushToReadyAction(input: {
 export async function runMaturationNow(): Promise<
   | {
       ok: true;
+      claimed: number;
       lifted: number;
       inspected: number;
       signal1: number;
@@ -38,10 +40,33 @@ export async function runMaturationNow(): Promise<
 > {
   try {
     const user = await requireUser();
+
+    // Phase 18 hotfix (2026-05-05): one-click does BOTH jobs.
+    // Step 1: drive the seed chunk loop to completion so any
+    //   unclaimed user-authored extracted_ideas get partner rows.
+    //   Without this, maturation has nothing to inspect.
+    // Step 2: run the maturation pass over the now-populated ideas
+    //   table.
+    //
+    // The seed chunks each process up to 25 rows. Vercel server
+    // actions are 10s capped — at ~50 rows/s the budget covers
+    // ~500 rows comfortably. Cap the loop at 30 chunks (=750 rows)
+    // so we don't time out on huge backlogs; the next click picks
+    // up where this one stopped.
+
+    let totalClaimed = 0;
+    const MAX_CHUNKS = 30;
+    for (let i = 0; i < MAX_CHUNKS; i++) {
+      const chunk = await runSeedChunk();
+      totalClaimed += chunk.claimed;
+      if (!chunk.hasMore) break;
+    }
+
     const res = await runMaturationPass(user.id);
     revalidatePath('/studio/garden');
     return {
       ok: true,
+      claimed: totalClaimed,
       lifted: res.lifted,
       inspected: res.inspected,
       signal1: res.signal1Hits,

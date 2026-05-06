@@ -24,19 +24,26 @@ export function MatureNowButton() {
         const res = await runMaturationNow();
         if (!res.ok) {
           setLastResult(`Pass failed: ${res.reason}`);
-        } else if (res.inspected === 0) {
-          setLastResult('Inspected 0 ideas — Garden is empty.');
-        } else if (res.lifted === 0) {
-          // Diagnostic: which signals are firing? If all zeros, the
-          // formula has nothing to work with and thresholds need
-          // tuning.
-          setLastResult(
-            `Lifted 0 of ${res.inspected} · signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
-          );
         } else {
-          setLastResult(
-            `Lifted ${res.lifted} of ${res.inspected} · signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
-          );
+          // Phase 18 hotfix: report claimed + lifted in one line.
+          // 'Claimed N' = unclaimed extracted_ideas just turned into
+          //   partner ideas rows in this click.
+          // 'Lifted M of P' = of the P ideas evaluated by maturation,
+          //   M had at least one signal lift.
+          // signals = per-signal hit counts for diagnostic clarity.
+          const parts: string[] = [];
+          if (res.claimed > 0) {
+            parts.push(`Claimed ${res.claimed}`);
+          }
+          if (res.inspected === 0) {
+            parts.push('Inspected 0 ideas');
+          } else {
+            parts.push(`Lifted ${res.lifted} of ${res.inspected}`);
+            parts.push(
+              `signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
+            );
+          }
+          setLastResult(parts.join(' · '));
         }
         router.refresh();
       } catch (err) {
