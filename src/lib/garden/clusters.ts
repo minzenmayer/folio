@@ -243,28 +243,35 @@ export async function persistClusters(
   if (clusters.length === 0) return 0;
   const dateOnly = runDate.toISOString().slice(0, 10);
 
-  // Replace today's run for this user. Cheaper than diffing.
-  await db
-    .delete(ideaClusters)
-    .where(
-      and(
-        eq(ideaClusters.userId, userId),
-        eq(ideaClusters.runDate, dateOnly)
-      )
-    );
+  // Phase 17 hotfix (2026-05-05): if migration 0015 isn't applied, the
+  // idea_clusters table doesn't exist; both delete and insert throw.
+  // Swallow + log so the cron / on-demand caller doesn't 500.
+  try {
+    await db
+      .delete(ideaClusters)
+      .where(
+        and(
+          eq(ideaClusters.userId, userId),
+          eq(ideaClusters.runDate, dateOnly)
+        )
+      );
 
-  const rows = clusters.map((c) => ({
-    userId,
-    runDate: dateOnly,
-    repKind: c.rep.kind,
-    repId: c.rep.id,
-    theme: c.theme,
-    memberCount: c.members.length,
-    members: c.members,
-  }));
+    const rows = clusters.map((c) => ({
+      userId,
+      runDate: dateOnly,
+      repKind: c.rep.kind,
+      repId: c.rep.id,
+      theme: c.theme,
+      memberCount: c.members.length,
+      members: c.members,
+    }));
 
-  await db.insert(ideaClusters).values(rows);
-  return rows.length;
+    await db.insert(ideaClusters).values(rows);
+    return rows.length;
+  } catch (err) {
+    console.warn('[persistClusters] failed (migration?)', err);
+    return 0;
+  }
 }
 
 export interface ClusterSnapshot {
@@ -280,23 +287,39 @@ export async function readClustersForToday(
   userId: string
 ): Promise<ClusterSnapshot[]> {
   const today = new Date().toISOString().slice(0, 10);
-  const rows = await db
-    .select({
-      id: ideaClusters.id,
-      repKind: ideaClusters.repKind,
-      repId: ideaClusters.repId,
-      theme: ideaClusters.theme,
-      memberCount: ideaClusters.memberCount,
-      members: ideaClusters.members,
-    })
-    .from(ideaClusters)
-    .where(
-      and(
-        eq(ideaClusters.userId, userId),
-        eq(ideaClusters.runDate, today)
+  // Phase 17 hotfix (2026-05-05): tolerate missing idea_clusters
+  // table (migration 0015 not yet applied). Returns [] so the page
+  // falls back to the 'no clusters yet' empty state.
+  let rows: Array<{
+    id: string;
+    repKind: string;
+    repId: string;
+    theme: string | null;
+    memberCount: number;
+    members: unknown;
+  }> = [];
+  try {
+    rows = await db
+      .select({
+        id: ideaClusters.id,
+        repKind: ideaClusters.repKind,
+        repId: ideaClusters.repId,
+        theme: ideaClusters.theme,
+        memberCount: ideaClusters.memberCount,
+        members: ideaClusters.members,
+      })
+      .from(ideaClusters)
+      .where(
+        and(
+          eq(ideaClusters.userId, userId),
+          eq(ideaClusters.runDate, today)
+        )
       )
-    )
-    .orderBy(sql`${ideaClusters.memberCount} desc`);
+      .orderBy(sql`${ideaClusters.memberCount} desc`);
+  } catch (err) {
+    console.warn('[readClustersForToday] read failed (migration?)', err);
+    return [];
+  }
 
   return rows.map((r) => ({
     id: r.id,

@@ -32,25 +32,40 @@ export type SeedStatus = {
 
 export async function getSeedStatus(): Promise<SeedStatus> {
   const user = await requireUser();
-  const [u] = await db
-    .select({ phase17SeededAt: users.phase17SeededAt })
-    .from(users)
-    .where(eq(users.id, user.id))
-    .limit(1);
+  // Phase 17 hotfix (2026-05-05): if the 0015 migration isn't applied
+  // yet, this query throws on the missing phase17_seeded_at column.
+  // Treat that as 'not seeded, no eligible rows' so the page still
+  // renders. Banner stays hidden until migration lands.
+  let u: { phase17SeededAt: Date | null } | undefined;
+  try {
+    [u] = await db
+      .select({ phase17SeededAt: users.phase17SeededAt })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+  } catch (err) {
+    console.warn('[getSeedStatus] users query failed (migration?)', err);
+    return { totalEligible: 0, alreadyClaimed: 0, seeded: true };
+  }
 
-  const eligibleRows = (await db.execute<{ count: number }>(sql`
-    SELECT COUNT(*)::int as count
-      FROM extracted_ideas
-     WHERE user_id = ${user.id}
-       AND source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
-  `)) as unknown as Array<{ count: number }>;
-
-  const claimedRows = (await db.execute<{ count: number }>(sql`
-    SELECT COUNT(*)::int as count
-      FROM ideas
-     WHERE user_id = ${user.id}
-       AND claim_kind = 'auto_claimed'
-  `)) as unknown as Array<{ count: number }>;
+  let eligibleRows: Array<{ count: number }> = [];
+  let claimedRows: Array<{ count: number }> = [];
+  try {
+    eligibleRows = (await db.execute<{ count: number }>(sql`
+      SELECT COUNT(*)::int as count
+        FROM extracted_ideas
+       WHERE user_id = ${user.id}
+         AND source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
+    `)) as unknown as Array<{ count: number }>;
+    claimedRows = (await db.execute<{ count: number }>(sql`
+      SELECT COUNT(*)::int as count
+        FROM ideas
+       WHERE user_id = ${user.id}
+         AND claim_kind = 'auto_claimed'
+    `)) as unknown as Array<{ count: number }>;
+  } catch (err) {
+    console.warn('[getSeedStatus] count queries failed', err);
+  }
 
   const totalEligible = Number(eligibleRows[0]?.count ?? 0);
   const alreadyClaimed = Number(claimedRows[0]?.count ?? 0);
@@ -73,6 +88,12 @@ export type SeedChunkResult = {
 
 export async function runSeedChunk(): Promise<SeedChunkResult> {
   const user = await requireUser();
+
+  // Phase 17 hotfix (2026-05-05): if migration 0015 is unapplied, the
+  // users.phase17_seeded_at write at the bottom of this function will
+  // throw. Catch around the whole body so the banner doesn't loop on
+  // a 500 — return a 'no more work' result and the banner exits.
+  try {
 
   // Find extracted rows that are auto-claim eligible AND don't yet
   // have a partner ideas row. LEFT JOIN to detect missing partner.
@@ -150,6 +171,10 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
   if (claimed > 0) revalidatePath('/studio/garden');
 
   return { claimed, totalClaimed, hasMore };
+  } catch (err) {
+    console.warn('[runSeedChunk] failed (migration?)', err);
+    return { claimed: 0, totalClaimed: 0, hasMore: false };
+  }
 }
 
 // ─── Demote affordance — reverses an auto-claim ────────────

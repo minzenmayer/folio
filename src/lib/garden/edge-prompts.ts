@@ -41,6 +41,11 @@ const PRIMARY_ACTION: Record<EdgeReason, EdgePrompt['primaryAction']> = {
 };
 
 export async function findEdgeMatches(userId: string): Promise<EdgePrompt[]> {
+  // Phase 17 hotfix (2026-05-05): wrap the queries so any DB hiccup
+  // (or future schema drift) returns an empty list instead of crashing
+  // the Garden page. Each query is independent — failure of one
+  // criterion shouldn't suppress the others.
+  try {
   // Pull each criterion's top-3 in priority order. Dedupe by idea id
   // across criteria. Cap the final list at 3.
   const aboutToCool = await db.execute<{
@@ -130,6 +135,10 @@ export async function findEdgeMatches(userId: string): Promise<EdgePrompt[]> {
     if (out.length >= 3) break;
   }
   return out;
+  } catch (err) {
+    console.warn('[findEdgeMatches] failed', err);
+    return [];
+  }
 }
 
 // Server action: bump maturity one step toward 'ready'. Used by
