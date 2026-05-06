@@ -15,6 +15,7 @@
 import { db, users } from '@/db';
 import { applyAutoCooling, computeDigest, persistDigestRun, markSurfaced } from '@/lib/garden/digest';
 import { computeNextJuxtaposition } from '@/lib/garden/juxtaposition';
+import { computeClusters, persistClusters } from '@/lib/garden/clusters';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,6 +25,7 @@ type UserReport = {
   cooledByVisit: number;
   cooledByDigest: number;
   digestPicks: number;
+  clusterCount: number;
   juxtapositionId: string | null;
   errors: string[];
 };
@@ -54,6 +56,7 @@ export async function GET(req: Request) {
       cooledByVisit: 0,
       cooledByDigest: 0,
       digestPicks: 0,
+      clusterCount: 0,
       juxtapositionId: null,
       errors: [],
     };
@@ -66,6 +69,17 @@ export async function GET(req: Request) {
       // 2. digest pick
       const picks = await computeDigest(user.id);
       report.digestPicks = picks.length;
+
+      // 2.5 (Phase 17, 2026-05-05). Cluster compute. Greedy O(N²)
+      // over candidates with embeddings; in practice ~860 ideas
+      // resolves in well under the cron's per-user budget.
+      try {
+        const clusters = await computeClusters(user.id);
+        const persisted = await persistClusters(user.id, new Date(), clusters);
+        report.clusterCount = persisted;
+      } catch (err) {
+        report.errors.push(`clusters: ${(err as Error).message}`);
+      }
 
       // 3. juxtaposition compute
       let jxId: string | null = null;
