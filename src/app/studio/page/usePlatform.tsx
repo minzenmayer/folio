@@ -28,7 +28,13 @@ export type Platform = 'linkedin' | 'newsletter' | 'blog' | 'note';
 // Phase 21 slice 5 (2026-05-06): preview width toggle. 'desktop' is
 // the natural frame width per platform; 'mobile' narrows the frame
 // to ~380px so the user can see how their copy reads on a phone.
-export type PreviewWidth = 'desktop' | 'mobile';
+//
+// Phase 22 slice 3 (2026-05-06): added 'preview' mode — a fully
+// rendered read-only render of the artifact in its native platform
+// chrome (LinkedIn reactions + comments + repost/send buttons,
+// etc.). Editor mode = plain editable; preview mode = full render;
+// mobile = narrow rendered preview.
+export type PreviewWidth = 'preview' | 'desktop' | 'mobile';
 
 export const PLATFORMS: ReadonlyArray<Platform> = [
   'linkedin',
@@ -97,7 +103,9 @@ function readPreview(draftId: string): PreviewWidth | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(`${PREVIEW_PREFIX}${draftId}`);
-    if (raw === 'desktop' || raw === 'mobile') return raw;
+    if (raw === 'preview' || raw === 'desktop' || raw === 'mobile') {
+      return raw;
+    }
   } catch {
     // Ignore.
   }

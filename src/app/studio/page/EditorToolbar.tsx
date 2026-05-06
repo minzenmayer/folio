@@ -394,17 +394,23 @@ function WordCountReadout({ count }: { count: number }) {
   );
 }
 
-// Phase 21 slice 5 (2026-05-06): desktop / mobile preview toggle.
-// Two small device icons in a segmented control. Tracks the
-// previewWidth state in usePlatform. PlatformFrame reacts.
+// Phase 22 slice 3 (2026-05-06): three-mode toggle — preview /
+// editor / mobile. Eye icon = full platform render (LinkedIn
+// reactions, comments, etc.). Desktop icon = plain editable.
+// Phone icon = narrow rendered preview.
 function PreviewWidthToggle() {
   const { previewWidth, setPreviewWidth } = usePlatform();
   return (
     <div
       role="group"
-      aria-label="Preview width"
+      aria-label="View mode"
       className="flex items-center gap-0.5 border border-rule rounded-full p-0.5"
     >
+      <PreviewWidthChip
+        value="preview"
+        active={previewWidth === 'preview'}
+        onClick={() => setPreviewWidth('preview')}
+      />
       <PreviewWidthChip
         value="desktop"
         active={previewWidth === 'desktop'}
@@ -428,7 +434,12 @@ function PreviewWidthChip({
   active: boolean;
   onClick: () => void;
 }) {
-  const label = value === 'desktop' ? 'Desktop preview' : 'Mobile preview';
+  const label =
+    value === 'preview'
+      ? 'Rendered preview'
+      : value === 'desktop'
+        ? 'Editor view'
+        : 'Mobile preview';
   return (
     <button
       type="button"
@@ -442,8 +453,33 @@ function PreviewWidthChip({
           : 'text-tag hover:text-ink'
       }`}
     >
-      {value === 'desktop' ? <DesktopGlyph /> : <MobileGlyph />}
+      {value === 'preview' ? (
+        <EyeGlyph />
+      ) : value === 'desktop' ? (
+        <DesktopGlyph />
+      ) : (
+        <MobileGlyph />
+      )}
     </button>
+  );
+}
+
+function EyeGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.5 7C3 4 5 3 7 3C9 3 11 4 12.5 7C11 10 9 11 7 11C5 11 3 10 1.5 7Z" />
+      <circle cx="7" cy="7" r="1.6" />
+    </svg>
   );
 }
 

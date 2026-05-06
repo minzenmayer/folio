@@ -13,9 +13,11 @@
 
 'use client';
 
-import { type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { useArtifactPanel } from './useArtifactPanel';
+import { useEditorContext } from './EditorContext';
 import { PlatformFrame } from './PlatformFrame';
+import { usePlatform } from './usePlatform';
 
 export function ArtifactPanel({
   toolbar,
@@ -26,6 +28,21 @@ export function ArtifactPanel({
 }) {
   const { state, closeArtifact } = useArtifactPanel();
   const isOpen = state === 'open';
+  const { editor: tiptapEditor } = useEditorContext();
+  const { previewWidth } = usePlatform();
+  const readOnly = previewWidth !== 'desktop';
+
+  // Phase 22 slice 3 (2026-05-06): preview + mobile modes are
+  // read-only renders. Toggle Tiptap's editable flag so keystrokes
+  // don't sneak through. Returns to editable when the user
+  // switches back to the editor view.
+  useEffect(() => {
+    if (!tiptapEditor) return;
+    tiptapEditor.setEditable(!readOnly);
+    return () => {
+      tiptapEditor.setEditable(true);
+    };
+  }, [tiptapEditor, readOnly]);
 
   return (
     <aside
