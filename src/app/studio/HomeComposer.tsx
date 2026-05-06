@@ -22,10 +22,24 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import {
+  proposeFromTopic,
+  commitProposal,
+  type ProposeFromTopicResult,
+  type ProposeAngle,
+} from './actions';
 
 type Mode = 'with-assistant' | 'beside' | 'self-driving';
 type Path = 'writing' | 'ideation';
+// Phase 23 v2 slice 4 (2026-05-06): the homepage transitions through
+// these stages on a Writing × With-assistant submit. Other path × mode
+// combinations stay in 'default' for now and surface a placeholder.
+type Stage = 'default' | 'thinking' | 'thread' | 'error';
+
+// Narrow the success branch out so JSX can rely on the angles/outline/
+// question fields without re-checking ok every render.
+type SparProposal = Extract<ProposeFromTopicResult, { ok: true }>;
 
 const MODE_LABEL: Record<Mode, string> = {
   'with-assistant': 'With assistant',
@@ -69,6 +83,12 @@ export function HomeComposer() {
   const [placeholderResult, setPlaceholderResult] = useState<string | null>(
     null
   );
+  const [stage, setStage] = useState<Stage>('default');
+  const [proposal, setProposal] = useState<SparProposal | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [submittedTopic, setSubmittedTopic] = useState<string>('');
+  const [isProposing, startProposeTransition] = useTransition();
+  const [isCommitting, startCommitTransition] = useTransition();
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -99,13 +119,74 @@ export function HomeComposer() {
 
   function handleSubmit() {
     const trimmed = text.trim();
-    if (!trimmed) return;
-    // Slice 1 placeholder. Slices 4-7 wire each path × mode combination.
+    if (trimmed.length < 3) return;
+
+    // Phase 23 v2 slice 4 (2026-05-06): only Writing × With-assistant
+    // is wired in this slice. Other combinations still surface the
+    // slice-1 placeholder until slices 5-7 land.
+    if (path === 'writing' && mode === 'with-assistant') {
+      setSubmittedTopic(trimmed);
+      setErrorMsg(null);
+      setStage('thinking');
+      setText('');
+      const platformHint = inferPlatformHint(trimmed);
+      startProposeTransition(async () => {
+        try {
+          const res = await proposeFromTopic({
+            topic: trimmed,
+            ...(platformHint ? { platformHint } : {}),
+          });
+          if (res.ok) {
+            setProposal(res);
+            setStage('thread');
+          } else {
+            setErrorMsg(res.message);
+            setStage('error');
+          }
+        } catch (err) {
+          setErrorMsg(err instanceof Error ? err.message : 'Unknown error.');
+          setStage('error');
+        }
+      });
+      return;
+    }
+
     const pathLabel = path ?? 'default';
     setPlaceholderResult(
-      `Slice 1 — would launch ${pathLabel} × ${mode}. Slices 4-7 wire each combination.`
+      `Slice 1 — would launch ${pathLabel} × ${mode}. Slices 5-7 wire the other combinations.`
     );
     setText('');
+  }
+
+  function startOver() {
+    setStage('default');
+    setProposal(null);
+    setErrorMsg(null);
+    setSubmittedTopic('');
+  }
+
+  function pickAngle(angle: ProposeAngle) {
+    if (!proposal) return;
+    const platform: 'newsletter' | 'linkedin' =
+      proposal.platformGuess === 'linkedin' ? 'linkedin' : 'newsletter';
+    // commitProposal redirects on the server to /studio/page/[id].
+    // The redirect is thrown as a Next error inside the action, which
+    // Next handles automatically — we don't await a value back.
+    startCommitTransition(async () => {
+      try {
+        await commitProposal({
+          topic: proposal.topic,
+          outline: proposal.outline,
+          platform,
+        });
+      } catch (err) {
+        // Real redirects throw a NEXT_REDIRECT error that Next consumes
+        // before this catch sees it. Anything that lands here is an
+        // actual failure.
+        setErrorMsg(err instanceof Error ? err.message : 'Unknown error.');
+        setStage('error');
+      }
+    });
   }
 
   function fillPrompt(prompt: string) {
@@ -114,6 +195,35 @@ export function HomeComposer() {
   }
 
   const placeholder = PATH_PLACEHOLDER[path ?? 'default'];
+
+  if (stage === 'thinking') {
+    return (
+      <div className="w-full max-w-[720px] mx-auto">
+        <ThinkingCard topic={submittedTopic} />
+      </div>
+    );
+  }
+
+  if (stage === 'thread' && proposal) {
+    return (
+      <div className="w-full max-w-[720px] mx-auto">
+        <ThreadView
+          proposal={proposal}
+          isCommitting={isCommitting}
+          onPickAngle={pickAngle}
+          onStartOver={startOver}
+        />
+      </div>
+    );
+  }
+
+  if (stage === 'error') {
+    return (
+      <div className="w-full max-w-[720px] mx-auto">
+        <ErrorCard message={errorMsg} onStartOver={startOver} />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-[720px] mx-auto">
@@ -264,7 +374,7 @@ export function HomeComposer() {
             onClick={handleSubmit}
             aria-label="Send"
             title="Send"
-            disabled={text.trim().length === 0}
+            disabled={text.trim().length === 0 || isProposing}
             className="p-1.5 rounded-full bg-ink text-paper hover:bg-ink-soft disabled:bg-rule disabled:text-tag disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
           >
             <svg
@@ -538,6 +648,231 @@ function ArrowOutGlyph() {
     >
       <line x1="3" y1="8" x2="8" y2="3" />
       <polyline points="4,3 8,3 8,7" />
+    </svg>
+  );
+}
+
+
+// Phase 23 v2 slice 4 (2026-05-06): infer the platform from the
+// user's topic text. Cheap heuristic — the LLM also auto-detects via
+// platformGuess, but supplying a hint up front gives proposeFromTopic
+// a stronger signal when the user used the curated sub-prompts.
+function inferPlatformHint(
+  text: string
+): 'newsletter' | 'linkedin' | undefined {
+  const lower = text.toLowerCase();
+  if (lower.includes('linkedin')) return 'linkedin';
+  if (
+    lower.includes('newsletter') ||
+    lower.includes('csl issue') ||
+    lower.includes('email course')
+  ) {
+    return 'newsletter';
+  }
+  return undefined;
+}
+
+function ThinkingCard({ topic }: { topic: string }) {
+  return (
+    <div className="rounded-card border border-rule bg-paper p-6">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="flex-1">
+          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-1">
+            You
+          </p>
+          <p className="font-sans text-[14.5px] text-ink leading-snug">
+            {topic}
+          </p>
+        </div>
+      </div>
+      <div className="border-t border-rule pt-4">
+        <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+          Thoughtbed
+        </p>
+        <p className="font-sans text-[13px] text-ink-soft leading-snug flex items-center gap-2">
+          <SpinGlyph />
+          Pulling what you've already written about this…
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ThreadView({
+  proposal,
+  isCommitting,
+  onPickAngle,
+  onStartOver,
+}: {
+  proposal: SparProposal;
+  isCommitting: boolean;
+  onPickAngle: (angle: ProposeAngle) => void;
+  onStartOver: () => void;
+}) {
+  const { topic, visibleThinking, angles, outline, followUpQuestion } =
+    proposal;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-card border border-rule bg-paper p-6 space-y-5">
+        {/* User's topic as the first turn */}
+        <div>
+          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-1">
+            You
+          </p>
+          <p className="font-sans text-[14.5px] text-ink leading-snug">
+            {topic}
+          </p>
+        </div>
+
+        {/* Visible thinking — what the system pulled */}
+        <div className="border-t border-rule pt-5">
+          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+            Thoughtbed
+          </p>
+          <p className="font-sans text-[13px] text-ink-soft leading-snug">
+            {visibleThinking.summary}
+          </p>
+        </div>
+
+        {/* Angles — multi-option proposals. Click an angle to commit
+            and open the editor with the outline pre-built. */}
+        {angles.length > 0 && (
+          <div>
+            <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+              Three angles
+            </p>
+            <ul className="space-y-2">
+              {angles.map((angle, i) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => onPickAngle(angle)}
+                    disabled={isCommitting}
+                    className="w-full text-left rounded-card border border-rule bg-paper px-4 py-3 hover:bg-paper-2 hover:border-rule-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
+                        {String.fromCharCode(65 + i)}
+                      </span>
+                      <span className="font-sans text-[14px] text-ink leading-snug flex-1">
+                        {angle.line}
+                      </span>
+                    </div>
+                    {angle.sources.length > 0 && (
+                      <div className="mt-2 ml-7 flex flex-wrap gap-1.5">
+                        {angle.sources.map((s) => (
+                          <span
+                            key={`${s.kind}-${s.id}`}
+                            className="font-mono text-[10px] text-tag bg-paper-2 border border-rule rounded-full px-2 py-0.5"
+                          >
+                            {s.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Outline preview */}
+        {outline.length > 0 && (
+          <div>
+            <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+              If you pick one, the page opens with this outline
+            </p>
+            <ol className="space-y-1.5 ml-1">
+              {outline.map((b, i) => (
+                <li
+                  key={i}
+                  className="font-sans text-[13px] text-ink-soft leading-snug flex gap-2.5"
+                >
+                  <span className="font-mono text-[11px] text-tag shrink-0">
+                    {i + 1}
+                  </span>
+                  <span className="flex-1">{b.beat}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        {/* Follow-up question */}
+        {followUpQuestion && (
+          <div className="border-t border-rule pt-4">
+            <p className="font-sans text-[14px] text-ink leading-snug">
+              {followUpQuestion}
+            </p>
+            <p className="mt-2 font-sans text-[12px] text-tag">
+              Multi-turn replies land in slice 4.5 — for now, pick an angle
+              above to open the page, or start over with a different topic.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onStartOver}
+          disabled={isCommitting}
+          className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors disabled:opacity-50"
+        >
+          ← Start over
+        </button>
+        {isCommitting && (
+          <span className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag flex items-center gap-2">
+            <SpinGlyph />
+            Opening the page…
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ErrorCard({
+  message,
+  onStartOver,
+}: {
+  message: string | null;
+  onStartOver: () => void;
+}) {
+  return (
+    <div className="rounded-card border border-rule bg-paper p-6">
+      <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+        Couldn't pull from your space
+      </p>
+      <p className="font-sans text-[14px] text-ink leading-snug mb-4">
+        {message || 'Something went sideways. Try again.'}
+      </p>
+      <button
+        type="button"
+        onClick={onStartOver}
+        className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink hover:text-tag transition-colors"
+      >
+        ← Start over
+      </button>
+    </div>
+  );
+}
+
+function SpinGlyph() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="animate-spin text-tag shrink-0"
+    >
+      <path d="M6 1.5a4.5 4.5 0 1 1-4.5 4.5" />
     </svg>
   );
 }
