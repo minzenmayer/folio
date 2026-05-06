@@ -10,7 +10,7 @@ import { db, captures, ideas, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
-import { Spar } from './Spar';
+import { HomeComposer } from './HomeComposer';
 import { BackfillButton } from './BackfillButton';
 
 function timeAgo(date: Date | string | null): string {
@@ -131,8 +131,10 @@ export default async function StudioHome() {
           </h1>
         </div>
 
-        {/* Composer (Phase 15b — sparring partner) */}
-        <Spar />
+        {/* Phase 23 v2 slice 1 (2026-05-06) — homepage chat box,
+            mode dropdown, two path chips. The Phase 15b/16 Spar
+            stays in the codebase but no longer renders here. */}
+        <HomeComposer />
 
         {/* Recent drafts + recent ideas */}
         {(recentDrafts.length > 0 || recentIdeas.length > 0) && (
