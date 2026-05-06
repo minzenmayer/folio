@@ -9,7 +9,7 @@ import { db, ideas, extractedIdeas, gardenDigestRuns } from '@/db';
 import type { GardenItem } from './types';
 import { listGardenItems } from './read';
 
-const DIGEST_SIZE = 5;
+const DIGEST_SIZE = 3;
 
 export interface DigestPick {
   kind: 'idea' | 'extracted_idea';

@@ -161,6 +161,42 @@ export async function markVisited(ideaId: string): Promise<void> {
   revalidate();
 }
 
+// Phase 19.3 (2026-05-06) — appendToIdea: quick-capture inline.
+// Adds a snippet to the end of the idea's body. Used by the
+// AddNoteInline component on idea cards. If the body is empty,
+// the snippet becomes the body. Re-embeds on next pass.
+
+export async function appendToIdea(
+  ideaId: string,
+  snippet: string
+): Promise<{ ok: true; nextBody: string } | { ok: false; reason: string }> {
+  const user = await requireUser();
+  const trimmed = snippet.trim();
+  if (trimmed.length === 0) return { ok: false, reason: 'empty' };
+  if (trimmed.length > 4000) {
+    return { ok: false, reason: 'too long (max 4000 chars)' };
+  }
+
+  const [row] = await db
+    .select({ body: ideas.body })
+    .from(ideas)
+    .where(and(eq(ideas.id, ideaId), eq(ideas.userId, user.id)))
+    .limit(1);
+  if (!row) return { ok: false, reason: 'not found' };
+
+  const existing = (row.body ?? '').trim();
+  const nextBody = existing.length === 0
+    ? trimmed
+    : `${existing}\n\n${trimmed}`;
+
+  await db
+    .update(ideas)
+    .set({ body: nextBody, updatedAt: new Date() })
+    .where(and(eq(ideas.id, ideaId), eq(ideas.userId, user.id)));
+  revalidate();
+  return { ok: true, nextBody };
+}
+
 // ── Phase 19.2 (2026-05-05) ───────────────────────────────────────
 // markAsWritingMaterial — active learning move. The user clicks
 // 'This is writing material' on an idea card; we flip its
@@ -508,4 +544,94 @@ export async function computeJuxtapositionForUser(): Promise<{
   const user = await requireUser();
   const id = await computeNextJuxtaposition(user.id);
   return { ok: true, juxtapositionId: id };
+}
+
+
+// Phase 19.3 (2026-05-06) — semantic search over the user's ideas.
+// Embeds the query, runs cosine vs ideas.embedding, returns top N.
+// Falls back to title ILIKE when the embed call fails.
+
+export async function searchGarden(input: {
+  query: string;
+}): Promise<
+  | { ok: true; results: Array<{ id: string; title: string; essence: string | null; temperature: string; maturity: string }> }
+  | { ok: false; reason: string }
+> {
+  const user = await requireUser();
+  const q = (input?.query ?? '').trim();
+  if (q.length < 2) return { ok: true, results: [] };
+
+  // Try embedding-based search first.
+  try {
+    const embedding = await embedText(q);
+    const vec = `[${embedding.join(',')}]`;
+    const rows = await db.execute<{
+      id: string;
+      title: string;
+      essence: string | null;
+      temperature: string;
+      maturity: string;
+      cos: number;
+    }>(sql`
+      SELECT id, title, essence, temperature, maturity,
+             1 - (embedding <=> ${vec}::vector) as cos
+        FROM ideas
+       WHERE user_id = ${user.id}
+         AND embedding IS NOT NULL
+       ORDER BY embedding <=> ${vec}::vector
+       LIMIT 30
+    `);
+    const list = rows as unknown as Array<{
+      id: string;
+      title: string;
+      essence: string | null;
+      temperature: string;
+      maturity: string;
+      cos: number;
+    }>;
+    return {
+      ok: true,
+      results: list.map((r) => ({
+        id: r.id,
+        title: r.title,
+        essence: r.essence,
+        temperature: r.temperature,
+        maturity: r.maturity,
+      })),
+    };
+  } catch (err) {
+    console.warn('[searchGarden] embed failed, falling back to ILIKE', err);
+  }
+
+  // Fallback: title + essence ILIKE.
+  try {
+    const pattern = `%${q.replace(/[%_]/g, '\$&')}%`;
+    const rows = await db.execute<{
+      id: string;
+      title: string;
+      essence: string | null;
+      temperature: string;
+      maturity: string;
+    }>(sql`
+      SELECT id, title, essence, temperature, maturity
+        FROM ideas
+       WHERE user_id = ${user.id}
+         AND (title ILIKE ${pattern} OR essence ILIKE ${pattern} OR body ILIKE ${pattern})
+       ORDER BY updated_at DESC
+       LIMIT 30
+    `);
+    const list = rows as unknown as Array<{
+      id: string;
+      title: string;
+      essence: string | null;
+      temperature: string;
+      maturity: string;
+    }>;
+    return { ok: true, results: list };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : 'search failed',
+    };
+  }
 }
