@@ -28,6 +28,7 @@ import { requireUser } from '@/lib/auth';
 import { type GardenRailMode } from '../AssistantRailLive';
 import { EditorContextProvider } from '../EditorContext';
 import { EditorRightColumn } from '../EditorRightColumn';
+import { EditorShell } from '../EditorShell';
 import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
@@ -82,25 +83,23 @@ export default async function DraftEditorPage({
 
   return (
     <EditorContextProvider>
-      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-0px)]">
-        <section className="flex-1 min-w-0 px-[7%] py-12 md:py-14 overflow-y-auto">
-          <div className="max-w-[68ch] mx-auto">
-            <EditorPane
-              draftId={draft.id}
-              initialContent={draft.contentJson}
-              initialVersion={draft.version}
-              initialUpdatedAt={draft.updatedAt.toISOString()}
-              title={draft.title}
-              updatedAt={draft.updatedAt}
-            />
-          </div>
-        </section>
-
-        {/* Phase 20 slice 6: the right column is a client wrapper so it
-            can read useRailCollapse and reflow its own width. The editor
-            pane on the left grows into the freed space when collapsed. */}
-        <EditorRightColumn draftId={draft.id} mode={mode} />
-      </div>
+      {/* Phase 21 slice 2 (2026-05-06): EditorShell wraps the route in
+          the new 3-zone layout. Slice 3 fills the toolbar zone; slice
+          4 wraps EditorPane in a platform-shaped visual frame; slice
+          6 swaps EditorRightColumn for the new ChatCompanion. */}
+      <EditorShell
+        editor={
+          <EditorPane
+            draftId={draft.id}
+            initialContent={draft.contentJson}
+            initialVersion={draft.version}
+            initialUpdatedAt={draft.updatedAt.toISOString()}
+            title={draft.title}
+            updatedAt={draft.updatedAt}
+          />
+        }
+        rightColumn={<EditorRightColumn draftId={draft.id} mode={mode} />}
+      />
     </EditorContextProvider>
   );
 }
