@@ -243,11 +243,20 @@ export default async function GardenPage({
     <section>
       <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
         <div className="mb-8">
-          <div className="flex items-baseline justify-between gap-3 mb-2">
+          <div className="flex items-baseline justify-between gap-3 mb-2 flex-wrap">
             <h1 className="font-sans text-[clamp(28px,4vw,40px)] font-semibold tracking-tight text-ink">
               Garden
             </h1>
-            <MatureNowButton />
+            <div className="flex items-center gap-3">
+              <a
+                href="/studio/garden/audit"
+                className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag hover:text-ink transition-colors"
+                title="Inspect the actual signal data behind the maturation engine"
+              >
+                Audit →
+              </a>
+              <MatureNowButton />
+            </div>
           </div>
           <p className="font-sans text-[15px] leading-[1.55] text-ink-soft max-w-[58ch]">
             {allItems.length === 0
