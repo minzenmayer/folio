@@ -108,6 +108,28 @@ export async function loadTopicFitContext(
     console.warn('[topic-fit] linkedin load failed', err);
   }
 
+  // Phase 19 hotfix: also include claimed + authored ideas in the
+  // positive corpus. The user has intentionally curated those —
+  // they're 'what I write about' signal too, alongside published
+  // writing.
+  try {
+    const claimed = await db
+      .select({ embedding: ideas.embedding, claimKind: ideas.claimKind })
+      .from(ideas)
+      .where(eq(ideas.userId, userId));
+    for (const r of claimed) {
+      // Only claimed + authored (NOT auto_claimed — those are the
+      // ideas we're TRYING to gate; including them would create
+      // circularity).
+      if (r.claimKind !== 'claimed' && r.claimKind !== 'authored') continue;
+      if (Array.isArray(r.embedding) && r.embedding.length > 0) {
+        positivePool.push(r.embedding);
+      }
+    }
+  } catch (err) {
+    console.warn('[topic-fit] claimed-ideas load failed', err);
+  }
+
   // Negative pool: ideas the user has set aside.
   const negativePool: number[][] = [];
   try {
@@ -148,19 +170,19 @@ export function computeTopicFit(
   return Math.max(0, Math.min(1, score));
 }
 
-// Ceiling thresholds. Tuned to be permissive: we want to FILTER
-// obvious noise (system setup notes, Claude scratch) without hiding
-// content that's genuinely Payton-shaped.
+// Phase 19 hotfix (2026-05-05): lowered thresholds. Real-use showed
+// 818 of 830 ideas hitting the cool ceiling at 0.45 — too aggressive.
+// text-embedding-3-small actually scores 'topically aligned but not
+// a duplicate' more like 0.35-0.55 for vault-vs-CSL pairs. New levels:
 //
-// Why 0.45 vs 0.65: text-embedding-3-small typically scores
-// 'topically aligned but not a duplicate' in 0.45-0.65 range. Below
-// 0.45 the idea is from a different topical universe than the user's
-// published writing.
+//   < 0.30 → cool ceiling (real noise — system setup, Claude scratch)
+//   < 0.50 → warm ceiling (mid-topic — can warm but not hot/ready)
+//   ≥ 0.50 → no ceiling (writing-worthy — full progression unlocked)
 
 export type TopicFitCeiling = 'cool' | 'warm' | null;
 
 export function topicFitCeiling(score: number): TopicFitCeiling {
-  if (score < 0.45) return 'cool';
-  if (score < 0.65) return 'warm';
+  if (score < 0.3) return 'cool';
+  if (score < 0.5) return 'warm';
   return null;
 }

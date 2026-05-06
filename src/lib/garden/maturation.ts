@@ -524,24 +524,41 @@ export async function runMaturationPass(
       topicFitCtx
     );
     const ceiling = topicFitCeiling(fit);
+    // Phase 19 hotfix (2026-05-05): ceiling only PREVENTS upward
+    // lifts, doesn't pull mature ideas back down. Compare against
+    // idea.temperature / idea.maturity (original state) — if the
+    // accumulated lifts would push it ABOVE the ceiling AND above
+    // the original state, clamp. If it was already there, leave it.
     if (ceiling === 'cool') {
-      // Hard ceiling — reset all bumps. The other 5 signals don't
-      // matter if the idea isn't writing material.
-      if (tempIndex(nextTemp) > tempIndex('cool')) {
-        nextTemp = 'cool';
+      // Cap above 'cool': clamp temp lifts back, but don't pull
+      // existing warm/hot ideas down.
+      if (
+        tempIndex(nextTemp) > tempIndex('cool') &&
+        tempIndex(nextTemp) > tempIndex(idea.temperature)
+      ) {
+        nextTemp = idea.temperature;
       }
-      if (maturityIndex(nextMat) > maturityIndex('forming')) {
-        nextMat = 'forming';
+      if (
+        maturityIndex(nextMat) > maturityIndex('forming') &&
+        maturityIndex(nextMat) > maturityIndex(idea.maturity)
+      ) {
+        nextMat = idea.maturity;
       }
       maturityLifts = 0; // suppress stacked-signal hot rule
       report.signal6Hits += 1;
     } else if (ceiling === 'warm') {
-      // Soft ceiling — keep some progression but cap below hot/ready.
-      if (tempIndex(nextTemp) > tempIndex('warm')) {
-        nextTemp = 'warm';
+      // Cap above 'warm.'
+      if (
+        tempIndex(nextTemp) > tempIndex('warm') &&
+        tempIndex(nextTemp) > tempIndex(idea.temperature)
+      ) {
+        nextTemp = idea.temperature;
       }
-      if (maturityIndex(nextMat) > maturityIndex('shaping')) {
-        nextMat = 'shaping';
+      if (
+        maturityIndex(nextMat) > maturityIndex('shaping') &&
+        maturityIndex(nextMat) > maturityIndex(idea.maturity)
+      ) {
+        nextMat = idea.maturity;
       }
       maturityLifts = 0;
       report.signal6Hits += 1;
