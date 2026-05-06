@@ -109,39 +109,50 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
   // result. The core work (SELECT + autoClaim loop + COUNT) reports
   // accurately even when migration 0015 isn't applied.
 
-  // Find extracted rows that are auto-claim eligible AND don't yet
-  // have a partner ideas row.
+  // Phase 18 hotfix (2026-05-05): use Drizzle's typed query builder
+  // instead of raw SQL. Raw db.execute returns vector columns as
+  // strings — passing those into db.insert(ideas).values() then
+  // tries to serialize the string as a vector and throws 'b is not
+  // iterable' from Drizzle's minified runtime. Typed queries parse
+  // vectors to number[] automatically.
   let list: Array<{
     id: string;
     title: string;
     claim: string;
     evidence: string | null;
-    depth_signal: number;
-    source_kind: string;
+    depthSignal: number;
+    sourceKind: string;
     embedding: number[] | null;
   }> = [];
   try {
-    list = (await db.execute<{
-      id: string;
-      title: string;
-      claim: string;
-      evidence: string | null;
-      depth_signal: number;
-      source_kind: string;
-      embedding: number[] | null;
-    }>(sql`
-      SELECT e.id, e.title, e.claim, e.evidence, e.depth_signal, e.source_kind, e.embedding
-        FROM extracted_ideas e
-       WHERE e.user_id = ${user.id}
-         AND e.source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
-         AND NOT EXISTS (
-           SELECT 1 FROM ideas i
-            WHERE i.user_id = e.user_id
-              AND i.source_extracted_idea_id = e.id
-         )
-       ORDER BY e.created_at ASC
-       LIMIT ${CHUNK_SIZE}
-    `)) as unknown as typeof list;
+    list = await db
+      .select({
+        id: extractedIdeas.id,
+        title: extractedIdeas.title,
+        claim: extractedIdeas.claim,
+        evidence: extractedIdeas.evidence,
+        depthSignal: extractedIdeas.depthSignal,
+        sourceKind: extractedIdeas.sourceKind,
+        embedding: extractedIdeas.embedding,
+      })
+      .from(extractedIdeas)
+      .where(
+        and(
+          eq(extractedIdeas.userId, user.id),
+          inArray(extractedIdeas.sourceKind, [
+            'newsletter_issue',
+            'obsidian_note',
+            'linkedin_post',
+          ]),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${ideas}
+             WHERE ${ideas.userId} = ${extractedIdeas.userId}
+               AND ${ideas.sourceExtractedIdeaId} = ${extractedIdeas.id}
+          )`
+        )
+      )
+      .orderBy(extractedIdeas.createdAt)
+      .limit(CHUNK_SIZE);
   } catch (err) {
     console.warn('[runSeedChunk] eligibility query failed', err);
     return { claimed: 0, totalClaimed: 0, hasMore: false };
@@ -153,13 +164,18 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
       const id = await autoClaimExtractedRow({
         userId: user.id,
         extractedId: row.id,
-        sourceKind: row.source_kind,
+        sourceKind: row.sourceKind,
         title: row.title,
         claim: row.claim,
         evidence: row.evidence,
-        depthSignal: row.depth_signal,
+        depthSignal: row.depthSignal,
         themes: [],
-        embedding: row.embedding,
+        // Skip embedding pass-through. autoClaim's NewIdea row will
+        // be embedded later by the backfill cron — passing it here
+        // adds a serialization failure surface and isn't strictly
+        // needed for the partner ideas row to function (retrieval
+        // still works via the source extracted_idea's embedding).
+        embedding: null,
       });
       if (id) claimed += 1;
     } catch (err) {
