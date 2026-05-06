@@ -239,6 +239,25 @@ export default async function GardenPage({
 
 
 
+  // Hoist + guard server-side calls so the page renders even when
+  // one of them throws at runtime (transient DB hiccup, missing
+  // schema, etc.). Each fallback keeps the corresponding zone
+  // hidden / inert without taking down the whole surface.
+  let seedStatus: Awaited<ReturnType<typeof getSeedStatus>>;
+  try {
+    seedStatus = await getSeedStatus();
+  } catch (err) {
+    console.warn('[garden/page] getSeedStatus failed', err);
+    seedStatus = { totalEligible: 0, alreadyClaimed: 0, seeded: true };
+  }
+
+  let edgeMatches: Awaited<ReturnType<typeof findEdgeMatches>> = [];
+  try {
+    edgeMatches = await findEdgeMatches(user.id);
+  } catch (err) {
+    console.warn('[garden/page] findEdgeMatches failed', err);
+  }
+
   return (
     <section>
       <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
@@ -265,15 +284,8 @@ export default async function GardenPage({
           </p>
         </div>
 
-        {/* Phase 17 onboarding mass-claim banner — visible until the
-            user's phase17_seeded_at gate is set. Component handles its
-            own polling. */}
-        <SeedBanner initialStatus={await getSeedStatus()} />
-
-        {/* Phase 17 edge-prompts zone. Up to 3 ideas about to cool /
-            shaping but stuck / ready but never written from. Quiet
-            when nothing matches. */}
-        <EdgePromptZone prompts={await findEdgeMatches(user.id)} />
+        <SeedBanner initialStatus={seedStatus} />
+        <EdgePromptZone prompts={edgeMatches} />
 
         {digestItems.length > 0 && (
           <GardenDigest items={digestItems} juxtaposition={juxtaposition} />
