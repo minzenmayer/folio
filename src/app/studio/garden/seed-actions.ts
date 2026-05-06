@@ -32,21 +32,18 @@ export type SeedStatus = {
 
 export async function getSeedStatus(): Promise<SeedStatus> {
   const user = await requireUser();
-  // Phase 17 hotfix (2026-05-05): if the 0015 migration isn't applied
-  // yet, this query throws on the missing phase17_seeded_at column.
-  // Treat that as 'not seeded, no eligible rows' so the page still
-  // renders. Banner stays hidden until migration lands.
-  let u: { phase17SeededAt: Date | null } | undefined;
-  try {
-    [u] = await db
-      .select({ phase17SeededAt: users.phase17SeededAt })
-      .from(users)
-      .where(eq(users.id, user.id))
-      .limit(1);
-  } catch (err) {
-    console.warn('[getSeedStatus] users query failed (migration?)', err);
-    return { totalEligible: 0, alreadyClaimed: 0, seeded: true };
-  }
+  // Phase 18 hotfix (2026-05-05): drop the users.phase17_seeded_at
+  // gate. The earlier fallback returned seeded=true when the column
+  // was missing — that suppressed the banner forever for users who
+  // hadn't applied migration 0015. The onboarding pass is idempotent
+  // (runSeedChunk's NOT EXISTS clause skips already-claimed rows),
+  // so we can safely use the derived gate: seeded = the user has
+  // no eligible-but-unclaimed rows left.
+  //
+  // The column write at the end of runSeedChunk still happens when
+  // the migration IS applied (informational), but it's no longer
+  // load-bearing.
+  void user;
 
   let eligibleRows: Array<{ count: number }> = [];
   let claimedRows: Array<{ count: number }> = [];
@@ -70,10 +67,16 @@ export async function getSeedStatus(): Promise<SeedStatus> {
   const totalEligible = Number(eligibleRows[0]?.count ?? 0);
   const alreadyClaimed = Number(claimedRows[0]?.count ?? 0);
 
+  // Derived gate: seeded when the user has no eligible-but-unclaimed
+  // rows left. Holds even when the column-write side of runSeedChunk
+  // fails (migration not applied), because the actual claim work is
+  // gated on the NOT EXISTS query against the ideas table.
+  const seeded = totalEligible > 0 && alreadyClaimed >= totalEligible;
+
   return {
     totalEligible,
     alreadyClaimed,
-    seeded: !!u?.phase17SeededAt,
+    seeded,
   };
 }
 

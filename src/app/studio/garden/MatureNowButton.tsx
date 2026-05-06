@@ -24,7 +24,7 @@ export function MatureNowButton() {
         const res = await runMaturationNow();
         setLastResult(
           res.ok
-            ? `Lifted ${res.lifted} ${res.lifted === 1 ? 'idea' : 'ideas'}`
+            ? `Lifted ${res.lifted} of ${res.inspected} inspected`
             : `Pass failed: ${res.reason}`
         );
         router.refresh();
