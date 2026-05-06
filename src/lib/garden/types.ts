@@ -45,4 +45,7 @@ export interface GardenItem {
   // Phase 14b auxiliary
   evidence?: string | null;
   body?: string | null;
+  // Phase 17 — drives the AUTO badge on cluster cards. 'authored' |
+  // 'claimed' | 'auto_claimed' for ideas; null for extracted ideas.
+  claimKind?: string | null;
 }

@@ -80,6 +80,7 @@ export async function listGardenItems(
         lastVisitedAt: row.lastVisitedAt ? new Date(row.lastVisitedAt) : null,
         digestSurfaceCount: row.digestSurfaceCount ?? 0,
         isClaimed: true,
+        claimKind: row.claimKind ?? null,
         body: typeof row.body === 'string' ? row.body : null,
         ripeness: computeRipeness({
           temperature: row.temperature as Temperature,

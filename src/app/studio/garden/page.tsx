@@ -26,6 +26,15 @@ import { GardenFeed } from './GardenFeed';
 import { FilterChips } from './FilterChips';
 import { SeedBanner } from './SeedBanner';
 import { getSeedStatus } from './seed-actions';
+import {
+  readClustersForToday,
+  computeClusters,
+  persistClusters,
+} from '@/lib/garden/clusters';
+import type { ClusterSnapshot } from '@/lib/garden/clusters';
+import { ClusterFeed } from './ClusterFeed';
+import { ViewToggle } from './ViewToggle';
+import type { ClusterRender } from './ClusterCard';
 
 // Always render fresh — temperature changes are per-action and we
 // invalidate paths from server actions, but pages also benefit from
@@ -35,6 +44,7 @@ export const dynamic = 'force-dynamic';
 interface SearchParams {
   filter?: string;
   source?: string;
+  view?: string;
 }
 
 export default async function GardenPage({
@@ -118,8 +128,40 @@ export default async function GardenPage({
     }
   }
 
+  // Phase 17 (2026-05-05) — cluster view default. Read today's run; if
+  // empty, compute on-demand once (the cron will catch up daily but
+  // the first user after migration shouldn't see a blank surface).
+  let clusterSnapshots: ClusterSnapshot[] = await readClustersForToday(user.id);
+  if (clusterSnapshots.length === 0 && allItems.length > 0) {
+    try {
+      const computed = await computeClusters(user.id);
+      const persisted = await persistClusters(user.id, new Date(), computed);
+      if (persisted > 0) {
+        clusterSnapshots = await readClustersForToday(user.id);
+      }
+    } catch (err) {
+      console.warn('[garden/page] on-demand cluster compute failed', err);
+    }
+  }
+
+  // Hydrate cluster snapshots into ClusterRender shape.
+  const clusters: ClusterRender[] = clusterSnapshots.map((cs) => {
+    const repItem = itemMap.get(`${cs.repKind}|${cs.repId}`);
+    if (!repItem) return null;
+    const memberItems = cs.members
+      .map((m) => itemMap.get(`${m.kind}|${m.id}`))
+      .filter((m): m is NonNullable<typeof m> => !!m);
+    return {
+      id: cs.id,
+      rep: repItem,
+      theme: cs.theme,
+      members: memberItems,
+    };
+  }).filter((c): c is ClusterRender => c !== null);
+
   // Apply filter chips for the feed below.
   const activeFilter = sp.filter ?? 'all';
+  const activeView: 'cluster' | 'list' = sp.view === 'list' ? 'list' : 'cluster';
   let feedItems = allItems;
   if (activeFilter === 'hot') {
     feedItems = allItems.filter((i) => i.temperature === 'hot');
@@ -156,9 +198,19 @@ export default async function GardenPage({
           <GardenDigest items={digestItems} juxtaposition={juxtaposition} />
         )}
 
-        <FilterChips active={activeFilter} />
+        {/* Phase 17: cluster vs list toggle + filter chips share the
+            row above the feed surfaces. Cluster view is the default;
+            list view ships the existing ranked feed. */}
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <FilterChips active={activeFilter} />
+          <ViewToggle active={activeView} />
+        </div>
 
-        <GardenFeed items={feedItems} />
+        {activeView === 'cluster' ? (
+          <ClusterFeed clusters={clusters} />
+        ) : (
+          <GardenFeed items={feedItems} />
+        )}
       </div>
     </section>
   );
