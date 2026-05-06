@@ -82,7 +82,7 @@ export default async function DraftEditorPage({
 
   return (
     <EditorContextProvider>
-      <div className="flex flex-col md:flex-row min-h-[calc(100vh-0px)]">
+      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-0px)]">
         <section className="flex-1 min-w-0 px-[7%] py-12 md:py-14 overflow-y-auto">
           <div className="max-w-[68ch] mx-auto">
             <EditorPane
