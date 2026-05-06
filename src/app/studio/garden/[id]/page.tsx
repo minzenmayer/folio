@@ -102,6 +102,7 @@ export default async function IdeaPage({
         maturity: row.maturity,
         temperature: row.temperature as any,
         lastVisitedAt: row.lastVisitedAt ? new Date(row.lastVisitedAt).toISOString() : null,
+        claimKind: row.claimKind,
       }}
       links={links}
       provenance={provenance}

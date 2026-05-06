@@ -15,6 +15,7 @@ import {
   setAside,
   bringBack,
 } from '../actions';
+import { demoteAutoClaim } from '../seed-actions';
 
 interface Idea {
   id: string;
@@ -25,6 +26,9 @@ interface Idea {
   maturity: string;
   temperature: Temperature;
   lastVisitedAt: string | null;
+  // Phase 17 (2026-05-05): 'authored' | 'claimed' | 'auto_claimed'.
+  // Drives the AUTO badge + the Demote affordance below.
+  claimKind?: string;
 }
 
 export function ExpandSurfaceClaimed({
@@ -253,6 +257,37 @@ export function ExpandSurfaceClaimed({
               >
                 {busy === 'set' ? 'Setting aside…' : 'Set aside'}
               </button>
+              {idea.claimKind === 'auto_claimed' && (
+                <button
+                  onClick={() => {
+                    if (pending) return;
+                    if (
+                      typeof window !== 'undefined' &&
+                      !window.confirm(
+                        'Demote this idea? It moves back to unclaimed and the partner Garden card disappears.'
+                      )
+                    ) {
+                      return;
+                    }
+                    setBusy('demote');
+                    start(async () => {
+                      try {
+                        await demoteAutoClaim({ ideaId: idea.id });
+                        router.push('/studio/garden');
+                      } catch (err) {
+                        console.warn('[ExpandSurfaceClaimed] demote failed', err);
+                      } finally {
+                        setBusy(null);
+                      }
+                    });
+                  }}
+                  disabled={pending}
+                  title="Reverses the auto-claim. The source extracted idea returns to the unclaimed lane."
+                  className="font-sans text-[13px] px-3 py-[6px] rounded-md bg-paper text-tag border border-rule hover:border-rule-strong hover:text-ink disabled:opacity-50 ml-auto"
+                >
+                  {busy === 'demote' ? 'Demoting…' : 'Demote'}
+                </button>
+              )}
             </>
           )}
         </div>

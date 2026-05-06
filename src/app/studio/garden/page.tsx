@@ -24,6 +24,8 @@ import { computeNextJuxtaposition } from '@/lib/garden/juxtaposition';
 import { GardenDigest } from './GardenDigest';
 import { GardenFeed } from './GardenFeed';
 import { FilterChips } from './FilterChips';
+import { SeedBanner } from './SeedBanner';
+import { getSeedStatus } from './seed-actions';
 
 // Always render fresh — temperature changes are per-action and we
 // invalidate paths from server actions, but pages also benefit from
@@ -144,6 +146,11 @@ export default async function GardenPage({
               : `${allItems.length} ${allItems.length === 1 ? 'idea' : 'ideas'} in your Garden. Claimed and unclaimed, all in one place.`}
           </p>
         </div>
+
+        {/* Phase 17 onboarding mass-claim banner — visible until the
+            user's phase17_seeded_at gate is set. Component handles its
+            own polling. */}
+        <SeedBanner initialStatus={await getSeedStatus()} />
 
         {digestItems.length > 0 && (
           <GardenDigest items={digestItems} juxtaposition={juxtaposition} />
