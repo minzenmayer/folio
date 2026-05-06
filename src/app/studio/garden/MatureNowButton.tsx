@@ -43,6 +43,9 @@ export function MatureNowButton() {
               `signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
             );
           }
+          if (res.firstError) {
+            parts.push(`error: ${res.firstError}`);
+          }
           setLastResult(parts.join(' · '));
         }
         router.refresh();

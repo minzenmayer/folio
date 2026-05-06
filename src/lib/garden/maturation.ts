@@ -131,13 +131,21 @@ interface DraftCand {
   embedding: number[];
 }
 
-function cosine(a: number[], b: number[]): number {
+function cosine(a: unknown, b: unknown): number {
+  // Defensive: pgvector embeddings sometimes round-trip as strings
+  // depending on Drizzle adapter config. Reject anything that isn't
+  // a real number array.
+  if (!Array.isArray(a) || !Array.isArray(b)) return 0;
+  if (a.length === 0 || b.length === 0) return 0;
   let dot = 0, na = 0, nb = 0;
   const len = Math.min(a.length, b.length);
   for (let i = 0; i < len; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
+    const ai = a[i] as number;
+    const bi = b[i] as number;
+    if (typeof ai !== 'number' || typeof bi !== 'number') return 0;
+    dot += ai * bi;
+    na += ai * ai;
+    nb += bi * bi;
   }
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
@@ -335,8 +343,7 @@ export async function runMaturationPass(
   try {
     ideasList = await loadIdeas(userId);
   } catch (err) {
-    report.errors.push(`load ideas: ${(err as Error).message}`);
-    return report;
+    throw new Error(`loadIdeas: ${(err as Error).message}`);
   }
 
   if (ideasList.length === 0) return report;
@@ -346,20 +353,33 @@ export async function runMaturationPass(
   try {
     resonancePool = await loadResonancePool(userId);
   } catch (err) {
-    report.errors.push(`load resonance: ${(err as Error).message}`);
+    report.errors.push(`loadResonancePool: ${(err as Error).message}`);
   }
 
   let recentDrafts: DraftCand[] = [];
   try {
     recentDrafts = await loadRecentDrafts(userId);
   } catch (err) {
-    report.errors.push(`load drafts: ${(err as Error).message}`);
+    report.errors.push(`loadRecentDrafts: ${(err as Error).message}`);
   }
 
-  const edgeCounts = await loadEdgeCounts(userId);
-  const { membership: clusterMembership } = await loadTodayClusters(userId);
+  let edgeCounts = new Map<string, number>();
+  try {
+    edgeCounts = await loadEdgeCounts(userId);
+  } catch (err) {
+    report.errors.push(`loadEdgeCounts: ${(err as Error).message}`);
+  }
+
+  let clusterMembership = new Map<string, { size: number; isRep: boolean }>();
+  try {
+    const cl = await loadTodayClusters(userId);
+    clusterMembership = cl.membership;
+  } catch (err) {
+    report.errors.push(`loadTodayClusters: ${(err as Error).message}`);
+  }
 
   for (const idea of ideasList) {
+    try {
     let nextTemp = idea.temperature;
     let nextMat = idea.maturity;
 
@@ -469,6 +489,9 @@ export async function runMaturationPass(
           `lift ${idea.id}: ${(err as Error).message}`
         );
       }
+    }
+    } catch (err) {
+      report.errors.push(`evaluate ${idea.id}: ${(err as Error).message}`);
     }
   }
 

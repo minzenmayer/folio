@@ -35,6 +35,7 @@ export async function runMaturationNow(): Promise<
       signal3: number;
       signal4: number;
       signal5: number;
+      firstError: string | null;
     }
   | { ok: false; reason: string }
 > {
@@ -56,13 +57,29 @@ export async function runMaturationNow(): Promise<
 
     let totalClaimed = 0;
     const MAX_CHUNKS = 30;
-    for (let i = 0; i < MAX_CHUNKS; i++) {
-      const chunk = await runSeedChunk();
-      totalClaimed += chunk.claimed;
-      if (!chunk.hasMore) break;
+    try {
+      for (let i = 0; i < MAX_CHUNKS; i++) {
+        const chunk = await runSeedChunk();
+        totalClaimed += chunk.claimed;
+        if (!chunk.hasMore) break;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      return { ok: false, reason: `seed phase failed: ${msg}` };
     }
 
-    const res = await runMaturationPass(user.id);
+    let res;
+    try {
+      res = await runMaturationPass(user.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      return { ok: false, reason: `maturation phase failed: ${msg}` };
+    }
+
+    // Bubble up the first error encountered during the pass so the
+    // user sees WHICH loader / signal step failed, not just an
+    // opaque count.
+    const firstError = res.errors[0];
     revalidatePath('/studio/garden');
     return {
       ok: true,
@@ -74,6 +91,7 @@ export async function runMaturationNow(): Promise<
       signal3: res.signal3Hits,
       signal4: res.signal4Hits,
       signal5: res.signal5Hits,
+      firstError: firstError ?? null,
     };
   } catch (err) {
     return {
