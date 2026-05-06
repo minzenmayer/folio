@@ -35,6 +35,8 @@ import type { ClusterSnapshot } from '@/lib/garden/clusters';
 import { ClusterFeed } from './ClusterFeed';
 import { ViewToggle } from './ViewToggle';
 import type { ClusterRender } from './ClusterCard';
+import { findEdgeMatches } from '@/lib/garden/edge-prompts';
+import { EdgePromptZone } from './EdgePromptZone';
 
 // Always render fresh — temperature changes are per-action and we
 // invalidate paths from server actions, but pages also benefit from
@@ -193,6 +195,11 @@ export default async function GardenPage({
             user's phase17_seeded_at gate is set. Component handles its
             own polling. */}
         <SeedBanner initialStatus={await getSeedStatus()} />
+
+        {/* Phase 17 edge-prompts zone. Up to 3 ideas about to cool /
+            shaping but stuck / ready but never written from. Quiet
+            when nothing matches. */}
+        <EdgePromptZone prompts={await findEdgeMatches(user.id)} />
 
         {digestItems.length > 0 && (
           <GardenDigest items={digestItems} juxtaposition={juxtaposition} />
