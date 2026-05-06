@@ -193,7 +193,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
             id: newId(),
             kind: 'thoughtbed',
             text:
-              'Give me a few more words to search on — paste a sentence or pass one with /related <query>.',
+              'Give me a few more words to search on. Paste a sentence or pass one with /related <query>.',
           });
           return;
         }
@@ -510,7 +510,7 @@ function StatusLine({ status }: { status: Status }) {
   if (status.kind === 'empty') {
     return (
       <p className="font-sans text-[12.5px] text-tag leading-[1.55] m-0">
-        Nothing in your Garden resonates yet. Keep writing — sources surface
+        Nothing in your Garden resonates yet. Keep writing. Sources surface
         as the archive grows.
       </p>
     );
@@ -870,7 +870,7 @@ function ChatInput({
     <div className="border-t border-rule bg-paper px-3 py-2.5 flex items-end gap-2">
       <textarea
         rows={1}
-        placeholder="Reply to Thoughtbed… try /related, /hook, /closer"
+        placeholder="Reply to Thoughtbed. Try /related, /hook, /closer"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onCompositionStart={() => onCompositionChange(true)}
