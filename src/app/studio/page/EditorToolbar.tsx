@@ -21,6 +21,13 @@ import {
   downloadFile,
   safeFilename,
 } from '@/lib/exports';
+import {
+  usePlatform,
+  PLATFORMS,
+  PLATFORM_LABEL,
+  PLATFORM_WORD_TARGET,
+  type Platform,
+} from './usePlatform';
 
 const FAV_KEY_PREFIX = 'tb:fav:';
 
@@ -113,22 +120,10 @@ export function EditorToolbar({
   return (
     <>
       <div className="px-5 py-2.5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-tag">
-          {/* Slice 4 (2026-05-06) drops the platform-shape toggle in
-              this slot. For now a quiet placeholder so the layout
-              spacing is right. */}
-          <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag/60">
-            Draft
-          </span>
-        </div>
+        <PlatformToggle />
 
         <div className="flex items-center gap-3">
-          <span
-            className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag"
-            aria-live="polite"
-          >
-            {wordCount} {wordCount === 1 ? 'word' : 'words'}
-          </span>
+          <WordCountReadout count={wordCount} />
 
           <div className="flex items-center gap-1">
             <ToolbarIconButton
@@ -273,3 +268,127 @@ function ToolbarIconButton({
     </button>
   );
 }
+
+// Phase 21 slice 4 (2026-05-06): segmented platform control.
+// Left and right arrows cycle through linkedin / newsletter / blog
+// / note. Clicking a label sets directly. The active platform's
+// label gets a paper-2 fill + ink text; others read as muted.
+function PlatformToggle() {
+  const { platform, setPlatform, cycle } = usePlatform();
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => cycle('left')}
+        aria-label="Previous platform"
+        title="Previous platform"
+        className="text-tag hover:text-ink transition-colors p-1 rounded-soft focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="7,2 3,6 7,10" />
+        </svg>
+      </button>
+      <div className="flex items-center gap-0.5" role="tablist" aria-label="Platform shape">
+        {PLATFORMS.map((p) => (
+          <PlatformChip
+            key={p}
+            value={p}
+            active={p === platform}
+            onClick={() => setPlatform(p)}
+          />
+        ))}
+      </div>
+      <button
+        type="button"
+        onClick={() => cycle('right')}
+        aria-label="Next platform"
+        title="Next platform"
+        className="text-tag hover:text-ink transition-colors p-1 rounded-soft focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="5,2 9,6 5,10" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function PlatformChip({
+  value,
+  active,
+  onClick,
+}: {
+  value: Platform;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      role="tab"
+      aria-selected={active}
+      className={`font-mono text-[10px] tracking-[0.16em] uppercase rounded-full px-2.5 py-1 transition-colors border ${
+        active
+          ? 'bg-paper-2 text-ink border-rule'
+          : 'bg-transparent text-tag border-transparent hover:text-ink hover:bg-paper-2'
+      }`}
+    >
+      {PLATFORM_LABEL[value]}
+    </button>
+  );
+}
+
+function WordCountReadout({ count }: { count: number }) {
+  const { platform } = usePlatform();
+  const target = PLATFORM_WORD_TARGET[platform];
+  if (target === null) {
+    return (
+      <span
+        className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag"
+        aria-live="polite"
+      >
+        {count} {count === 1 ? 'word' : 'words'}
+      </span>
+    );
+  }
+  // Color drift: under target = tag, near target (>=80%) = ink, over
+  // target = accent (a soft signal, not an alarm).
+  const ratio = count / target;
+  const cls =
+    ratio >= 1.1
+      ? 'text-accent'
+      : ratio >= 0.8
+        ? 'text-ink'
+        : 'text-tag';
+  return (
+    <span
+      className={`font-mono text-[10px] tracking-[0.18em] uppercase ${cls}`}
+      aria-live="polite"
+      title={`Target: ~${target} words for ${PLATFORM_LABEL[platform]}`}
+    >
+      {count} / ~{target} words
+    </span>
+  );
+}
+

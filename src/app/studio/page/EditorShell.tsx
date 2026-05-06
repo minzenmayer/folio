@@ -12,40 +12,45 @@
 //   │                                      │   AssistantRailLive)  │
 //   └──────────────────────────────────────┴──────────────────────┘
 //
-// Slice 2 ships only the structural shell. The toolbar zone is a
-// placeholder strip; the chat slot still renders the existing
-// AssistantRailLive via EditorRightColumn. No behavior change yet,
-// just the new wrapper to hang Phase 21 slices off.
+// Phase 21 slice 4 (2026-05-06): wraps the route in a
+// PlatformProvider and wraps the editor slot in a PlatformFrame so
+// the editor body re-shapes to match the active platform without
+// the route page needing to know about platform state.
 
 'use client';
 
 import { type ReactNode } from 'react';
+import { PlatformFrame } from './PlatformFrame';
+import { PlatformProvider, type Platform } from './usePlatform';
 
 export function EditorShell({
+  draftId,
+  initialPlatform,
   toolbar,
   editor,
   rightColumn,
 }: {
+  draftId: string;
+  initialPlatform?: Platform;
   toolbar?: ReactNode;
   editor: ReactNode;
   rightColumn: ReactNode;
 }) {
   return (
-    <div className="flex flex-col min-h-[calc(100vh-0px)]">
-      {/* Top toolbar zone. Slice 3 wires document actions
-          (favorite, download, copy, history) and slice 4 adds the
-          platform-shape toggle + word-count target. */}
-      <div className="border-b border-rule bg-bg">
-        {toolbar ?? <div className="h-11" aria-hidden="true" />}
-      </div>
+    <PlatformProvider draftId={draftId} initial={initialPlatform}>
+      <div className="flex flex-col min-h-[calc(100vh-0px)]">
+        <div className="border-b border-rule bg-bg">
+          {toolbar ?? <div className="h-11" aria-hidden="true" />}
+        </div>
 
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0">
-        <section className="flex-1 min-w-0 px-[7%] py-12 md:py-14 overflow-y-auto">
-          <div className="max-w-[68ch] mx-auto">{editor}</div>
-        </section>
+        <div className="flex flex-col lg:flex-row flex-1 min-h-0">
+          <section className="flex-1 min-w-0 px-[7%] py-12 md:py-14 overflow-y-auto">
+            <PlatformFrame>{editor}</PlatformFrame>
+          </section>
 
-        {rightColumn}
+          {rightColumn}
+        </div>
       </div>
-    </div>
+    </PlatformProvider>
   );
 }

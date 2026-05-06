@@ -30,6 +30,7 @@ import { EditorContextProvider } from '../EditorContext';
 import { EditorRightColumn } from '../EditorRightColumn';
 import { EditorShell } from '../EditorShell';
 import { EditorToolbar } from '../EditorToolbar';
+import { type Platform } from '../usePlatform';
 import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
@@ -55,6 +56,19 @@ function parseMode(raw: string | string[] | undefined): GardenRailMode | undefin
   return (VALID_MODES as readonly string[]).includes(value)
     ? (value as GardenRailMode)
     : undefined;
+}
+
+// Phase 21 slice 4 (2026-05-06): URL mode -> initial platform for
+// the new platform toggle. Falls through to 'note' when no mode is
+// set or when the mode is 'self-pilot' (which doesn't map to a
+// platform shape — self-pilot meant 'rail dormant', a different
+// concept).
+function platformFromMode(
+  mode: GardenRailMode | undefined
+): Platform | undefined {
+  if (mode === 'newsletter') return 'newsletter';
+  if (mode === 'linkedin') return 'linkedin';
+  return undefined;
 }
 
 export default async function DraftEditorPage({
@@ -89,6 +103,8 @@ export default async function DraftEditorPage({
           4 wraps EditorPane in a platform-shaped visual frame; slice
           6 swaps EditorRightColumn for the new ChatCompanion. */}
       <EditorShell
+        draftId={draft.id}
+        initialPlatform={platformFromMode(mode)}
         toolbar={<EditorToolbar draftId={draft.id} title={draft.title} />}
         editor={
           <EditorPane
