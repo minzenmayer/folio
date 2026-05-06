@@ -26,8 +26,9 @@ import { eq, and } from 'drizzle-orm';
 import { db, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { type GardenRailMode } from '../AssistantRailLive';
+import { ArtifactPanel } from '../ArtifactPanel';
+import { ChatCompanion } from '../ChatCompanion';
 import { EditorContextProvider } from '../EditorContext';
-import { EditorRightColumn } from '../EditorRightColumn';
 import { EditorShell } from '../EditorShell';
 import { EditorToolbar } from '../EditorToolbar';
 import { type Platform } from '../usePlatform';
@@ -134,18 +135,24 @@ export default async function DraftEditorPage({
         initialPlatform={platformFromMode(mode)}
         initialIsEmpty={isDraftEmpty(draft.contentJson)}
         userName={user.name ? user.name.split(' ')[0] : null}
-        toolbar={<EditorToolbar draftId={draft.id} title={draft.title} />}
-        editor={
-          <EditorPane
-            draftId={draft.id}
-            initialContent={draft.contentJson}
-            initialVersion={draft.version}
-            initialUpdatedAt={draft.updatedAt.toISOString()}
-            title={draft.title}
-            updatedAt={draft.updatedAt}
+        chat={<ChatCompanion draftId={draft.id} />}
+        artifactPanel={
+          <ArtifactPanel
+            toolbar={
+              <EditorToolbar draftId={draft.id} title={draft.title} />
+            }
+            editor={
+              <EditorPane
+                draftId={draft.id}
+                initialContent={draft.contentJson}
+                initialVersion={draft.version}
+                initialUpdatedAt={draft.updatedAt.toISOString()}
+                title={draft.title}
+                updatedAt={draft.updatedAt}
+              />
+            }
           />
         }
-        rightColumn={<EditorRightColumn draftId={draft.id} mode={mode} />}
       />
     </EditorContextProvider>
   );

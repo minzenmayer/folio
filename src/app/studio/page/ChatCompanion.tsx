@@ -26,6 +26,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
+import { useArtifactPanel } from './useArtifactPanel';
 import { findSimilar, originalityCheck, type SimilarHit } from '../actions';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
@@ -79,6 +80,7 @@ type ChatCompanionProps = {
 
 export function ChatCompanion({ draftId }: ChatCompanionProps) {
   const { editor, insertThoughtBubble } = useEditorContext();
+  const { openArtifact } = useArtifactPanel();
   const { state: collapseState, toggleCollapsed } = useRailCollapse();
   const isCollapsed = collapseState === 'collapsed';
   const { platform } = usePlatform();
@@ -312,6 +314,10 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
       if (!editor) return;
 
       if (hit.kind === 'idea' || hit.kind === 'extracted_idea') {
+        // Phase 22 slice 2 (2026-05-06): pulling from chat also
+        // opens the artifact panel so the bubble lands somewhere
+        // the user can see immediately. Idempotent if already open.
+        openArtifact();
         const title = (hit.title ?? '').trim();
         const preview = (
           hit.kind === 'extracted_idea' && hit.claimFull
@@ -334,6 +340,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
           });
         }
       } else {
+        openArtifact();
         const text = (hit.snippet ?? '').trim() || (hit.title ?? '').trim();
         if (text.length > 0) {
           editor
@@ -359,12 +366,12 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
         return next;
       });
     },
-    [editor, insertThoughtBubble]
+    [editor, insertThoughtBubble, openArtifact]
   );
 
   return (
     <aside
-      className="border-l border-rule bg-bg flex flex-col w-full"
+      className="bg-bg flex flex-col w-full h-full min-h-0"
       aria-label="Thoughtbed companion"
     >
       <div className="px-4 py-3 border-b border-rule flex items-center gap-2">
