@@ -15,6 +15,14 @@
 // matches how the draft was started. Self-pilot starts the rail dormant
 // — no debounced retrieval, no listening copy. The header carries a small
 // On/Off toggle to wake it up.
+//
+// Phase 20 (2026-05-06): editor redesign — slice 1 lays in the new header
+// shape. A collapse chevron + a "Refresh ideas" button sit alongside the
+// title. The chevron is wired to local state for now (visual collapse on
+// click); slice 6 lifts the state into useRailCollapse with localStorage
+// persistence and adds the 56px collapsed strip + hidden state. Refresh
+// re-fires findSimilar with the current draft text (no separate path —
+// shares the same runRetrieval the debounced trigger uses).
 
 'use client';
 
@@ -77,6 +85,11 @@ export function AssistantRailLive({
   const { editor } = useEditorContext();
 
   const [awake, setAwake] = useState(mode !== 'self-pilot');
+  // Phase 20 slice 1: visual collapse state. Slice 6 lifts this into a
+  // dedicated hook (useRailCollapse) with localStorage persistence and a
+  // 56px collapsed strip. For now the collapsed branch just hides the body
+  // so we can ship the header redesign in isolation.
+  const [collapsedLocal, setCollapsedLocal] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [reflection, setReflection] = useState<ReflectionState>({
     kind: 'idle',
@@ -85,6 +98,10 @@ export function AssistantRailLive({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryStampRef = useRef(0);
   const reflectStampRef = useRef(0);
+  // Phase 20: most-recent query text. The debounced trigger writes here on
+  // every editor update; the Refresh button reads here to re-run findSimilar
+  // without waiting for the next keystroke.
+  const lastQueryRef = useRef<string>('');
 
   const runRetrieval = useCallback(
     async (text: string) => {
@@ -121,6 +138,7 @@ export function AssistantRailLive({
 
     const trigger = () => {
       const text = editor.getText().trim().slice(0, MAX_QUERY_CHARS);
+      lastQueryRef.current = text;
       if (timerRef.current) clearTimeout(timerRef.current);
       if (text.length < MIN_QUERY_CHARS) {
         queryStampRef.current++;
@@ -191,6 +209,29 @@ export function AssistantRailLive({
     [editor]
   );
 
+  // Phase 20: Refresh button in the rail header. Fires findSimilar with
+  // whatever text the editor currently holds — bypasses the debounce so
+  // the user gets a fresh pass when they want one. If the text is below
+  // the minimum (12 chars), we fall back to the editor's current text in
+  // case lastQueryRef hasn't been seeded yet (first render before any
+  // keystroke after a paste).
+  const refreshIdeas = useCallback(() => {
+    if (!editor) return;
+    if (!awake) return;
+    const fromRef = lastQueryRef.current;
+    const text = (
+      fromRef.length >= MIN_QUERY_CHARS
+        ? fromRef
+        : editor.getText().trim().slice(0, MAX_QUERY_CHARS)
+    );
+    if (text.length < MIN_QUERY_CHARS) return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    runRetrieval(text);
+  }, [editor, awake, runRetrieval]);
+
   const onReflect = useCallback(async () => {
     const stamp = ++reflectStampRef.current;
     setReflection({ kind: 'thinking' });
@@ -230,25 +271,51 @@ export function AssistantRailLive({
       aria-label="Resonance"
     >
       <div className="px-5 pt-6 pb-4 border-b border-rule">
-        <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2 mb-2">
           <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
             Resonance
           </h2>
-          {mode === 'self-pilot' && (
+          <div className="ml-auto flex items-center gap-1.5">
+            {awake && (
+              <button
+                type="button"
+                onClick={refreshIdeas}
+                disabled={status.kind === 'loading'}
+                title="Refresh ideas"
+                aria-label="Refresh ideas"
+                className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Refresh
+              </button>
+            )}
+            {mode === 'self-pilot' && (
+              <button
+                type="button"
+                onClick={() => setAwake((v) => !v)}
+                aria-pressed={awake}
+                title={awake ? 'Quiet resonance' : 'Wake resonance'}
+                className={`font-mono text-[9px] tracking-[0.18em] uppercase rounded-full px-2.5 py-1 transition-colors border ${
+                  awake
+                    ? 'bg-paper-2 text-ink border-rule hover:border-ink'
+                    : 'bg-transparent text-tag border-rule hover:bg-paper-2 hover:text-ink'
+                }`}
+              >
+                {awake ? 'On' : 'Off'}
+              </button>
+            )}
+            {/* Phase 20 slice 1: collapse chevron. Local visual state for now;
+                slice 6 lifts to useRailCollapse with localStorage. */}
             <button
               type="button"
-              onClick={() => setAwake((v) => !v)}
-              aria-pressed={awake}
-              title={awake ? 'Quiet resonance' : 'Wake resonance'}
-              className={`font-mono text-[9px] tracking-[0.18em] uppercase rounded-full px-2.5 py-1 transition-colors border ${
-                awake
-                  ? 'bg-paper-2 text-ink border-rule hover:border-ink'
-                  : 'bg-transparent text-tag border-rule hover:bg-paper-2 hover:text-ink'
-              }`}
+              onClick={() => setCollapsedLocal((v) => !v)}
+              aria-pressed={collapsedLocal}
+              aria-label={collapsedLocal ? 'Expand rail' : 'Collapse rail'}
+              title={collapsedLocal ? 'Expand rail' : 'Collapse rail'}
+              className="text-tag hover:text-ink transition-colors rounded-soft p-1 -mr-1"
             >
-              {awake ? 'On' : 'Off'}
+              <ChevronGlyph direction={collapsedLocal ? 'left' : 'right'} />
             </button>
-          )}
+          </div>
         </div>
         {awake ? (
           <p className="font-sans text-[12.5px] text-ink-soft leading-[1.5]">
@@ -263,7 +330,7 @@ export function AssistantRailLive({
         )}
       </div>
 
-      {awake && (
+      {awake && !collapsedLocal && (
         <div className="flex-1 px-5 py-6 overflow-y-auto flex flex-col gap-6">
           {reflection.kind !== 'idle' && (
             <ReflectionPanel
@@ -283,15 +350,17 @@ export function AssistantRailLive({
         </div>
       )}
 
-      {!awake && <div className="flex-1" />}
+      {(!awake || collapsedLocal) && <div className="flex-1" />}
 
-      <div className="px-5 py-3 font-mono text-[10px] tracking-[0.16em] uppercase text-tag/80 flex items-center gap-2">
-        {awake ? (
-          <FootnoteForStatus status={status} />
-        ) : (
-          <span>Dormant</span>
-        )}
-      </div>
+      {!collapsedLocal && (
+        <div className="px-5 py-3 font-mono text-[10px] tracking-[0.16em] uppercase text-tag/80 flex items-center gap-2">
+          {awake ? (
+            <FootnoteForStatus status={status} />
+          ) : (
+            <span>Dormant</span>
+          )}
+        </div>
+      )}
     </aside>
   );
 }
@@ -593,4 +662,30 @@ function FootnoteForStatus({ status }: { status: Status }) {
     case 'error':
       return <span className="text-ink">Retrieval offline</span>;
   }
+}
+
+// Phase 20 slice 1: tiny inline SVG chevron used in the rail header. Inline
+// so we don't pull in an icon library. `direction` mirrors which way the
+// chevron points — 'right' when the rail is open (signals collapse), 'left'
+// when the rail is collapsed (signals expand).
+function ChevronGlyph({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {direction === 'right' ? (
+        <polyline points="5,3 9,7 5,11" />
+      ) : (
+        <polyline points="9,3 5,7 9,11" />
+      )}
+    </svg>
+  );
 }

@@ -18,6 +18,15 @@ const config: Config = {
         // reads as distinct from angles / outline cards. Stays in the zinc
         // family (no warm-cream pivot — the brand is monochrome).
         'paper-3': '#e4e4e7',    // emphasized fills (zinc-200)
+        // Phase 20 (2026-05-06) — editor redesign. The hottest 1-2 ideas in
+        // the resonance rail get this warm tint as background, plus the
+        // ideaBubble node that lands above the user's paragraph on pull.
+        // Same warm cream the unclaimed "Make it mine" zone already uses,
+        // promoted to a token so the rail and the bubble stay in sync.
+        'paper-hot': '#FAEEDA',  // warm idea-pull surface
+        // Filled lightbulb glyph color for the hottest ideas. Matches the
+        // accent edge of paper-hot.
+        'glyph-hot': '#EF9F27',
         'code-bg': '#f4f4f5',    // inline code / pre blocks (zinc-100)
         ink: '#0a0a0a',          // primary text — near-black (zinc-950)
         'ink-soft': '#52525b',   // secondary text (zinc-600)
