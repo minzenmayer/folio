@@ -132,7 +132,7 @@ export function RailIdeaPill({
               </button>
             )}
             <span className="ml-auto font-mono text-[9px] tracking-[0.16em] uppercase text-tag/70">
-              {KIND_LABEL[hit.kind]} · {hit.similarity.toFixed(2)}
+              {KIND_LABEL[hit.kind]}
             </span>
           </div>
         </div>

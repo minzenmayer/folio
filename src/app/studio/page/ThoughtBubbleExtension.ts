@@ -140,11 +140,13 @@ export const ThoughtBubbleExtension = Node.create({
       insertThoughtBubble:
         (attrs) =>
         ({ commands, state }) => {
-          // Resolve the position immediately above the current block.
-          // $from.before(1) = the position before the first ancestor
-          // node, i.e. the start of the user's current paragraph.
-          // Falls back to inserting at the cursor when the selection
-          // is at a doc edge that doesn't have an ancestor block.
+          // Phase 21 slice 1 (2026-05-06): defensive rewrite.
+          // String() coerces title/preview so a hit row with a
+          // numeric or null field can't sneak past as undefined and
+          // render the bubble with empty content. Earlier on, Payton
+          // saw bubbles render with no title/preview even though the
+          // hit had both — the safest read is one of the attrs was
+          // arriving as something other than a plain string.
           let insertPos: number | null = null;
           try {
             const $from = state.selection.$from;
@@ -153,16 +155,19 @@ export const ThoughtBubbleExtension = Node.create({
             insertPos = null;
           }
 
+          const safeTitle = String(attrs.title ?? '').trim();
+          const safePreview = String(attrs.preview ?? '').trim();
+
           const node = {
             type: 'thoughtBubble',
             attrs: {
-              source: attrs.source,
+              source: attrs.source ?? 'idea',
               ideaId: attrs.ideaId ?? null,
               kind: attrs.kind ?? null,
               beatId: attrs.beatId ?? null,
               beatStatus: attrs.beatStatus ?? null,
-              title: attrs.title ?? '',
-              preview: attrs.preview ?? '',
+              title: safeTitle,
+              preview: safePreview,
             },
           };
 

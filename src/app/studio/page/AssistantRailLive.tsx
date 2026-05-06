@@ -301,52 +301,55 @@ export function AssistantRailLive({
     >
       <div className="px-5 pt-6 pb-4 border-b border-rule">
         <div className="flex items-center gap-2 mb-2">
+          {/* Phase 21 slice 1 (2026-05-06): chevron moves to the LEFT
+              of the header for discoverability. The previous right-side
+              placement was hidden behind the action buttons. */}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-pressed={isCollapsed}
+            aria-label={isCollapsed ? 'Expand rail' : 'Collapse rail'}
+            title={isCollapsed ? 'Expand rail' : 'Collapse rail'}
+            className="text-tag hover:text-ink transition-colors rounded-soft p-1 -ml-1 shrink-0"
+          >
+            <ChevronGlyph direction={isCollapsed ? 'right' : 'left'} />
+          </button>
           {!isCollapsed && (
             <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
               Resonance
             </h2>
           )}
-          <div className={`${isCollapsed ? 'mx-auto' : 'ml-auto'} flex items-center gap-1.5`}>
-            {!isCollapsed && awake && (
-              <button
-                type="button"
-                onClick={refreshIdeas}
-                disabled={status.kind === 'loading'}
-                title="Refresh ideas"
-                aria-label="Refresh ideas"
-                className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Refresh
-              </button>
-            )}
-            {!isCollapsed && mode === 'self-pilot' && (
-              <button
-                type="button"
-                onClick={() => setAwake((v) => !v)}
-                aria-pressed={awake}
-                title={awake ? 'Quiet resonance' : 'Wake resonance'}
-                className={`font-mono text-[9px] tracking-[0.18em] uppercase rounded-full px-2.5 py-1 transition-colors border ${
-                  awake
-                    ? 'bg-paper-2 text-ink border-rule hover:border-ink'
-                    : 'bg-transparent text-tag border-rule hover:bg-paper-2 hover:text-ink'
-                }`}
-              >
-                {awake ? 'On' : 'Off'}
-              </button>
-            )}
-            {/* Phase 20 slice 6: collapse chevron, persisted via
-                useRailCollapse. Cycles expanded <-> collapsed. */}
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              aria-pressed={isCollapsed}
-              aria-label={isCollapsed ? 'Expand rail' : 'Collapse rail'}
-              title={isCollapsed ? 'Expand rail' : 'Collapse rail'}
-              className="text-tag hover:text-ink transition-colors rounded-soft p-1 -mr-1"
-            >
-              <ChevronGlyph direction={isCollapsed ? 'left' : 'right'} />
-            </button>
-          </div>
+          {!isCollapsed && (
+            <div className="ml-auto flex items-center gap-1.5">
+              {awake && (
+                <button
+                  type="button"
+                  onClick={refreshIdeas}
+                  disabled={status.kind === 'loading'}
+                  title="Refresh ideas"
+                  aria-label="Refresh ideas"
+                  className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Refresh
+                </button>
+              )}
+              {mode === 'self-pilot' && (
+                <button
+                  type="button"
+                  onClick={() => setAwake((v) => !v)}
+                  aria-pressed={awake}
+                  title={awake ? 'Quiet resonance' : 'Wake resonance'}
+                  className={`font-mono text-[9px] tracking-[0.18em] uppercase rounded-full px-2.5 py-1 transition-colors border ${
+                    awake
+                      ? 'bg-paper-2 text-ink border-rule hover:border-ink'
+                      : 'bg-transparent text-tag border-rule hover:bg-paper-2 hover:text-ink'
+                  }`}
+                >
+                  {awake ? 'On' : 'Off'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
         {!isCollapsed &&
           (awake ? (
@@ -612,9 +615,7 @@ function ReflectionPanel({
                     <span className="font-sans text-[12px] text-ink-soft truncate normal-case tracking-normal">
                       {src.title || src.snippet?.slice(0, 60) || '(untitled)'}
                     </span>
-                    <span className="ml-auto tracking-[0.04em]">
-                      {src.similarity.toFixed(2)}
-                    </span>
+
                   </li>
                 ))}
               </ul>
