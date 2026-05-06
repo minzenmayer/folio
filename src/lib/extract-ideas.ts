@@ -29,6 +29,7 @@
 
 import { anthropic } from '@ai-sdk/anthropic';
 import { generateObject } from 'ai';
+import { autoClaimExtractedRow } from './garden/auto-claim';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import {
@@ -227,7 +228,32 @@ export async function extractIdeasFromObsidian(input: {
     })
   );
 
-  await db.insert(extractedIdeas).values(rows);
+  // Phase 17 (2026-05-05): auto-claim every extracted row from this
+  // user-authored source. The user already wrote the prose; the partner
+  // ideas row gets created automatically. Best-effort — failures are
+  // logged but don't fail the parent sync (ideas can still be claimed
+  // manually later).
+  const inserted = await db
+    .insert(extractedIdeas)
+    .values(rows)
+    .returning({ id: extractedIdeas.id, title: extractedIdeas.title, claim: extractedIdeas.claim, evidence: extractedIdeas.evidence, depthSignal: extractedIdeas.depthSignal, embedding: extractedIdeas.embedding });
+  for (const row of inserted) {
+    try {
+      await autoClaimExtractedRow({
+        userId: input.userId,
+        extractedId: row.id,
+        sourceKind: 'obsidian_note',
+        title: row.title,
+        claim: row.claim,
+        evidence: row.evidence,
+        depthSignal: row.depthSignal,
+        themes: [],
+        embedding: row.embedding ?? null,
+      });
+    } catch (err) {
+      console.warn('[extract:obsidian] auto-claim failed', row.id, err);
+    }
+  }
   return rows.length;
 }
 
@@ -288,7 +314,29 @@ export async function extractIdeasFromNewsletter(input: {
     })
   );
 
-  await db.insert(extractedIdeas).values(rows);
+  // Phase 17 (2026-05-05): auto-claim every extracted row from this
+  // user-authored source. Best-effort.
+  const inserted = await db
+    .insert(extractedIdeas)
+    .values(rows)
+    .returning({ id: extractedIdeas.id, title: extractedIdeas.title, claim: extractedIdeas.claim, evidence: extractedIdeas.evidence, depthSignal: extractedIdeas.depthSignal, embedding: extractedIdeas.embedding });
+  for (const row of inserted) {
+    try {
+      await autoClaimExtractedRow({
+        userId: input.userId,
+        extractedId: row.id,
+        sourceKind: 'newsletter_issue',
+        title: row.title,
+        claim: row.claim,
+        evidence: row.evidence,
+        depthSignal: row.depthSignal,
+        themes: [],
+        embedding: row.embedding ?? null,
+      });
+    } catch (err) {
+      console.warn('[extract:newsletter] auto-claim failed', row.id, err);
+    }
+  }
   return rows.length;
 }
 
@@ -788,7 +836,29 @@ export async function extractIdeasFromLinkedinPost(input: {
     })
   );
 
-  await db.insert(extractedIdeas).values(rows);
+  // Phase 17 (2026-05-05): auto-claim every extracted row from this
+  // user-authored source. Best-effort.
+  const inserted = await db
+    .insert(extractedIdeas)
+    .values(rows)
+    .returning({ id: extractedIdeas.id, title: extractedIdeas.title, claim: extractedIdeas.claim, evidence: extractedIdeas.evidence, depthSignal: extractedIdeas.depthSignal, embedding: extractedIdeas.embedding });
+  for (const row of inserted) {
+    try {
+      await autoClaimExtractedRow({
+        userId: input.userId,
+        extractedId: row.id,
+        sourceKind: 'linkedin_post',
+        title: row.title,
+        claim: row.claim,
+        evidence: row.evidence,
+        depthSignal: row.depthSignal,
+        themes: [],
+        embedding: row.embedding ?? null,
+      });
+    } catch (err) {
+      console.warn('[extract:linkedin] auto-claim failed', row.id, err);
+    }
+  }
   return rows.length;
 }
 
