@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
 import { findSimilar, reflect, type SimilarHit } from '../actions';
+import { RailIdeaPill } from './RailIdeaPill';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 
@@ -418,10 +419,14 @@ function BodyForStatus({
 
     case 'ok':
       return (
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col gap-1.5">
           {status.hits.map((hit) => (
             <li key={`${hit.kind}-${hit.id}`}>
-              <HitRow hit={hit} onPull={onPull} />
+              {/* Phase 20 slice 2: minimal pill replaces the verbose row.
+                  Hover expands inline; click runs onPull. Slice 3 layers
+                  heat-color rank on top. Slice 5 swaps onPull to insert
+                  an ideaBubble node. Slice 8 wires onOpen to the Garden. */}
+              <RailIdeaPill hit={hit} onPull={onPull} />
             </li>
           ))}
         </ul>
@@ -429,102 +434,6 @@ function BodyForStatus({
   }
 }
 
-function HitRow({
-  hit,
-  onPull,
-}: {
-  hit: SimilarHit;
-  onPull: (hit: SimilarHit) => void;
-}) {
-  // Phase 14a (2026-05-04): expand affordance for extracted_idea hits
-  // reveals evidence + the underlying source title. Other kinds keep
-  // the previous compact card.
-  const [expanded, setExpanded] = useState(false);
-  const isExtractedIdea = hit.kind === 'extracted_idea';
-  const fullClaim = (hit.claimFull ?? hit.snippet ?? '').trim();
-  const evidence = (hit.evidenceFull ?? '').trim();
-  const sourceTitle = (hit.sourceTitle ?? '').trim();
-  const reasoning = (hit.reasoning ?? '').trim();
-  const hasExpand = isExtractedIdea && (evidence.length > 0 || sourceTitle.length > 0);
-
-  return (
-    <div className="w-full rounded-soft -mx-1 hover:bg-paper-2 transition-colors group focus-within:bg-paper-2/60">
-      <button
-        type="button"
-        onClick={() => onPull(hit)}
-        className="w-full text-left px-3 pt-3 pb-2 focus:outline-none focus:ring-1 focus:ring-rule-strong rounded-soft"
-      >
-        <div className="flex items-baseline gap-2 font-mono text-[10px] tracking-[0.16em] uppercase text-tag mb-1">
-          <span>{KIND_LABEL[hit.kind]}</span>
-          <span className="ml-auto normal-case tracking-[0.04em] text-tag/70">
-            {hit.similarity.toFixed(2)}
-          </span>
-        </div>
-        {hit.title && (
-          <div className="font-sans text-[13.5px] font-medium text-ink leading-[1.4] group-hover:underline underline-offset-4 decoration-rule-strong">
-            {hit.title}
-          </div>
-        )}
-        {/* Phase 14a: render the FULL claim for extracted_idea hits — claim
-            is short by design (one sentence). For other kinds keep the
-            existing 3-line clamp on snippet. */}
-        {isExtractedIdea ? (
-          fullClaim.length > 0 && (
-            <div
-              className={`font-sans text-[12.5px] text-ink-soft leading-[1.55] ${hit.title ? 'mt-1' : ''}`}
-            >
-              {fullClaim}
-            </div>
-          )
-        ) : (
-          hit.snippet && (
-            <div
-              className={`font-sans text-[12.5px] text-ink-soft leading-[1.55] ${hit.title ? 'mt-1' : ''} line-clamp-3`}
-            >
-              {hit.snippet}
-            </div>
-          )
-        )}
-        {/* Phase 14a: per-hit "this is here because…" reasoning. Lives
-            under the title (or claim) and reads as a small italic line. */}
-        {reasoning.length > 0 && (
-          <div className="mt-1.5 font-serif italic text-[12px] text-tag leading-[1.5]">
-            ↳ {reasoning}
-          </div>
-        )}
-        <div className="mt-2 font-mono text-[9px] tracking-[0.22em] uppercase text-tag opacity-0 group-hover:opacity-100 transition-opacity">
-          + Pull into draft
-        </div>
-      </button>
-      {hasExpand && (
-        <div className="px-3 pb-3">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="font-mono text-[9px] tracking-[0.22em] uppercase text-tag hover:text-ink transition-colors focus:outline-none focus:ring-1 focus:ring-rule-strong rounded-soft"
-            aria-expanded={expanded}
-          >
-            {expanded ? '− less' : '+ more'}
-          </button>
-          {expanded && (
-            <div className="mt-2 space-y-2">
-              {evidence.length > 0 && (
-                <p className="font-sans text-[12.5px] text-ink-soft leading-[1.55] whitespace-pre-line">
-                  {evidence}
-                </p>
-              )}
-              {sourceTitle.length > 0 && (
-                <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-tag">
-                  from {sourceTitle}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function ReflectButton({
   onClick,
