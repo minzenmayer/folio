@@ -24,13 +24,32 @@ export async function pushToReadyAction(input: {
 // Phase 18 manual trigger. Surfaces in the Garden header so the user
 // can fire the maturation pass without waiting for the daily cron.
 export async function runMaturationNow(): Promise<
-  { ok: true; lifted: number; inspected: number } | { ok: false; reason: string }
+  | {
+      ok: true;
+      lifted: number;
+      inspected: number;
+      signal1: number;
+      signal2: number;
+      signal3: number;
+      signal4: number;
+      signal5: number;
+    }
+  | { ok: false; reason: string }
 > {
   try {
     const user = await requireUser();
     const res = await runMaturationPass(user.id);
     revalidatePath('/studio/garden');
-    return { ok: true, lifted: res.lifted, inspected: res.inspected };
+    return {
+      ok: true,
+      lifted: res.lifted,
+      inspected: res.inspected,
+      signal1: res.signal1Hits,
+      signal2: res.signal2Hits,
+      signal3: res.signal3Hits,
+      signal4: res.signal4Hits,
+      signal5: res.signal5Hits,
+    };
   } catch (err) {
     return {
       ok: false,

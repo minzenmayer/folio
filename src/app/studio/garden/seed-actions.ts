@@ -45,14 +45,25 @@ export async function getSeedStatus(): Promise<SeedStatus> {
   // load-bearing.
   void user;
 
+  // Phase 18 diagnostic fix (2026-05-05): totalEligible must mirror
+  // the chunk's NOT EXISTS pattern. The prior count over ALL
+  // user-authored extracted_ideas was misleading — many were
+  // already claimed manually (Phase 14b) and have partner ideas
+  // rows. Banner saw work-to-do that didn't actually exist, fired
+  // a chunk that returned 0 hasMore, and exited.
   let eligibleRows: Array<{ count: number }> = [];
   let claimedRows: Array<{ count: number }> = [];
   try {
     eligibleRows = (await db.execute<{ count: number }>(sql`
       SELECT COUNT(*)::int as count
-        FROM extracted_ideas
-       WHERE user_id = ${user.id}
-         AND source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
+        FROM extracted_ideas e
+       WHERE e.user_id = ${user.id}
+         AND e.source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
+         AND NOT EXISTS (
+           SELECT 1 FROM ideas i
+            WHERE i.user_id = e.user_id
+              AND i.source_extracted_idea_id = e.id
+         )
     `)) as unknown as Array<{ count: number }>;
     claimedRows = (await db.execute<{ count: number }>(sql`
       SELECT COUNT(*)::int as count
@@ -67,11 +78,12 @@ export async function getSeedStatus(): Promise<SeedStatus> {
   const totalEligible = Number(eligibleRows[0]?.count ?? 0);
   const alreadyClaimed = Number(claimedRows[0]?.count ?? 0);
 
-  // Derived gate: seeded when the user has no eligible-but-unclaimed
-  // rows left. Holds even when the column-write side of runSeedChunk
-  // fails (migration not applied), because the actual claim work is
-  // gated on the NOT EXISTS query against the ideas table.
-  const seeded = totalEligible > 0 && alreadyClaimed >= totalEligible;
+  // Derived gate: seeded means 'no eligible-but-unclaimed rows
+  // remaining.' Now that totalEligible mirrors the NOT EXISTS, this
+  // is simply totalEligible === 0. (alreadyClaimed is informational
+  // — auto_claimed counts can be 0 even when seeded if all the
+  // user's ideas were claimed manually before Phase 17.)
+  const seeded = totalEligible === 0;
 
   return {
     totalEligible,

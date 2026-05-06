@@ -22,11 +22,22 @@ export function MatureNowButton() {
     start(async () => {
       try {
         const res = await runMaturationNow();
-        setLastResult(
-          res.ok
-            ? `Lifted ${res.lifted} of ${res.inspected} inspected`
-            : `Pass failed: ${res.reason}`
-        );
+        if (!res.ok) {
+          setLastResult(`Pass failed: ${res.reason}`);
+        } else if (res.inspected === 0) {
+          setLastResult('Inspected 0 ideas — Garden is empty.');
+        } else if (res.lifted === 0) {
+          // Diagnostic: which signals are firing? If all zeros, the
+          // formula has nothing to work with and thresholds need
+          // tuning.
+          setLastResult(
+            `Lifted 0 of ${res.inspected} · signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
+          );
+        } else {
+          setLastResult(
+            `Lifted ${res.lifted} of ${res.inspected} · signals: depth ${res.signal1} · resonance ${res.signal2} · cluster ${res.signal3} · drafts ${res.signal4} · edges ${res.signal5}`
+          );
+        }
         router.refresh();
       } catch (err) {
         setLastResult(

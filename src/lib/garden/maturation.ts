@@ -50,10 +50,18 @@ import { and, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import { db, ideas, extractedIdeas, drafts, ideaEdges, ideaClusters } from '@/db';
 import type { Maturity, Temperature } from './types';
 
-const COSINE_RESONANCE_THRESHOLD = 0.8;
-const COSINE_DRAFT_THRESHOLD_TEMP = 0.75;
-const COSINE_DRAFT_THRESHOLD_MAT = 0.85;
-const DRAFT_RECENT_DAYS = 30;
+// Phase 18 hotfix (2026-05-05): lowered thresholds. The 0.80 cosine
+// was too conservative for corpora with mixed embedding qualities and
+// older claimed ideas. New levels:
+//   resonance: 0.72 (was 0.80) — catches near-duplicate themes
+//   draft-resonance temp: 0.65 (was 0.75) — looser since drafts are
+//     long and average-pool poorly against single-claim embeddings
+//   draft-resonance maturity: 0.78 (was 0.85)
+//   recent days: 60 (was 30) — wider window for sparse writers
+const COSINE_RESONANCE_THRESHOLD = 0.72;
+const COSINE_DRAFT_THRESHOLD_TEMP = 0.65;
+const COSINE_DRAFT_THRESHOLD_MAT = 0.78;
+const DRAFT_RECENT_DAYS = 60;
 
 const MATURITY_LADDER: Maturity[] = [
   'seed',
@@ -297,6 +305,14 @@ export interface MaturationReport {
   userId: string;
   inspected: number;
   lifted: number;
+  // Phase 18 hotfix: per-signal hit counters for debug visibility.
+  // signal{N}Hits = how many ideas had at least one lift contribution
+  // from that signal during this pass.
+  signal1Hits: number;
+  signal2Hits: number;
+  signal3Hits: number;
+  signal4Hits: number;
+  signal5Hits: number;
   errors: string[];
 }
 
@@ -307,6 +323,11 @@ export async function runMaturationPass(
     userId,
     inspected: 0,
     lifted: 0,
+    signal1Hits: 0,
+    signal2Hits: 0,
+    signal3Hits: 0,
+    signal4Hits: 0,
+    signal5Hits: 0,
     errors: [],
   };
 
@@ -344,23 +365,30 @@ export async function runMaturationPass(
 
     // ── Signal 1: depth+breadth on entry ───────────────────
     if (idea.depthSignal !== null) {
-      if (idea.depthSignal >= 0.7) {
+      let s1Hit = false;
+      if (idea.depthSignal >= 0.6) {
+        const before = nextTemp;
         nextTemp = maxTemperature(nextTemp, 'warm');
+        if (nextTemp !== before) s1Hit = true;
       }
       if (
         idea.depthSignal >= 0.8 &&
         (idea.breadthSignal ?? 0) >= 0.6
       ) {
+        const before = nextMat;
         nextMat = maxMaturity(nextMat, 'ready');
+        if (nextMat !== before) s1Hit = true;
       } else if (idea.depthSignal >= 0.6) {
+        const before = nextMat;
         nextMat = maxMaturity(nextMat, 'shaping');
+        if (nextMat !== before) s1Hit = true;
       } else if (idea.depthSignal < 0.6) {
-        // Floor at 'forming' so we don't pull READY ideas DOWN — only
-        // treat as the entry rung when the idea is at seed.
         if (maturityIndex(nextMat) < maturityIndex('forming')) {
           nextMat = 'forming';
+          s1Hit = true;
         }
       }
+      if (s1Hit) report.signal1Hits += 1;
     }
 
     // ── Signal 2: cross-source resonance ───────────────────
@@ -375,6 +403,7 @@ export async function runMaturationPass(
     }
     if (distinctKinds.size >= 2) {
       nextTemp = bumpTemperature(nextTemp, 1);
+      report.signal2Hits += 1;
     }
     if (distinctKinds.size >= 3) {
       nextMat = bumpMaturity(nextMat, 1);
@@ -384,6 +413,7 @@ export async function runMaturationPass(
     const cluster = clusterMembership.get(idea.id);
     if (cluster && cluster.size >= 3) {
       nextTemp = bumpTemperature(nextTemp, 1);
+      report.signal3Hits += 1;
     }
     if (cluster && cluster.isRep && cluster.size >= 5) {
       nextMat = bumpMaturity(nextMat, 1);
@@ -397,6 +427,7 @@ export async function runMaturationPass(
     }
     if (maxDraftCos >= COSINE_DRAFT_THRESHOLD_TEMP) {
       nextTemp = bumpTemperature(nextTemp, 1);
+      report.signal4Hits += 1;
     }
     if (maxDraftCos >= COSINE_DRAFT_THRESHOLD_MAT) {
       nextMat = bumpMaturity(nextMat, 1);
@@ -404,7 +435,10 @@ export async function runMaturationPass(
 
     // ── Signal 5: connectedness ────────────────────────────
     const ec = edgeCounts.get(idea.id) ?? 0;
-    if (ec >= 3) nextTemp = bumpTemperature(nextTemp, 1);
+    if (ec >= 3) {
+      nextTemp = bumpTemperature(nextTemp, 1);
+      report.signal5Hits += 1;
+    }
     if (ec >= 5) nextMat = bumpMaturity(nextMat, 1);
 
     // Apply only if something changed. Don't touch pinned-hot ideas;
