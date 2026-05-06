@@ -83,7 +83,7 @@ export function AssistantRailLive({
   draftId: string;
   mode?: GardenRailMode;
 }) {
-  const { editor } = useEditorContext();
+  const { editor, insertIdeaBubble } = useEditorContext();
 
   const [awake, setAwake] = useState(mode !== 'self-pilot');
   // Phase 20 slice 1: visual collapse state. Slice 6 lifts this into a
@@ -91,6 +91,13 @@ export function AssistantRailLive({
   // 56px collapsed strip. For now the collapsed branch just hides the body
   // so we can ship the header redesign in isolation.
   const [collapsedLocal, setCollapsedLocal] = useState(false);
+  // Phase 20 slice 5: track which ideas have been pulled into the draft
+  // this session. The pill flips its label to 'Jump to bubble' once
+  // pulled; clicking it again scrolls to the existing bubble instead of
+  // spawning a duplicate. Cleared on remount (per draft session).
+  const [pulledIdeaIds, setPulledIdeaIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [reflection, setReflection] = useState<ReflectionState>({
     kind: 'idle',
@@ -163,36 +170,53 @@ export function AssistantRailLive({
   const onPull = useCallback(
     (hit: SimilarHit) => {
       if (!editor) return;
-      const chain = editor.chain().focus();
 
-      if (hit.kind === 'idea') {
-        const titleNode = hit.title
-          ? {
-              type: 'heading',
-              attrs: { level: 2 },
-              content: [{ type: 'text', text: hit.title }],
-            }
-          : null;
-        const essenceNode = hit.snippet
-          ? {
-              type: 'paragraph',
-              content: [{ type: 'text', text: hit.snippet }],
-            }
-          : null;
-        const nodes = [titleNode, essenceNode].filter(Boolean) as object[];
-        if (nodes.length === 0) return;
-        chain.insertContent(nodes).run();
-        // Phase 17 (2026-05-05): implicit-claim signal. If this idea
-        // was auto_claimed, the act of pulling it into a draft flips
-        // it to user-claimed. Fire-and-forget — no UI block on the
-        // round-trip; the badge disappears on next render.
-        markIdeaPulledIntoDraft(hit.id).catch((err) => {
-          console.warn('[rail] markIdeaPulledIntoDraft failed', err);
+      // Phase 20 slice 5: ideas (claimed) and extracted_ideas (unclaimed)
+      // land as ideaBubble nodes — the new "borrowed material" surface.
+      // Other kinds (capture / draft / newsletter_issue / obsidian_note /
+      // linkedin_post / gmail_message) keep the prior blockquote behavior
+      // because they're external sources without a Garden surface to
+      // open back to.
+      if (hit.kind === 'idea' || hit.kind === 'extracted_idea') {
+        const title = (hit.title ?? '').trim();
+        const preview = (
+          hit.kind === 'extracted_idea' && hit.claimFull
+            ? hit.claimFull
+            : hit.snippet ?? ''
+        ).trim();
+
+        const result = insertIdeaBubble({
+          ideaId: hit.id,
+          kind: hit.kind,
+          title,
+          preview,
         });
+        if (!result.ok) return;
+
+        setPulledIdeaIds((prev) => {
+          if (prev.has(hit.id)) return prev;
+          const next = new Set(prev);
+          next.add(hit.id);
+          return next;
+        });
+
+        // Phase 17 (2026-05-05): implicit-claim signal. If the idea was
+        // auto_claimed, pulling it into a draft flips it to user-claimed.
+        // Fire-and-forget — no UI block on the round-trip; the badge
+        // disappears on next render. Only fires for kind 'idea' (claimed
+        // path) — extracted_idea has its own claim flow elsewhere.
+        if (hit.kind === 'idea') {
+          markIdeaPulledIntoDraft(hit.id).catch((err) => {
+            console.warn('[rail] markIdeaPulledIntoDraft failed', err);
+          });
+        }
         return;
       }
 
-      // captures + drafts + newsletter_issues → blockquote
+      // captures + drafts + newsletter_issues + obsidian_note +
+      // linkedin_post + gmail_message → blockquote (unchanged from prior
+      // behavior).
+      const chain = editor.chain().focus();
       const text = hit.snippet?.trim() || hit.title?.trim();
       if (!text) return;
       chain
@@ -207,7 +231,7 @@ export function AssistantRailLive({
         })
         .run();
     },
-    [editor]
+    [editor, insertIdeaBubble]
   );
 
   // Phase 20: Refresh button in the rail header. Fires findSimilar with
@@ -341,7 +365,7 @@ export function AssistantRailLive({
             />
           )}
 
-          <BodyForStatus status={status} onPull={onPull} />
+          <BodyForStatus status={status} onPull={onPull} pulledIdeaIds={pulledIdeaIds} />
 
           <ReflectButton
             onClick={onReflect}
@@ -369,9 +393,11 @@ export function AssistantRailLive({
 function BodyForStatus({
   status,
   onPull,
+  pulledIdeaIds,
 }: {
   status: Status;
   onPull: (hit: SimilarHit) => void;
+  pulledIdeaIds: Set<string>;
 }) {
   switch (status.kind) {
     case 'idle':
@@ -434,7 +460,12 @@ function BodyForStatus({
                   Slice 3 layers heat-color rank on top. Slice 5 swaps
                   onPull to insert an ideaBubble node. Slice 8 wires
                   onOpen to the Garden surface. */}
-              <RailIdeaPill hit={hit} onPull={onPull} rank={rankFor(i)} />
+              <RailIdeaPill
+                hit={hit}
+                onPull={onPull}
+                rank={rankFor(i)}
+                pulled={pulledIdeaIds.has(hit.id)}
+              />
             </li>
           ))}
         </ul>
