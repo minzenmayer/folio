@@ -27,6 +27,7 @@ import {
   PLATFORM_LABEL,
   PLATFORM_WORD_TARGET,
   type Platform,
+  type PreviewWidth,
 } from './usePlatform';
 
 const FAV_KEY_PREFIX = 'tb:fav:';
@@ -124,6 +125,7 @@ export function EditorToolbar({
 
         <div className="flex items-center gap-3">
           <WordCountReadout count={wordCount} />
+          <PreviewWidthToggle />
 
           <div className="flex items-center gap-1">
             <ToolbarIconButton
@@ -389,6 +391,98 @@ function WordCountReadout({ count }: { count: number }) {
     >
       {count} / ~{target} words
     </span>
+  );
+}
+
+// Phase 21 slice 5 (2026-05-06): desktop / mobile preview toggle.
+// Two small device icons in a segmented control. Tracks the
+// previewWidth state in usePlatform. PlatformFrame reacts.
+function PreviewWidthToggle() {
+  const { previewWidth, setPreviewWidth } = usePlatform();
+  return (
+    <div
+      role="group"
+      aria-label="Preview width"
+      className="flex items-center gap-0.5 border border-rule rounded-full p-0.5"
+    >
+      <PreviewWidthChip
+        value="desktop"
+        active={previewWidth === 'desktop'}
+        onClick={() => setPreviewWidth('desktop')}
+      />
+      <PreviewWidthChip
+        value="mobile"
+        active={previewWidth === 'mobile'}
+        onClick={() => setPreviewWidth('mobile')}
+      />
+    </div>
+  );
+}
+
+function PreviewWidthChip({
+  value,
+  active,
+  onClick,
+}: {
+  value: PreviewWidth;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const label = value === 'desktop' ? 'Desktop preview' : 'Mobile preview';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      className={`p-1 rounded-full transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
+        active
+          ? 'bg-paper-2 text-ink'
+          : 'text-tag hover:text-ink'
+      }`}
+    >
+      {value === 'desktop' ? <DesktopGlyph /> : <MobileGlyph />}
+    </button>
+  );
+}
+
+function DesktopGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2" y="3" width="10" height="6.5" rx="1" />
+      <line x1="5" y1="12" x2="9" y2="12" />
+      <line x1="7" y1="9.5" x2="7" y2="12" />
+    </svg>
+  );
+}
+
+function MobileGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4" y="2" width="6" height="10" rx="1" />
+      <line x1="6" y1="10.5" x2="8" y2="10.5" />
+    </svg>
   );
 }
 

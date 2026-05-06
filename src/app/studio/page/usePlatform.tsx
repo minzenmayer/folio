@@ -25,6 +25,11 @@ import {
 
 export type Platform = 'linkedin' | 'newsletter' | 'blog' | 'note';
 
+// Phase 21 slice 5 (2026-05-06): preview width toggle. 'desktop' is
+// the natural frame width per platform; 'mobile' narrows the frame
+// to ~380px so the user can see how their copy reads on a phone.
+export type PreviewWidth = 'desktop' | 'mobile';
+
 export const PLATFORMS: ReadonlyArray<Platform> = [
   'linkedin',
   'newsletter',
@@ -52,11 +57,14 @@ type PlatformCtxValue = {
   platform: Platform;
   setPlatform: (next: Platform) => void;
   cycle: (direction: 'left' | 'right') => void;
+  previewWidth: PreviewWidth;
+  setPreviewWidth: (next: PreviewWidth) => void;
 };
 
 const PlatformCtx = createContext<PlatformCtxValue | null>(null);
 
 const STORAGE_PREFIX = 'tb:platform:';
+const PREVIEW_PREFIX = 'tb:preview:';
 
 function readStored(draftId: string): Platform | null {
   if (typeof window === 'undefined') return null;
@@ -85,6 +93,26 @@ function writeStored(draftId: string, value: Platform) {
   }
 }
 
+function readPreview(draftId: string): PreviewWidth | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`${PREVIEW_PREFIX}${draftId}`);
+    if (raw === 'desktop' || raw === 'mobile') return raw;
+  } catch {
+    // Ignore.
+  }
+  return null;
+}
+
+function writePreview(draftId: string, value: PreviewWidth) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(`${PREVIEW_PREFIX}${draftId}`, value);
+  } catch {
+    // Ignore.
+  }
+}
+
 export function PlatformProvider({
   draftId,
   initial,
@@ -97,10 +125,14 @@ export function PlatformProvider({
   // Render with the initial value first; hydrate from localStorage
   // on mount so we don't break the SSR/CSR HTML contract.
   const [platform, setPlatformRaw] = useState<Platform>(initial ?? 'note');
+  const [previewWidth, setPreviewWidthRaw] =
+    useState<PreviewWidth>('desktop');
 
   useEffect(() => {
     const stored = readStored(draftId);
     if (stored) setPlatformRaw(stored);
+    const storedPreview = readPreview(draftId);
+    if (storedPreview) setPreviewWidthRaw(storedPreview);
   }, [draftId]);
 
   const setPlatform = useCallback(
@@ -127,9 +159,17 @@ export function PlatformProvider({
     [draftId]
   );
 
+  const setPreviewWidth = useCallback(
+    (next: PreviewWidth) => {
+      setPreviewWidthRaw(next);
+      writePreview(draftId, next);
+    },
+    [draftId]
+  );
+
   const value = useMemo<PlatformCtxValue>(
-    () => ({ platform, setPlatform, cycle }),
-    [platform, setPlatform, cycle]
+    () => ({ platform, setPlatform, cycle, previewWidth, setPreviewWidth }),
+    [platform, setPlatform, cycle, previewWidth, setPreviewWidth]
   );
 
   return <PlatformCtx.Provider value={value}>{children}</PlatformCtx.Provider>;

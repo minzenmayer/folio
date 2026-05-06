@@ -26,11 +26,15 @@ import { type ReactNode } from 'react';
 import { usePlatform } from './usePlatform';
 
 export function PlatformFrame({ children }: { children: ReactNode }) {
-  const { platform } = usePlatform();
+  const { platform, previewWidth } = usePlatform();
+  // Phase 21 slice 5: when previewWidth === 'mobile', clamp the
+  // outer width to a phone-ish 380px regardless of the platform's
+  // natural width. The inner per-platform chrome stays the same.
+  const mobileClass = previewWidth === 'mobile' ? 'max-w-[380px]' : '';
 
   if (platform === 'linkedin') {
     return (
-      <div className="max-w-[520px] mx-auto">
+      <div className={`max-w-[520px] mx-auto ${mobileClass}`}>
         <div className="rounded-card border border-rule bg-paper px-5 py-5 shadow-soft">
           <div className="flex items-center gap-3 mb-4">
             <div
@@ -64,7 +68,7 @@ export function PlatformFrame({ children }: { children: ReactNode }) {
 
   if (platform === 'blog') {
     return (
-      <div className="max-w-[80ch] mx-auto blog-frame">
+      <div className={`max-w-[80ch] mx-auto blog-frame ${mobileClass}`}>
         {children}
       </div>
     );
@@ -73,5 +77,7 @@ export function PlatformFrame({ children }: { children: ReactNode }) {
   // 'newsletter' and 'note' — the editor's existing prose styling
   // already matches the newsletter shape; note is the same as
   // newsletter without the topic-as-H1 emphasis. No extra chrome.
-  return <div className="max-w-[68ch] mx-auto">{children}</div>;
+  return (
+    <div className={`max-w-[68ch] mx-auto ${mobileClass}`}>{children}</div>
+  );
 }
