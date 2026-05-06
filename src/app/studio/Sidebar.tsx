@@ -32,7 +32,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
-import { createDraft } from './page/actions';
 
 export type RecentItem = {
   kind: 'draft' | 'idea';
@@ -159,22 +158,10 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* + NEW POST — primary CTA, mono uppercase like Ghostbase NEW CHAT.
-          Phase 11: server-action form (was a plain Link to /studio that
-          no-op'd when the user was already on /studio). Mirrors the
-          DraftsRail "+ New draft" pattern: createDraft() inserts an
-          empty draft for the authed user and redirect()s into the
-          editor at /studio/page/[id]. */}
-      <div className="px-3 pb-3">
-        <form action={createDraft}>
-          <button
-            type="submit"
-            className="block w-full text-center font-mono text-[11px] tracking-[0.2em] uppercase font-medium rounded-card border border-rule bg-paper px-3 py-3 text-ink hover:border-ink hover:bg-paper-2 transition-colors"
-          >
-            + New post
-          </button>
-        </form>
-      </div>
+      {/* Phase 23 v2 slice 2 (2026-05-06): + New post retired. The
+          homepage at /studio is the entry surface — chat box, mode
+          dropdown, path chips. The Thoughtbed wordmark above acts
+          as the home link. */}
 
       {/* Nav — Write / Capture / Garden / Insights / Knowledge.
           Two-line pills: label on top, muted subtitle below. */}

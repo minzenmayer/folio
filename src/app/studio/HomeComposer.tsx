@@ -34,12 +34,9 @@ const MODE_LABEL: Record<Mode, string> = {
 };
 
 const MODE_DESCRIPTION: Record<Mode, string> = {
-  'with-assistant':
-    'Chat-based writing. The system asks questions, surfaces ideas from your Garden, returns multi-option proposals. You steer.',
-  beside:
-    'A blank editor opens. The thought bed surfaces ideas as you write. You hold the pen.',
-  'self-driving':
-    'Autonomously take the next sensible step until done or blocked.',
+  'with-assistant': 'Chat-based writing',
+  beside: 'Blank editor, ideas alongside',
+  'self-driving': 'I draft on my own',
 };
 
 const PATH_PLACEHOLDER: Record<'default' | Path, string> = {
@@ -195,7 +192,7 @@ export function HomeComposer() {
             {modeOpen && (
               <div
                 role="menu"
-                className="absolute bottom-full left-0 mb-2 min-w-[200px] rounded-card border border-rule bg-paper shadow-soft overflow-hidden z-10"
+                className="absolute bottom-full left-0 mb-2 min-w-[260px] rounded-card border border-rule bg-paper shadow-soft overflow-hidden z-10"
               >
                 {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
                   <button
@@ -206,27 +203,26 @@ export function HomeComposer() {
                       setMode(m);
                       setModeOpen(false);
                     }}
-                    title={MODE_DESCRIPTION[m]}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-paper-2 transition-colors ${
+                    className={`w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-paper-2 transition-colors ${
                       m === mode ? 'bg-paper-2' : ''
                     }`}
                   >
-                    {m === 'with-assistant' ? (
-                      <PencilGlyph />
-                    ) : m === 'beside' ? (
-                      <BulbGlyph />
-                    ) : (
-                      <SteeringGlyph />
-                    )}
-                    <span className="font-sans text-[13px] text-ink leading-none flex-1">
-                      {MODE_LABEL[m]}
+                    <span className="shrink-0 mt-0.5">
+                      {m === 'with-assistant' ? (
+                        <PencilGlyph />
+                      ) : m === 'beside' ? (
+                        <BulbGlyph />
+                      ) : (
+                        <SteeringGlyph />
+                      )}
                     </span>
-                    <span
-                      title={MODE_DESCRIPTION[m]}
-                      aria-label={`More about ${MODE_LABEL[m]}`}
-                      className="text-tag hover:text-ink shrink-0"
-                    >
-                      <EyeGlyph />
+                    <span className="flex flex-col items-start gap-0.5 flex-1">
+                      <span className="font-sans text-[13px] text-ink leading-none">
+                        {MODE_LABEL[m]}
+                      </span>
+                      <span className="font-sans text-[11.5px] text-tag leading-snug">
+                        {MODE_DESCRIPTION[m]}
+                      </span>
                     </span>
                   </button>
                 ))}
@@ -457,25 +453,6 @@ function SteeringGlyph() {
       <line x1="7" y1="8.4" x2="7" y2="12" />
       <line x1="2" y1="7" x2="5.6" y2="7" />
       <line x1="8.4" y1="7" x2="12" y2="7" />
-    </svg>
-  );
-}
-
-function EyeGlyph() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M1.8 7C3.2 4.4 5.1 3.5 7 3.5C8.9 3.5 10.8 4.4 12.2 7C10.8 9.6 8.9 10.5 7 10.5C5.1 10.5 3.2 9.6 1.8 7Z" />
-      <circle cx="7" cy="7" r="1.6" />
     </svg>
   );
 }
