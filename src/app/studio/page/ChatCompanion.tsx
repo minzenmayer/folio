@@ -205,6 +205,11 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
     seedConsumedRef.current = true;
 
     if (seed.intent === 'write') {
+      // Phase 22 hotfix (2026-05-06): the 'Write a post' intent
+      // means 'I want to write right now'. Open the artifact panel
+      // so the editor is visible and focusable, not hidden behind
+      // a 'Pull an idea first' precondition.
+      openArtifact();
       if (seed.text && seed.text.length > 0) {
         // User typed something into the empty-state input.
         appendTurn({ id: newId(), kind: 'user', text: seed.text });
@@ -254,7 +259,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
       });
       return;
     }
-  }, [appendTurn, consumeSeed]);
+  }, [appendTurn, consumeSeed, openArtifact]);
 
   const refreshIdeas = useCallback(() => {
     if (!editor) return;
@@ -563,11 +568,20 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
         </span>
         <button
           type="button"
+          onClick={openArtifact}
+          title="Open editor"
+          aria-label="Open editor"
+          className="ml-auto font-mono text-[9px] tracking-[0.18em] uppercase text-ink bg-paper-2 border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:bg-paper transition-colors"
+        >
+          Open editor →
+        </button>
+        <button
+          type="button"
           onClick={refreshIdeas}
           disabled={status.kind === 'loading'}
           title="Refresh ideas"
           aria-label="Refresh ideas"
-          className="ml-auto font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Refresh
         </button>
