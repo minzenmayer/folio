@@ -121,6 +121,14 @@ export function ExpandSurfaceClaimed({
               {t}
             </span>
           ))}
+          {idea.claimKind === 'auto_claimed' && (
+            <span
+              className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag border border-rule rounded px-2 py-[2px]"
+              title="Auto-claimed from your own writing. Edit the essence or body below to refine into your own words. Pull this idea into a draft and the badge goes away."
+            >
+              Auto
+            </span>
+          )}
           {idea.lastVisitedAt && (
             <span className="ml-auto font-mono text-[10px] tracking-[0.06em] text-tag">
               visited {new Date(idea.lastVisitedAt).toLocaleDateString()}

@@ -327,6 +327,20 @@ export async function updateIdea(opts: {
   if (typeof opts.body === 'string') patch.body = opts.body;
   if (Object.keys(patch).length === 1) return { ok: false, reason: 'nothing to update' };
 
+  // Phase 17 (2026-05-05): editing essence or body on an auto_claimed
+  // idea is the refine signal — flip claim_kind to 'claimed' so the
+  // AUTO badge disappears + the idea reads as user-finalized.
+  if (typeof opts.essence === 'string' || typeof opts.body === 'string') {
+    const [existing] = await db
+      .select({ claimKind: ideas.claimKind })
+      .from(ideas)
+      .where(and(eq(ideas.id, opts.ideaId), eq(ideas.userId, user.id)))
+      .limit(1);
+    if (existing?.claimKind === 'auto_claimed') {
+      patch.claimKind = 'claimed';
+    }
+  }
+
   // Re-embed if essence or body changed.
   if (typeof opts.essence === 'string' || typeof opts.body === 'string') {
     const [row] = await db
