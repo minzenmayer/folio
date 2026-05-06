@@ -246,6 +246,31 @@ export default async function GardenPage({
 
 
 
+  // Phase 19.3 hotfix (2026-05-06): wrap each new server-side call
+  // in a try/catch so the Garden page renders even when one of the
+  // loaders throws at runtime (e.g. transient DB hiccup).
+  let seedStatus: Awaited<ReturnType<typeof getSeedStatus>>;
+  try {
+    seedStatus = await getSeedStatus();
+  } catch (err) {
+    console.warn('[garden/page] getSeedStatus failed', err);
+    seedStatus = { totalEligible: 0, alreadyClaimed: 0, seeded: true };
+  }
+
+  let edgeMatches: Awaited<ReturnType<typeof findEdgeMatches>> = [];
+  try {
+    edgeMatches = await findEdgeMatches(user.id);
+  } catch (err) {
+    console.warn('[garden/page] findEdgeMatches failed', err);
+  }
+
+  let onTheRise: Awaited<ReturnType<typeof loadOnTheRise>> = [];
+  try {
+    onTheRise = await loadOnTheRise(user.id);
+  } catch (err) {
+    console.warn('[garden/page] loadOnTheRise failed', err);
+  }
+
   return (
     <section>
       <div className="max-w-[1000px] mx-auto px-6 md:px-8 py-12 md:py-16">
@@ -275,21 +300,17 @@ export default async function GardenPage({
         {/* Phase 17 onboarding mass-claim banner — visible until the
             user's phase17_seeded_at gate is set. Component handles its
             own polling. */}
-        <SeedBanner initialStatus={await getSeedStatus()} />
+        <SeedBanner initialStatus={seedStatus} />
 
-        {/* Phase 17 edge-prompts zone. Up to 3 ideas about to cool /
-            shaping but stuck / ready but never written from. Quiet
-            when nothing matches. */}
-        <EdgePromptZone prompts={await findEdgeMatches(user.id)} />
+        {/* Phase 17 edge-prompts zone. */}
+        <EdgePromptZone prompts={edgeMatches} />
 
         {digestItems.length > 0 && (
           <GardenDigest items={digestItems} juxtaposition={juxtaposition} />
         )}
 
-        {/* Phase 19.3 — on-the-rise grid. Hot / ready / recently-warmed
-            cards spark curiosity before the user scrolls into the
-            broader browse surface. */}
-        <OnTheRise items={await loadOnTheRise(user.id)} />
+        {/* Phase 19.3 — on-the-rise grid. */}
+        <OnTheRise items={onTheRise} />
 
         {/* Browse separator */}
         <div className="mt-12 mb-4 flex items-baseline justify-between gap-3 border-t border-rule pt-6">
