@@ -184,7 +184,7 @@ export default async function StudioHome() {
                     href="/studio/ideas"
                     className="font-sans text-[12px] text-tag hover:text-ink transition-colors"
                   >
-                    Library →
+                    Garden →
                   </Link>
                 </div>
                 <ul className="bg-paper rounded-card border border-rule overflow-hidden divide-y divide-rule">

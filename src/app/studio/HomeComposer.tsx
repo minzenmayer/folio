@@ -120,7 +120,7 @@ export function HomeComposer() {
 
   return (
     <div className="w-full max-w-[720px] mx-auto">
-      <div className="rounded-card border border-rule bg-paper overflow-hidden">
+      <div className="rounded-card border border-rule bg-paper">
         <div className="px-4 pt-4 pb-2">
           <textarea
             ref={textareaRef}
@@ -172,7 +172,7 @@ export function HomeComposer() {
               aria-expanded={modeOpen}
               className="flex items-center gap-1.5 rounded-full border border-rule px-2.5 py-1 hover:bg-paper-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
             >
-              <FeatherGlyph />
+              <ModeIcon mode={mode} />
               <span className="font-sans text-[12px] text-ink leading-none">
                 {MODE_LABEL[mode]}
               </span>
@@ -212,14 +212,21 @@ export function HomeComposer() {
                     }`}
                   >
                     {m === 'with-assistant' ? (
-                      <FeatherGlyph />
+                      <PencilGlyph />
                     ) : m === 'beside' ? (
                       <BulbGlyph />
                     ) : (
-                      <WandGlyph />
+                      <SteeringGlyph />
                     )}
-                    <span className="font-sans text-[13px] text-ink leading-none">
+                    <span className="font-sans text-[13px] text-ink leading-none flex-1">
                       {MODE_LABEL[m]}
+                    </span>
+                    <span
+                      title={MODE_DESCRIPTION[m]}
+                      aria-label={`More about ${MODE_LABEL[m]}`}
+                      className="text-tag hover:text-ink shrink-0"
+                    >
+                      <EyeGlyph />
                     </span>
                   </button>
                 ))}
@@ -282,7 +289,7 @@ export function HomeComposer() {
         </div>
 
         {path && (
-          <div className="border-t border-rule">
+          <div className="border-t border-rule rounded-b-card overflow-hidden">
             <ul>
               {(path === 'writing' ? WRITING_PROMPTS : IDEATION_PROMPTS).map(
                 (prompt) => (
@@ -338,14 +345,21 @@ function PathBadge({
   onClear: () => void;
 }) {
   const label = active === 'writing' ? 'Writing' : 'Ideation';
-  const Icon = active === 'writing' ? PencilGlyph : BulbGlyph;
+  const Icon = active === 'writing' ? PencilGlyph : SparklesGlyph;
+  // Phase 23 v2 slice 1.1 (2026-05-06): Writing reads green, Ideation
+  // reads amber. Soft tint, not a saturated highlight — the badge is
+  // a state indicator, not an alarm.
+  const colorClasses =
+    active === 'writing'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+      : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100';
   return (
     <button
       type="button"
       onClick={onClear}
       title={`Clear ${label} path`}
       aria-label={`Clear ${label} path`}
-      className="flex items-center gap-1.5 rounded-full border border-rule bg-paper-2 px-2.5 py-1 hover:bg-paper-3 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${colorClasses}`}
     >
       <Icon />
       <span className="font-sans text-[12px] text-ink leading-none">
@@ -379,40 +393,28 @@ function PathChip({
   onClick: () => void;
 }) {
   const label = value === 'writing' ? 'Writing' : 'Ideation';
-  const Icon = value === 'writing' ? PencilGlyph : BulbGlyph;
+  const Icon = value === 'writing' ? PencilGlyph : SparklesGlyph;
+  // Phase 23 v2 slice 1.1 (2026-05-06): Writing glows green when
+  // active, Ideation glows amber. Inactive stays neutral with the
+  // brand's monochrome ink/zinc palette.
+  const activeClasses =
+    value === 'writing'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+      : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100';
+  const inactiveClasses =
+    'bg-transparent text-tag border-rule hover:text-ink hover:bg-paper';
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
-        active
-          ? 'bg-paper-2 text-ink border-rule'
-          : 'bg-transparent text-tag border-rule hover:text-ink hover:bg-paper'
+        active ? activeClasses : inactiveClasses
       }`}
     >
       <Icon />
       <span className="font-sans text-[13px] leading-none">{label}</span>
     </button>
-  );
-}
-
-function FeatherGlyph() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M11 3.5 6 8.5l-2 2 1 1 2-2 5-5a1.5 1.5 0 0 0-1-2.5h-.5Z" />
-      <line x1="6" y1="8.5" x2="9.5" y2="8.5" />
-    </svg>
   );
 }
 
@@ -436,7 +438,7 @@ function BulbGlyph() {
   );
 }
 
-function WandGlyph() {
+function SteeringGlyph() {
   return (
     <svg
       width="13"
@@ -449,10 +451,59 @@ function WandGlyph() {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <line x1="3" y1="11" x2="9" y2="5" />
-      <path d="M9 2v2M11.5 3v1M11 5.5h1M10 7h1.5" />
+      <circle cx="7" cy="7" r="5" />
+      <circle cx="7" cy="7" r="1.4" />
+      <line x1="7" y1="2" x2="7" y2="5.6" />
+      <line x1="7" y1="8.4" x2="7" y2="12" />
+      <line x1="2" y1="7" x2="5.6" y2="7" />
+      <line x1="8.4" y1="7" x2="12" y2="7" />
     </svg>
   );
+}
+
+function EyeGlyph() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M1.8 7C3.2 4.4 5.1 3.5 7 3.5C8.9 3.5 10.8 4.4 12.2 7C10.8 9.6 8.9 10.5 7 10.5C5.1 10.5 3.2 9.6 1.8 7Z" />
+      <circle cx="7" cy="7" r="1.6" />
+    </svg>
+  );
+}
+
+function SparklesGlyph() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5.5 2.5L6.2 4.3L8 5L6.2 5.7L5.5 7.5L4.8 5.7L3 5L4.8 4.3Z" />
+      <path d="M10 7.5L10.5 8.7L11.7 9.2L10.5 9.7L10 10.9L9.5 9.7L8.3 9.2L9.5 8.7Z" />
+      <path d="M3 9.5L3.4 10.4L4.3 10.8L3.4 11.2L3 12.1L2.6 11.2L1.7 10.8L2.6 10.4Z" />
+    </svg>
+  );
+}
+
+function ModeIcon({ mode }: { mode: Mode }) {
+  if (mode === 'with-assistant') return <PencilGlyph />;
+  if (mode === 'beside') return <BulbGlyph />;
+  return <SteeringGlyph />;
 }
 
 function PencilGlyph() {
