@@ -1247,3 +1247,72 @@ Now produce just the outline.`;
     outline: (object.outline ?? []).map((b) => ({ beat: b.beat.trim() })),
   };
 }
+
+// ─── Phase 22 slice 6 — Hook + closer option generators ─────────────
+//
+// Returns 5 labeled options for either a post hook or a closer.
+// The label is a rhetorical-pattern name pulled from the platform
+// skill ("Mundane Moment + Revelation", "Bold Claim + Proof Tease",
+// etc.); the body is the actual draft sentence(s).
+
+const HOOK_CLOSER_MODEL =
+  process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+
+const hookCloserOutputSchema = z.object({
+  options: z
+    .array(
+      z.object({
+        label: z.string().min(1).max(200),
+        body: z.string().min(1).max(800),
+      })
+    )
+    .min(3)
+    .max(6),
+});
+
+export type HookCloserOption = {
+  label: string;
+  body: string;
+};
+
+export async function generateHookCloserOptions({
+  kind,
+  draftText,
+  platformSkill,
+  platformLabel,
+}: {
+  kind: 'hook' | 'closer';
+  draftText: string;
+  platformSkill: string;
+  platformLabel: string;
+}): Promise<HookCloserOption[]> {
+  const trimmedDraft = draftText.slice(0, 6000).trim();
+  const which = kind === 'hook' ? 'opening hook' : 'closer';
+
+  const prompt = `You are a sparring writing partner generating ${which} options for a ${platformLabel} post.
+
+The platform skill below has the rhetorical patterns + voice rules. Use it. Each option's label MUST name the rhetorical pattern (e.g., "Mundane Moment + Revelation"). The body MUST follow the platform's length rhythm and avoid every banned phrase listed in the skill.
+
+<platform_skill>
+${platformSkill}
+</platform_skill>
+
+<draft_so_far>
+${trimmedDraft.length > 0 ? trimmedDraft : '(empty — generate options that could open any post in this voice)'}
+</draft_so_far>
+
+Produce 5 options. Each option's label is the rhetorical pattern; the body is the actual ${which} text the user could paste in. No preamble, no commentary outside the options. No em dashes used as "but actually" pivots. No "It's not just X — it's Y" antithesis flips. No "crucial," "vital," "delve," "tapestry," "underscore," "showcase."
+
+Return exactly the JSON object the schema expects.`;
+
+  const { object } = await generateObject({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: anthropic(HOOK_CLOSER_MODEL as any),
+    schema: hookCloserOutputSchema,
+    prompt,
+    maxTokens: 1400,
+    temperature: 0.85,
+  });
+
+  return object.options;
+}

@@ -29,7 +29,13 @@ import { useEditorContext } from './EditorContext';
 import { useArtifactPanel } from './useArtifactPanel';
 import { useChatSeed } from './useChatSeed';
 import type { ChatSeed } from './EditorEmptyState';
-import { findSimilar, originalityCheck, type SimilarHit } from '../actions';
+import {
+  findSimilar,
+  originalityCheck,
+  proposeHooks,
+  proposeClosers,
+  type SimilarHit,
+} from '../actions';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 import { useRailCollapse } from './useRailCollapse';
@@ -78,6 +84,15 @@ type ChatTurn =
       title: string;
       body: string;
       sourceLabel: string;
+    }
+  | {
+      // Phase 22 slice 6 (2026-05-06): labeled hook / closer
+      // options from the LLM. Each option carries a rhetorical-
+      // pattern label + the actual draft text.
+      id: string;
+      kind: 'options';
+      heading: string;
+      options: { label: string; body: string }[];
     };
 
 // Phase 21 slice 8 (2026-05-06): supported slash commands.
@@ -305,14 +320,56 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
       }
 
       if (cmd === '/hook' || cmd === '/closer') {
+        // Phase 22 slice 6 (2026-05-06): call the proposeHooks /
+        // proposeClosers server actions with the active platform's
+        // skill loaded. Renders 5 labeled options the user can
+        // pick from. Uses the editor's current text as draft
+        // context plus any /hook <topic> argument.
+        const draftText = editor ? editor.getText() : '';
+        const explicitTopic = arg.length > 0 ? arg : '';
+        const compositeDraft =
+          explicitTopic.length > 0
+            ? `Topic: ${explicitTopic}\n\n${draftText}`.trim()
+            : draftText;
         appendTurn({
           id: newId(),
           kind: 'thoughtbed',
           text:
             cmd === '/hook'
-              ? 'Hook generator is wiring next slice. For now: write the most specific true sentence about the moment, then put a contrast right after it.'
-              : 'Closer generator is wiring next slice. For now: end on a sentence that lands the through-line of the post in 7 words or fewer.',
+              ? `Reading what you have. Drafting hook options for ${PLATFORM_LABEL[platform]}…`
+              : `Reading what you have. Drafting closer options for ${PLATFORM_LABEL[platform]}…`,
         });
+        try {
+          const result =
+            cmd === '/hook'
+              ? await proposeHooks({ draftText: compositeDraft, platform })
+              : await proposeClosers({ draftText: compositeDraft, platform });
+          if (!result.ok) {
+            appendTurn({
+              id: newId(),
+              kind: 'thoughtbed',
+              text: `Couldn't generate (${result.message}). Try again in a moment.`,
+            });
+            return;
+          }
+          appendTurn({
+            id: newId(),
+            kind: 'options',
+            heading:
+              cmd === '/hook'
+                ? `${result.options.length} hook options`
+                : `${result.options.length} closer options`,
+            options: result.options,
+          });
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'request failed';
+          appendTurn({
+            id: newId(),
+            kind: 'thoughtbed',
+            text: `Couldn't generate (${message}). Try again in a moment.`,
+          });
+        }
         return;
       }
 
@@ -886,6 +943,10 @@ function TurnView({
     );
   }
 
+  if (turn.kind === 'options') {
+    return <OptionsTurn turn={turn} />;
+  }
+
   if (turn.kind === 'artifact-preview') {
     return <ArtifactPreviewTurn turn={turn} />;
   }
@@ -942,6 +1003,52 @@ function TurnView({
           />
         );
       })}
+    </>
+  );
+}
+
+// Phase 22 slice 6 (2026-05-06): options turn renders 5 labeled
+// hook / closer options. Each option has its rhetorical-pattern
+// label in mono-uppercase + the actual draft text below. Click an
+// option to copy it to clipboard (slice 11 polish: also drop into
+// editor as the new opener / closer).
+function OptionsTurn({
+  turn,
+}: {
+  turn: Extract<ChatTurn, { kind: 'options' }>;
+}) {
+  return (
+    <>
+      <ThoughtbedTurn>
+        <p className="font-sans text-[12.5px] text-ink-soft leading-[1.55] m-0">
+          {turn.heading}. Pick one or use it as a starting point.
+        </p>
+      </ThoughtbedTurn>
+      {turn.options.map((option, i) => (
+        <div className="pl-7 -mt-1" key={`${turn.id}-${i}`}>
+          <div className="rounded-soft border border-rule bg-paper px-3 py-2.5">
+            <p className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag font-medium m-0 mb-1">
+              Option {i + 1} · {option.label}
+            </p>
+            <p className="font-sans text-[13px] text-ink leading-[1.55] m-0 whitespace-pre-wrap">
+              {option.body}
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(option.body).catch(() => {});
+                  }
+                }}
+                className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
     </>
   );
 }

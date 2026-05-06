@@ -2356,3 +2356,70 @@ export async function originalityCheck(
     return { ok: false, reason: 'error', message };
   }
 }
+
+// ─── proposeHooks / proposeClosers — Phase 22 slice 6 ──────────────
+//
+// Server action wrappers around generateHookCloserOptions in llm.ts.
+// Loads the platform skill, calls the LLM, returns either the
+// labeled options or a soft-error result for the chat to render.
+
+const proposeHookCloserSchema = z.object({
+  draftText: z.string().min(0).max(8000),
+  platform: z.enum(['linkedin', 'newsletter', 'blog', 'note']),
+});
+
+export type ProposeHookCloserResult =
+  | {
+      ok: true;
+      kind: 'hook' | 'closer';
+      options: { label: string; body: string }[];
+    }
+  | {
+      ok: false;
+      reason: 'error';
+      message: string;
+    };
+
+async function runHookCloser(
+  kind: 'hook' | 'closer',
+  input: unknown
+): Promise<ProposeHookCloserResult> {
+  await requireUser();
+  const data = proposeHookCloserSchema.parse(input);
+  try {
+    const { generateHookCloserOptions } = await import('@/lib/llm');
+    const { getPlatformSkill } = await import('@/lib/platform-skills');
+    const platformSkill = getPlatformSkill(data.platform);
+    const platformLabel =
+      data.platform === 'linkedin'
+        ? 'LinkedIn'
+        : data.platform === 'newsletter'
+          ? 'Newsletter'
+          : data.platform === 'blog'
+            ? 'Blog'
+            : 'Note';
+    const options = await generateHookCloserOptions({
+      kind,
+      draftText: data.draftText,
+      platformSkill,
+      platformLabel,
+    });
+    return { ok: true, kind, options };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'generation failed';
+    return { ok: false, reason: 'error', message };
+  }
+}
+
+export async function proposeHooks(
+  input: unknown
+): Promise<ProposeHookCloserResult> {
+  return runHookCloser('hook', input);
+}
+
+export async function proposeClosers(
+  input: unknown
+): Promise<ProposeHookCloserResult> {
+  return runHookCloser('closer', input);
+}
