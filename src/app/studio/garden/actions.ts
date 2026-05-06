@@ -161,6 +161,50 @@ export async function markVisited(ideaId: string): Promise<void> {
   revalidate();
 }
 
+// ── Phase 17 (2026-05-05) ─────────────────────────────────────────
+// markIdeaPulledIntoDraft — implicit-claim signal. When an idea is
+// pulled into a draft via the Reflect rail, the user is endorsing
+// it through their writing. If the idea was auto_claimed (not yet
+// user-finalized), flip claim_kind to 'claimed' so it stops showing
+// the AUTO badge + becomes a true claimed idea. No-op when the idea
+// is already 'claimed' or 'authored'.
+//
+// Also bumps last_visited_at so the existing ripeness math sees the
+// activity. The Reflect rail's debounced retrieval already runs on
+// the user's text; this action is fire-and-forget from the client.
+
+export async function markIdeaPulledIntoDraft(
+  ideaId: string
+): Promise<{ ok: true; flipped: boolean } | { ok: false; reason: string }> {
+  const user = await requireUser();
+  const [row] = await db
+    .select({ claimKind: ideas.claimKind })
+    .from(ideas)
+    .where(and(eq(ideas.id, ideaId), eq(ideas.userId, user.id)))
+    .limit(1);
+  if (!row) return { ok: false, reason: 'not_found' };
+
+  // Always touch last_visited_at; the implicit-claim flip is the
+  // bonus signal for auto_claimed.
+  if (row.claimKind === 'auto_claimed') {
+    await db
+      .update(ideas)
+      .set({
+        claimKind: 'claimed',
+        lastVisitedAt: new Date(),
+      })
+      .where(and(eq(ideas.id, ideaId), eq(ideas.userId, user.id)));
+    revalidate();
+    return { ok: true, flipped: true };
+  }
+
+  await db
+    .update(ideas)
+    .set({ lastVisitedAt: new Date() })
+    .where(and(eq(ideas.id, ideaId), eq(ideas.userId, user.id)));
+  return { ok: true, flipped: false };
+}
+
 // ── Claim flow — "Make it mine" textarea submit ────────────────────────
 //
 // The user wrote a sentence on an unclaimed extracted_idea. We:

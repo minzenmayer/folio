@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorContext } from './EditorContext';
 import { findSimilar, reflect, type SimilarHit } from '../actions';
+import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
 
 const DEBOUNCE_MS = 1500;
@@ -162,6 +163,13 @@ export function AssistantRailLive({
         const nodes = [titleNode, essenceNode].filter(Boolean) as object[];
         if (nodes.length === 0) return;
         chain.insertContent(nodes).run();
+        // Phase 17 (2026-05-05): implicit-claim signal. If this idea
+        // was auto_claimed, the act of pulling it into a draft flips
+        // it to user-claimed. Fire-and-forget — no UI block on the
+        // round-trip; the badge disappears on next render.
+        markIdeaPulledIntoDraft(hit.id).catch((err) => {
+          console.warn('[rail] markIdeaPulledIntoDraft failed', err);
+        });
         return;
       }
 
