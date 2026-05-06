@@ -15,9 +15,8 @@
 // navigation in its Recent section. Layout here is now 2 columns:
 // editor | garden rail.
 //
-// Sprint 12: composer mode threads through via ?mode=newsletter |
-// linkedin | self-pilot. The garden rail uses it to pick a voice for
-// Reflect; self-pilot also boots the rail dormant.
+// Phase 22 (2026-05-06): URL ?mode= still threads through as the
+// initial platform hint for the new platform-shape toggle.
 
 import type { Metadata } from 'next';
 import { auth } from '@clerk/nextjs/server';
@@ -25,7 +24,6 @@ import { notFound, redirect } from 'next/navigation';
 import { eq, and } from 'drizzle-orm';
 import { db, drafts } from '@/db';
 import { requireUser } from '@/lib/auth';
-import { type GardenRailMode } from '../AssistantRailLive';
 import { ArtifactPanel } from '../ArtifactPanel';
 import { ChatCompanion } from '../ChatCompanion';
 import { EditorContextProvider } from '../EditorContext';
@@ -33,6 +31,13 @@ import { EditorShell } from '../EditorShell';
 import { EditorToolbar } from '../EditorToolbar';
 import { type Platform } from '../usePlatform';
 import { EditorPane } from './EditorPane';
+
+// Phase 22 slice 8 (2026-05-06): GardenRailMode used to live in
+// AssistantRailLive (Phase 20). With AssistantRailLive retired,
+// the type is inlined here. URL ?mode= parameter still drives
+// the initial platform; 'self-pilot' kept for back-compat with
+// older shareable URLs.
+type GardenRailMode = 'newsletter' | 'linkedin' | 'self-pilot';
 
 type Params = Promise<{ id: string }>;
 type SearchParams = Promise<{ mode?: string | string[] }>;
@@ -126,10 +131,10 @@ export default async function DraftEditorPage({
 
   return (
     <EditorContextProvider>
-      {/* Phase 21 slice 2 (2026-05-06): EditorShell wraps the route in
-          the new 3-zone layout. Slice 3 fills the toolbar zone; slice
-          4 wraps EditorPane in a platform-shaped visual frame; slice
-          6 swaps EditorRightColumn for the new ChatCompanion. */}
+      {/* Phase 22 slice 2 (2026-05-06): EditorShell now drives the
+          chat-primary layout. Chat lives in the main pane;
+          ArtifactPanel slides in from the right when the user
+          opens the editor. Empty drafts get the slice-1 EmptyState. */}
       <EditorShell
         draftId={draft.id}
         initialPlatform={platformFromMode(mode)}

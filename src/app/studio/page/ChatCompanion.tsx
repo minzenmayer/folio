@@ -38,7 +38,7 @@ import {
 } from '../actions';
 import { markIdeaPulledIntoDraft } from '../garden/actions';
 import { SIMILAR_KINDS } from '@/lib/retrieval-kinds';
-import { useRailCollapse } from './useRailCollapse';
+
 import { usePlatform, PLATFORM_LABEL } from './usePlatform';
 
 const DEBOUNCE_MS = 1500;
@@ -120,8 +120,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
   const { editor, insertThoughtBubble } = useEditorContext();
   const { openArtifact } = useArtifactPanel();
   const { consume: consumeSeed } = useChatSeed();
-  const { state: collapseState, toggleCollapsed } = useRailCollapse();
-  const isCollapsed = collapseState === 'collapsed';
+
   const { platform } = usePlatform();
 
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -213,7 +212,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
           id: newId(),
           kind: 'thoughtbed',
           text:
-            'Got it. Pick a platform up top (LinkedIn / Newsletter / Blog / Note) and start writing — I\'ll surface things from your Garden as you go. Or ask me to /find a thought to start from.',
+            'Got it. Pick a platform up top (LinkedIn / Newsletter / Blog / Note) and start writing. I\'ll surface things from your Garden as you go. Or ask me to /find a thought to start from.',
         });
       } else {
         appendTurn({
@@ -231,7 +230,7 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
         id: newId(),
         kind: 'thoughtbed',
         text:
-          'Looking for something ripe in your Garden to start from. Type a few words about the territory you want to explore — I\'ll search there.',
+          'Looking for something ripe in your Garden to start from. Type a few words about the territory you want to explore. I\'ll search there.',
       });
       return;
     }
@@ -556,41 +555,25 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
       aria-label="Thoughtbed companion"
     >
       <div className="px-4 py-3 border-b border-rule flex items-center gap-2">
+        <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
+          Thoughtbed
+        </h2>
+        <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-tag/60">
+          · live
+        </span>
         <button
           type="button"
-          onClick={toggleCollapsed}
-          aria-pressed={isCollapsed}
-          aria-label={isCollapsed ? 'Expand chat' : 'Collapse chat'}
-          title={isCollapsed ? 'Expand chat' : 'Collapse chat'}
-          className="text-tag hover:text-ink transition-colors rounded-soft p-1 -ml-1 shrink-0"
+          onClick={refreshIdeas}
+          disabled={status.kind === 'loading'}
+          title="Refresh ideas"
+          aria-label="Refresh ideas"
+          className="ml-auto font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <ChevronGlyph direction={isCollapsed ? 'right' : 'left'} />
+          Refresh
         </button>
-
-        {!isCollapsed && (
-          <>
-            <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium">
-              Thoughtbed
-            </h2>
-            <span className="font-mono text-[9px] tracking-[0.16em] uppercase text-tag/60">
-              · live
-            </span>
-            <button
-              type="button"
-              onClick={refreshIdeas}
-              disabled={status.kind === 'loading'}
-              title="Refresh ideas"
-              aria-label="Refresh ideas"
-              className="ml-auto font-mono text-[9px] tracking-[0.18em] uppercase text-tag border border-rule rounded-full px-2.5 py-1 hover:border-ink hover:text-ink hover:bg-paper-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Refresh
-            </button>
-          </>
-        )}
       </div>
 
-      {!isCollapsed && (
-        <div className="flex-1 px-4 py-4 overflow-y-auto flex flex-col gap-3">
+      <div className="flex-1 px-4 py-4 overflow-y-auto flex flex-col gap-3">
           <WelcomeTurn platform={platform} />
 
           <ThoughtbedTurn>
@@ -642,24 +625,19 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
             />
           ))}
         </div>
-      )}
 
-      {!isCollapsed && (
-        <ChatInput
-          value={inputValue}
-          composing={composing}
-          onChange={setInputValue}
-          onCompositionChange={setComposing}
-          onSend={() => {
-            if (composing) return;
-            const text = inputValue;
-            setInputValue('');
-            handleSend(text);
-          }}
-        />
-      )}
-
-      {isCollapsed && <div className="flex-1" />}
+      <ChatInput
+        value={inputValue}
+        composing={composing}
+        onChange={setInputValue}
+        onCompositionChange={setComposing}
+        onSend={() => {
+          if (composing) return;
+          const text = inputValue;
+          setInputValue('');
+          handleSend(text);
+        }}
+      />
     </aside>
   );
 }
@@ -1234,24 +1212,4 @@ function ChatInput({
   );
 }
 
-function ChevronGlyph({ direction }: { direction: 'left' | 'right' }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {direction === 'right' ? (
-        <polyline points="5,3 9,7 5,11" />
-      ) : (
-        <polyline points="9,3 5,7 9,11" />
-      )}
-    </svg>
-  );
-}
+
