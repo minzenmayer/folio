@@ -29,6 +29,7 @@ import { type GardenRailMode } from '../AssistantRailLive';
 import { EditorContextProvider } from '../EditorContext';
 import { EditorRightColumn } from '../EditorRightColumn';
 import { EditorShell } from '../EditorShell';
+import { EditorToolbar } from '../EditorToolbar';
 import { EditorPane } from './EditorPane';
 
 type Params = Promise<{ id: string }>;
@@ -88,6 +89,7 @@ export default async function DraftEditorPage({
           4 wraps EditorPane in a platform-shaped visual frame; slice
           6 swaps EditorRightColumn for the new ChatCompanion. */}
       <EditorShell
+        toolbar={<EditorToolbar draftId={draft.id} title={draft.title} />}
         editor={
           <EditorPane
             draftId={draft.id}
