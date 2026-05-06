@@ -15,6 +15,8 @@ import {
   index,
   check,
   uniqueIndex,
+  unique,
+  date,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -27,6 +29,11 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   name: text('name'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  // Phase 17 (2026-05-05): one-time onboarding mass-claim gate. Null
+  // means the pass has not yet run for this user. Set to now() at the
+  // end of the chunked pass (see /api/onboarding/phase17-seed). Once
+  // set, the pass never runs again for this user.
+  phase17SeededAt: timestamp('phase17_seeded_at', { withTimezone: true }),
 });
 
 // ────────────────────────────────────────────
@@ -103,7 +110,12 @@ export const ideas = pgTable(
     }),
     // 'Mark hot' sets pinned_until = now() + 14 days; auto-cool paused while pinned.
     pinnedUntil: timestamp('pinned_until', { withTimezone: true }),
-    // 'authored' (hand-curated) | 'claimed' (made-mine from extracted_idea)
+    // 'authored' (hand-curated)
+    // | 'claimed' (made-mine from extracted_idea — user wrote a sentence)
+    // | 'auto_claimed' (Phase 17 — extracted from a user-authored source
+    //   like CSL / vault / LinkedIn; the user already wrote the prose so
+    //   the partner ideas row gets created automatically; refining the
+    //   essence flips this to 'claimed').
     claimKind: text('claim_kind').notNull().default('authored'),
   },
   (table) => ({
@@ -1173,3 +1185,53 @@ export type GardenJuxtaposition = typeof gardenJuxtapositions.$inferSelect;
 export type NewGardenJuxtaposition = typeof gardenJuxtapositions.$inferInsert;
 export type GardenDigestRun = typeof gardenDigestRuns.$inferSelect;
 export type NewGardenDigestRun = typeof gardenDigestRuns.$inferInsert;
+
+// ────────────────────────────────────────────────────────────────────
+// IDEA_CLUSTERS — Phase 17 (2026-05-05) garden maturation v2
+// ────────────────────────────────────────────────────────────────────
+//
+// Per-day cluster snapshots produced by the garden-digest cron.
+// computeClusters groups ideas + extracted_ideas by cosine ≥ 0.75 +
+// shared theme tag and writes one row per cluster. The default Garden
+// surface reads today's run via readClustersForToday.
+//
+// Cluster identity is per-day (not durable across days). Members live
+// in members jsonb as { kind, id, ripeness } objects.
+//
+// `theme` is the shared theme tag the cluster shares; null when the
+// cluster's identity comes from cosine alone (rare).
+
+export const ideaClusters = pgTable(
+  'idea_clusters',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    runDate: date('run_date').notNull(),
+    repKind: text('rep_kind').notNull(),
+    repId: uuid('rep_id').notNull(),
+    theme: text('theme'),
+    memberCount: integer('member_count').notNull().default(1),
+    members: jsonb('members').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    userDateIdx: index('idx_idea_clusters_user_date').on(
+      table.userId,
+      table.runDate
+    ),
+    uniqByRep: unique('idea_clusters_user_run_rep_unique').on(
+      table.userId,
+      table.runDate,
+      table.repKind,
+      table.repId
+    ),
+  })
+);
+
+export type IdeaClusterRow = typeof ideaClusters.$inferSelect;
+export type NewIdeaCluster = typeof ideaClusters.$inferInsert;
+
