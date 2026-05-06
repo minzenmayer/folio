@@ -71,6 +71,33 @@ function platformFromMode(
   return undefined;
 }
 
+// Phase 22 slice 1 (2026-05-06): does the draft's contentJson
+// have anything substantive in it? An empty draft is the doc shape
+// Tiptap initializes with — { type: 'doc', content: [{ type:
+// 'paragraph' }] } — or an empty / null contentJson. Anything
+// else (including a single paragraph with text) counts as having
+// content; the user is past the empty state.
+function isDraftEmpty(content: unknown): boolean {
+  if (!content) return true;
+  if (typeof content !== 'object') return true;
+  const doc = content as { content?: unknown[] };
+  if (!doc.content || !Array.isArray(doc.content)) return true;
+  if (doc.content.length === 0) return true;
+  if (doc.content.length === 1) {
+    const first = doc.content[0] as {
+      type?: string;
+      content?: unknown[];
+    };
+    if (
+      first.type === 'paragraph' &&
+      (!first.content || first.content.length === 0)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export default async function DraftEditorPage({
   params,
   searchParams,
@@ -105,6 +132,8 @@ export default async function DraftEditorPage({
       <EditorShell
         draftId={draft.id}
         initialPlatform={platformFromMode(mode)}
+        initialIsEmpty={isDraftEmpty(draft.contentJson)}
+        userName={user.name ? user.name.split(' ')[0] : null}
         toolbar={<EditorToolbar draftId={draft.id} title={draft.title} />}
         editor={
           <EditorPane
