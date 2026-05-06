@@ -170,12 +170,12 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
         evidence: row.evidence,
         depthSignal: row.depthSignal,
         themes: [],
-        // Skip embedding pass-through. autoClaim's NewIdea row will
-        // be embedded later by the backfill cron — passing it here
-        // adds a serialization failure surface and isn't strictly
-        // needed for the partner ideas row to function (retrieval
-        // still works via the source extracted_idea's embedding).
-        embedding: null,
+        // Phase 18 hotfix (2026-05-05): pass the embedding through.
+        // The typed query above parses vectors as number[]
+        // correctly, so Drizzle's insert serializer no longer
+        // chokes. loadIdeas in the maturation pass needs the
+        // embedding for cosine signals (2, 4) to fire.
+        embedding: row.embedding,
       });
       if (id) claimed += 1;
     } catch (err) {

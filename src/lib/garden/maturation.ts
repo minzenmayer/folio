@@ -192,13 +192,17 @@ async function loadIdeas(userId: string): Promise<IdeaCand[]> {
 
   const out: IdeaCand[] = [];
   for (const r of ideaRows) {
-    if (!r.embedding) continue;
+    // Phase 18 hotfix (2026-05-05): keep ideas without embeddings.
+    // cosine() returns 0 for non-array embeddings, so signals 2/4
+    // safely no-op. Signals 1/3/5 don't need embeddings to fire.
+    // This means inspected reflects the actual ideas count, not
+    // just the embedded subset.
     const sig = r.sourceExtractedIdeaId ? sigMap.get(r.sourceExtractedIdeaId) : null;
     out.push({
       id: r.id,
       title: r.title,
       themes: r.themes ?? [],
-      embedding: r.embedding,
+      embedding: (r.embedding ?? []) as number[],
       temperature: r.temperature as Temperature,
       maturity: r.maturity as Maturity,
       claimKind: r.claimKind,
