@@ -66,6 +66,16 @@ type ChatTurn =
       kind: 'originality';
       basedOnChars: number;
       matches: SimilarHit[];
+    }
+  | {
+      // Phase 22 slice 4 (2026-05-06): an artifact preview turn
+      // shown after a Pull-into-editor or generated draft. Carries
+      // a small platform-shaped card + Open-in-editor link.
+      id: string;
+      kind: 'artifact-preview';
+      title: string;
+      body: string;
+      sourceLabel: string;
     };
 
 // Phase 21 slice 8 (2026-05-06): supported slash commands.
@@ -339,6 +349,17 @@ export function ChatCompanion({ draftId }: ChatCompanionProps) {
             console.warn('[chat] markIdeaPulledIntoDraft failed', err);
           });
         }
+
+        // Phase 22 slice 4 (2026-05-06): post a preview turn so
+        // the chat carries a record of what just landed in the
+        // editor. Includes an Open-in-editor link.
+        appendTurn({
+          id: newId(),
+          kind: 'artifact-preview',
+          title: title || 'Untitled idea',
+          body: preview,
+          sourceLabel: 'Pulled into draft',
+        });
       } else {
         openArtifact();
         const text = (hit.snippet ?? '').trim() || (hit.title ?? '').trim();
@@ -800,6 +821,10 @@ function TurnView({
     );
   }
 
+  if (turn.kind === 'artifact-preview') {
+    return <ArtifactPreviewTurn turn={turn} />;
+  }
+
   if (turn.kind === 'originality') {
     return (
       <>
@@ -853,6 +878,48 @@ function TurnView({
         );
       })}
     </>
+  );
+}
+
+// Phase 22 slice 4 (2026-05-06): artifact preview turn renders
+// a small card + 'Open in editor →' link so the user has an
+// inline record of what just landed in the editor and a quick
+// jump back into it.
+function ArtifactPreviewTurn({
+  turn,
+}: {
+  turn: Extract<ChatTurn, { kind: 'artifact-preview' }>;
+}) {
+  const { openArtifact } = useArtifactPanel();
+  return (
+    <div className="pl-7 -mt-1">
+      <div className="rounded-soft border border-rule bg-paper px-3 py-2.5">
+        <div className="flex items-center gap-2 mb-1">
+          <span
+            aria-hidden="true"
+            className="w-1.5 h-1.5 rounded-full bg-glyph-hot"
+          />
+          <span className="font-mono text-[9px] tracking-[0.18em] uppercase text-tag font-medium">
+            {turn.sourceLabel}
+          </span>
+          <button
+            type="button"
+            onClick={openArtifact}
+            className="ml-auto font-mono text-[9px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors"
+          >
+            Open in editor →
+          </button>
+        </div>
+        <p className="font-sans text-[12.5px] font-medium text-ink leading-[1.4] m-0">
+          {turn.title}
+        </p>
+        {turn.body.length > 0 && (
+          <p className="font-sans text-[11.5px] text-ink-soft leading-[1.5] line-clamp-2 mt-1 m-0">
+            {turn.body}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
