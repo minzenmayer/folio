@@ -31,6 +31,7 @@ import {
   computeClusters,
   persistClusters,
 } from '@/lib/garden/clusters';
+import { runMaturationPass } from '@/lib/garden/maturation';
 import type { ClusterSnapshot } from '@/lib/garden/clusters';
 import { ClusterFeed } from './ClusterFeed';
 import { ViewToggle } from './ViewToggle';
@@ -75,12 +76,14 @@ export default async function GardenPage({
   }
 
   // Hydrate digest picks with full GardenItem data.
-  const allItems = await listGardenItems(user.id, {
+  // (let-binding so the inline maturation fallback below can re-fetch
+  // after lifts so the same render shows updated maturity/temperature.)
+  let allItems = await listGardenItems(user.id, {
     sort: 'ripeness',
     temperatures: ['hot', 'warm', 'cool', 'cold'],
   });
 
-  const itemMap = new Map<string, (typeof allItems)[number]>();
+  let itemMap = new Map<string, (typeof allItems)[number]>();
   for (const it of allItems) itemMap.set(`${it.kind}|${it.id}`, it);
 
   const digestItems = digest.picks
@@ -140,6 +143,27 @@ export default async function GardenPage({
       const persisted = await persistClusters(user.id, new Date(), computed);
       if (persisted > 0) {
         clusterSnapshots = await readClustersForToday(user.id);
+        // Phase 18 (2026-05-05) — fire the maturation pass right
+        // after the clusters land so signal #3 has data and the user
+        // sees lifted ideas immediately. Only runs once per user per
+        // day via this path (next visit hits the cluster cache and
+        // skips). The 04:00 UTC cron handles the daily rhythm.
+        try {
+          const matReport = await runMaturationPass(user.id);
+          if (matReport.lifted > 0) {
+            // Re-fetch items so the updated maturity/temperature
+            // render in the same response. Rebuild itemMap so the
+            // cluster hydration below picks up the new values.
+            allItems = await listGardenItems(user.id, {
+              sort: 'ripeness',
+              temperatures: ['hot', 'warm', 'cool', 'cold'],
+            });
+            itemMap = new Map<string, (typeof allItems)[number]>();
+            for (const it of allItems) itemMap.set(`${it.kind}|${it.id}`, it);
+          }
+        } catch (err) {
+          console.warn('[garden/page] inline maturation failed', err);
+        }
       }
     } catch (err) {
       console.warn('[garden/page] on-demand cluster compute failed', err);

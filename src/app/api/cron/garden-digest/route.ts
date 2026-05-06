@@ -16,6 +16,7 @@ import { db, users } from '@/db';
 import { applyAutoCooling, computeDigest, persistDigestRun, markSurfaced } from '@/lib/garden/digest';
 import { computeNextJuxtaposition } from '@/lib/garden/juxtaposition';
 import { computeClusters, persistClusters } from '@/lib/garden/clusters';
+import { runMaturationPass } from '@/lib/garden/maturation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,6 +27,7 @@ type UserReport = {
   cooledByDigest: number;
   digestPicks: number;
   clusterCount: number;
+  maturationLifted: number;
   juxtapositionId: string | null;
   errors: string[];
 };
@@ -57,6 +59,7 @@ export async function GET(req: Request) {
       cooledByDigest: 0,
       digestPicks: 0,
       clusterCount: 0,
+      maturationLifted: 0,
       juxtapositionId: null,
       errors: [],
     };
@@ -79,6 +82,17 @@ export async function GET(req: Request) {
         report.clusterCount = persisted;
       } catch (err) {
         report.errors.push(`clusters: ${(err as Error).message}`);
+      }
+
+      // 2.7 (Phase 18, 2026-05-05). Maturation pass — lifts ideas
+      // based on cross-source resonance, cluster density, draft-
+      // resonance, depth+breadth on entry, connectedness. Runs
+      // AFTER cluster compute so signal #3 has fresh data.
+      try {
+        const matReport = await runMaturationPass(user.id);
+        report.maturationLifted = matReport.lifted;
+      } catch (err) {
+        report.errors.push(`maturation: ${(err as Error).message}`);
       }
 
       // 3. juxtaposition compute
