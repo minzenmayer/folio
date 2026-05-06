@@ -39,6 +39,7 @@
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Heading from '@tiptap/extension-heading';
+import { IdeaBubbleExtension } from './IdeaBubbleExtension';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { updateDraft } from './actions';
@@ -363,6 +364,9 @@ export function DraftEditor({
     extensions: [
       StarterKit.configure({ heading: false }),
       ThoughtbedHeading,
+      // Phase 20 slice 4 (2026-05-06): custom node for "From your Garden"
+      // thought-bubbles. Slice 5 calls insertIdeaBubble from the rail.
+      IdeaBubbleExtension,
     ],
     immediatelyRender: false,
     content: initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] },
