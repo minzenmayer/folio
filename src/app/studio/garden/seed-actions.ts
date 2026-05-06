@@ -92,15 +92,14 @@ export type SeedChunkResult = {
 export async function runSeedChunk(): Promise<SeedChunkResult> {
   const user = await requireUser();
 
-  // Phase 17 hotfix (2026-05-05): if migration 0015 is unapplied, the
-  // users.phase17_seeded_at write at the bottom of this function will
-  // throw. Catch around the whole body so the banner doesn't loop on
-  // a 500 — return a 'no more work' result and the banner exits.
-  try {
+  // Phase 18 hotfix (2026-05-05): isolate the optional column write
+  // at the end of the chunk so it can't trash the chunk's actual
+  // result. The core work (SELECT + autoClaim loop + COUNT) reports
+  // accurately even when migration 0015 isn't applied.
 
   // Find extracted rows that are auto-claim eligible AND don't yet
-  // have a partner ideas row. LEFT JOIN to detect missing partner.
-  const rows = (await db.execute<{
+  // have a partner ideas row.
+  let list: Array<{
     id: string;
     title: string;
     claim: string;
@@ -108,29 +107,33 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
     depth_signal: number;
     source_kind: string;
     embedding: number[] | null;
-  }>(sql`
-    SELECT e.id, e.title, e.claim, e.evidence, e.depth_signal, e.source_kind, e.embedding
-      FROM extracted_ideas e
-     WHERE e.user_id = ${user.id}
-       AND e.source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
-       AND NOT EXISTS (
-         SELECT 1 FROM ideas i
-          WHERE i.user_id = e.user_id
-            AND i.source_extracted_idea_id = e.id
-       )
-     ORDER BY e.created_at ASC
-     LIMIT ${CHUNK_SIZE}
-  `)) as unknown as Array<{
-    id: string;
-    title: string;
-    claim: string;
-    evidence: string | null;
-    depth_signal: number;
-    source_kind: string;
-    embedding: number[] | null;
-  }>;
-
-  const list = rows;
+  }> = [];
+  try {
+    list = (await db.execute<{
+      id: string;
+      title: string;
+      claim: string;
+      evidence: string | null;
+      depth_signal: number;
+      source_kind: string;
+      embedding: number[] | null;
+    }>(sql`
+      SELECT e.id, e.title, e.claim, e.evidence, e.depth_signal, e.source_kind, e.embedding
+        FROM extracted_ideas e
+       WHERE e.user_id = ${user.id}
+         AND e.source_kind IN ('newsletter_issue', 'obsidian_note', 'linkedin_post')
+         AND NOT EXISTS (
+           SELECT 1 FROM ideas i
+            WHERE i.user_id = e.user_id
+              AND i.source_extracted_idea_id = e.id
+         )
+       ORDER BY e.created_at ASC
+       LIMIT ${CHUNK_SIZE}
+    `)) as unknown as typeof list;
+  } catch (err) {
+    console.warn('[runSeedChunk] eligibility query failed', err);
+    return { claimed: 0, totalClaimed: 0, hasMore: false };
+  }
 
   let claimed = 0;
   for (const row of list) {
@@ -152,32 +155,42 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
     }
   }
 
-  // After the chunk: if no rows came back, this user has no more
-  // pending work. Set the gate.
+  // hasMore reflects whether the SELECT was at the chunk size limit.
+  // If yes, more rows likely remain. If less than chunk size, the
+  // user has no more pending work — banner exits.
   const hasMore = list.length === CHUNK_SIZE;
+
+  // Optional informational column write — fails silently when
+  // migration 0015 isn't applied. Doesn't affect chunk semantics.
   if (!hasMore) {
-    await db
-      .update(users)
-      .set({ phase17SeededAt: sql`now()` })
-      .where(eq(users.id, user.id));
+    try {
+      await db
+        .update(users)
+        .set({ phase17SeededAt: sql`now()` })
+        .where(eq(users.id, user.id));
+    } catch (err) {
+      console.warn('[runSeedChunk] phase17_seeded_at write skipped', err);
+    }
   }
 
-  // Count total auto-claims (mirrors getSeedStatus).
-  const totalRows = (await db.execute<{ count: number }>(sql`
-    SELECT COUNT(*)::int as count
-      FROM ideas
-     WHERE user_id = ${user.id}
-       AND claim_kind = 'auto_claimed'
-  `)) as unknown as Array<{ count: number }>;
-  const totalClaimed = Number(totalRows[0]?.count ?? 0);
+  // Total auto-claims after this chunk. Wrapped because the schema
+  // requires nothing new — but defensive belt-and-braces.
+  let totalClaimed = 0;
+  try {
+    const totalRows = (await db.execute<{ count: number }>(sql`
+      SELECT COUNT(*)::int as count
+        FROM ideas
+       WHERE user_id = ${user.id}
+         AND claim_kind = 'auto_claimed'
+    `)) as unknown as Array<{ count: number }>;
+    totalClaimed = Number(totalRows[0]?.count ?? 0);
+  } catch (err) {
+    console.warn('[runSeedChunk] total-count query failed', err);
+  }
 
   if (claimed > 0) revalidatePath('/studio/garden');
 
   return { claimed, totalClaimed, hasMore };
-  } catch (err) {
-    console.warn('[runSeedChunk] failed (migration?)', err);
-    return { claimed: 0, totalClaimed: 0, hasMore: false };
-  }
 }
 
 // ─── Demote affordance — reverses an auto-claim ────────────
