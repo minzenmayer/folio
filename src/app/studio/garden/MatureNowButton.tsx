@@ -32,11 +32,17 @@ export function MatureNowButton() {
           //   M had at least one signal lift.
           // signals = per-signal hit counts for diagnostic clarity.
           const parts: string[] = [];
-          if (res.claimed > 0) {
-            parts.push(`Claimed ${res.claimed}`);
+          parts.push(`Claimed ${res.claimed}`);
+          // Surface the seed-phase eligibility count when nothing was
+          // claimed — distinguishes 'no work to do' from 'work failed.'
+          if (res.claimed === 0) {
+            parts.push(`eligible ${res.seedEligibleFound}`);
+          }
+          if (res.seedFirstError) {
+            parts.push(`seed err: ${res.seedFirstError}`);
           }
           if (res.inspected === 0) {
-            parts.push('Inspected 0 ideas');
+            parts.push('Inspected 0');
           } else {
             parts.push(`Lifted ${res.lifted} of ${res.inspected}`);
             parts.push(
@@ -44,7 +50,7 @@ export function MatureNowButton() {
             );
           }
           if (res.firstError) {
-            parts.push(`error: ${res.firstError}`);
+            parts.push(`mat err: ${res.firstError}`);
           }
           setLastResult(parts.join(' · '));
         }

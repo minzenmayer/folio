@@ -99,6 +99,12 @@ export type SeedChunkResult = {
   totalClaimed: number;
   // Whether more work remains (i.e. another chunk should fire).
   hasMore: boolean;
+  // First error encountered in the chunk, if any. Used by callers
+  // to surface seed-phase failures to the user.
+  firstError?: string;
+  // How many rows the eligibility query returned. 0 means nothing
+  // to claim. Useful diagnostic vs. silent failure.
+  eligibleFound?: number;
 };
 
 export async function runSeedChunk(): Promise<SeedChunkResult> {
@@ -154,11 +160,15 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
       .orderBy(extractedIdeas.createdAt)
       .limit(CHUNK_SIZE);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.warn('[runSeedChunk] eligibility query failed', err);
-    return { claimed: 0, totalClaimed: 0, hasMore: false };
+    // Re-throw so runMaturationNow's seed-phase catch surfaces this
+    // to the user instead of silently reporting 0 claims.
+    throw new Error(`eligibility query: ${msg}`);
   }
 
   let claimed = 0;
+  let firstRowError: string | undefined;
   for (const row of list) {
     try {
       const id = await autoClaimExtractedRow({
@@ -170,16 +180,13 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
         evidence: row.evidence,
         depthSignal: row.depthSignal,
         themes: [],
-        // Phase 18 hotfix (2026-05-05): pass the embedding through.
-        // The typed query above parses vectors as number[]
-        // correctly, so Drizzle's insert serializer no longer
-        // chokes. loadIdeas in the maturation pass needs the
-        // embedding for cosine signals (2, 4) to fire.
         embedding: row.embedding,
       });
       if (id) claimed += 1;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.warn('[seedPhase17] auto-claim failed', row.id, err);
+      if (!firstRowError) firstRowError = `row ${row.id.slice(0, 8)}: ${msg}`;
     }
   }
 
@@ -218,7 +225,13 @@ export async function runSeedChunk(): Promise<SeedChunkResult> {
 
   if (claimed > 0) revalidatePath('/studio/garden');
 
-  return { claimed, totalClaimed, hasMore };
+  return {
+    claimed,
+    totalClaimed,
+    hasMore,
+    firstError: firstRowError,
+    eligibleFound: list.length,
+  };
 }
 
 // ─── Demote affordance — reverses an auto-claim ────────────

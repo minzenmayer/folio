@@ -36,6 +36,8 @@ export async function runMaturationNow(): Promise<
       signal4: number;
       signal5: number;
       firstError: string | null;
+      seedFirstError: string | null;
+      seedEligibleFound: number;
     }
   | { ok: false; reason: string }
 > {
@@ -56,11 +58,19 @@ export async function runMaturationNow(): Promise<
     // up where this one stopped.
 
     let totalClaimed = 0;
+    let firstChunkError: string | undefined;
+    let lastEligibleFound = 0;
     const MAX_CHUNKS = 30;
     try {
       for (let i = 0; i < MAX_CHUNKS; i++) {
         const chunk = await runSeedChunk();
         totalClaimed += chunk.claimed;
+        if (!firstChunkError && chunk.firstError) {
+          firstChunkError = chunk.firstError;
+        }
+        if (typeof chunk.eligibleFound === 'number') {
+          lastEligibleFound = chunk.eligibleFound;
+        }
         if (!chunk.hasMore) break;
       }
     } catch (err) {
@@ -92,6 +102,8 @@ export async function runMaturationNow(): Promise<
       signal4: res.signal4Hits,
       signal5: res.signal5Hits,
       firstError: firstError ?? null,
+      seedFirstError: firstChunkError ?? null,
+      seedEligibleFound: lastEligibleFound,
     };
   } catch (err) {
     return {
