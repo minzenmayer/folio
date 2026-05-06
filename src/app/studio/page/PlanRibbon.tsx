@@ -59,24 +59,50 @@ export function PlanRibbon() {
     const out: BeatPill[] = [];
     // Phase 20.5 (2026-05-06): plan beats now live in the doc as
     // thoughtBubble nodes with source='plan'. Phase 16's H2-with-attrs
-    // shape is gone. Beat id, status, and text live on the bubble's
-    // attrs (beatId / beatStatus / title) — read them straight off.
+    // shape is gone for newly-committed proposals. The walk also picks
+    // up the legacy H2 shape so drafts created BEFORE Phase 20.5 still
+    // show their ribbon — read whichever you find.
     editor.state.doc.descendants((node, pos) => {
-      if (node.type.name !== 'thoughtBubble') return;
-      if (node.attrs.source !== 'plan') return;
-      const id = node.attrs.beatId;
-      const status = node.attrs.beatStatus;
-      const title = (node.attrs.title as string | null | undefined) ?? '';
-      if (!id) return;
-      out.push({
-        id,
-        beat: title,
-        status:
-          status === 'anchored' || status === 'drafted' || status === 'floating'
-            ? status
-            : 'floating',
-        pos,
-      });
+      // New shape — thoughtBubble plan nodes.
+      if (
+        node.type.name === 'thoughtBubble' &&
+        node.attrs.source === 'plan'
+      ) {
+        const id = node.attrs.beatId;
+        const status = node.attrs.beatStatus;
+        const title =
+          (node.attrs.title as string | null | undefined) ?? '';
+        if (!id) return;
+        out.push({
+          id,
+          beat: title,
+          status:
+            status === 'anchored' ||
+            status === 'drafted' ||
+            status === 'floating'
+              ? status
+              : 'floating',
+          pos,
+        });
+        return;
+      }
+      // Legacy shape — H2 with data-tb-beat-id / data-tb-beat-status.
+      if (node.type.name === 'heading' && node.attrs.level === 2) {
+        const id = node.attrs['data-tb-beat-id'];
+        const status = node.attrs['data-tb-beat-status'];
+        if (!id) return;
+        out.push({
+          id,
+          beat: node.textContent,
+          status:
+            status === 'anchored' ||
+            status === 'drafted' ||
+            status === 'floating'
+              ? status
+              : 'floating',
+          pos,
+        });
+      }
     });
     return out;
     // The tick counter forces re-derive on every editor transaction.
@@ -120,10 +146,18 @@ export function PlanRibbon() {
           Seeding the spar from the draft's anchors is a future-phase
           improvement; v2 ships with the link only. */}
       <div className="mt-3 pt-3 border-t border-rule">
+        {/* Phase 20.5 (2026-05-06): open Replan in a new tab so the
+            user's current draft + plan stay intact. Phase 16's
+            same-tab nav was a one-way trip — escape-hatch from spar
+            ("Just open a blank page") would land the user in a new
+            draft with no beats, and the original plan was effectively
+            gone. New tab keeps the original alive. */}
         <Link
           href="/studio"
+          target="_blank"
+          rel="noopener noreferrer"
           className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors"
-          title="Open the spar to rethink the plan"
+          title="Open the spar in a new tab to rethink the plan"
         >
           ↻ Replan
         </Link>
