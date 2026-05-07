@@ -83,6 +83,74 @@ const IDEATION_PROMPTS: ReadonlyArray<string> = [
   'Connect two ideas I keep circling',
 ];
 
+// Phase 23 v2 slice 4.7 (2026-05-06): the With-assistant coaching
+// arc. Five beats, four working + a done state. Each beat carries a
+// hand-written craft intro (Saunders, McPhee, Clark) so the user is
+// being TAUGHT a principle, not just answering questions. The angles
+// the LLM returns are only displayed on Hook + Close — beats where
+// multi-option actually helps. Tension and Stakes are single-question
+// turns so the loop doesn't feel like it keeps asking the same thing.
+type BeatKey = 'hook' | 'tension' | 'stakes' | 'close' | 'done';
+
+type Beat = {
+  key: BeatKey;
+  label: string;
+  coachIntro: string;
+  showAngles: boolean;
+  anglesIntro?: string;
+};
+
+const BEATS: ReadonlyArray<Beat> = [
+  {
+    key: 'hook',
+    label: 'Hook',
+    coachIntro:
+      "McPhee's rule was write the lead first, polish it, let it tell you the rest of the structure. So that's where we start. The hook is the smallest concrete moment that makes a stranger lean in.",
+    showAngles: true,
+    anglesIntro:
+      'Three places this could open. React to one, or tell me where you would start.',
+  },
+  {
+    key: 'tension',
+    label: 'Tension',
+    coachIntro:
+      "Now the spine. Every piece worth reading has one question pulling against itself the whole way through. Saunders calls it escalation: each beat raises the stakes of the question. What is the question this piece refuses to let go of?",
+    showAngles: false,
+  },
+  {
+    key: 'stakes',
+    label: 'Stakes',
+    coachIntro:
+      "If a reader can put this down without something shifting in them, you do not have a piece yet. What is the cost of not reading? Be specific. Generic stakes do not move people.",
+    showAngles: false,
+  },
+  {
+    key: 'close',
+    label: 'Close',
+    coachIntro:
+      'The kicker. Not a summary. The line a reader remembers on the drive home. How should this land?',
+    showAngles: true,
+    anglesIntro:
+      'Three shapes for the close. React to one, or tell me how you would land it.',
+  },
+  {
+    key: 'done',
+    label: 'Ready to draft',
+    coachIntro:
+      'Enough to draft. Open the editor and see how it sits on the page. You can keep refining there.',
+    showAngles: false,
+  },
+];
+
+function beatForTurnCount(userTurns: number): Beat {
+  // beat 0 (Hook) = the system's first response (no user replies yet)
+  // beat 1 (Tension) = after one user reply
+  // ...
+  // beat N (Done) = after enough replies to clear the arc
+  const idx = Math.min(userTurns, BEATS.length - 1);
+  return BEATS[idx];
+}
+
 export function HomeComposer() {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<Mode>('with-assistant');
@@ -845,7 +913,7 @@ function ThinkingCard({ topic }: { topic: string }) {
         </p>
         <p className="font-sans text-[13px] text-ink-soft leading-snug flex items-center gap-2">
           <SpinGlyph />
-          Pulling what you've already written about this…
+          Pulling what you have already written about this.
         </p>
       </div>
     </div>
@@ -911,9 +979,12 @@ function ThreadView({
 
         {angles.length > 0 && (
           <div>
+            <p className="font-sans text-[14px] text-ink leading-relaxed mb-3">
+              {BEATS[0].coachIntro}
+            </p>
             <div className="flex items-center justify-between mb-2">
               <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
-                {angles.length === 1 ? 'One angle' : `${angles.length} angles`}
+                {BEATS[0].anglesIntro ?? 'Three places this could open'}
               </p>
               <button
                 type="button"
@@ -984,9 +1055,7 @@ function ThreadView({
             </ul>
             {selectedAngleIndex === null && (
               <p className="mt-2 font-sans text-[12px] text-tag">
-                Click an angle to select it (click again to clear), refresh
-                for a new three, or skip selection and tell me where to take
-                this below.
+                Click one to select it, click it again to clear. Or refresh for a different three. Or skip the selection and tell me where you would take it below.
               </p>
             )}
           </div>
@@ -995,7 +1064,7 @@ function ThreadView({
         {outline.length > 0 && (
           <div>
             <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
-              Outline so far
+              Where this is headed
             </p>
             <ol className="space-y-1.5 ml-1">
               {outline.map((b, i) => (
@@ -1028,7 +1097,7 @@ function ThreadView({
                   onContinue();
                 }
               }}
-              placeholder="Add direction here, or just pick an angle above and continue. (Shift+Enter for a new paragraph.)"
+              placeholder="Tell me where you would take it. Shift+Enter for a new paragraph."
               rows={2}
               className="w-full resize-none rounded-card border border-rule bg-paper px-3 py-2.5 font-sans text-[14px] text-ink placeholder:text-tag leading-snug focus:outline-none focus:border-rule-strong min-h-[56px] max-h-[200px]"
             />
@@ -1051,7 +1120,7 @@ function ThreadView({
           disabled={!canContinue}
           className="font-mono text-[11px] tracking-[0.18em] uppercase rounded-full px-4 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong disabled:bg-rule disabled:text-tag disabled:cursor-not-allowed bg-ink text-paper hover:bg-ink-soft"
         >
-          Continue →
+          Got it →
         </button>
       </div>
     </div>
@@ -1144,9 +1213,7 @@ function CoachView({
         >
           ← Start over
         </button>
-        <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
-          Coaching · Round {round || 1}
-        </span>
+        <BeatProgress current={beatForTurnCount(round)} totalWorking={BEATS.length - 1} />
         <button
           type="button"
           onClick={onOpenEditor}
@@ -1159,24 +1226,36 @@ function CoachView({
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-6 py-8 space-y-6">
-          {turns.map((turn, i) => {
-            if (turn.kind === 'user') {
-              return <UserTurn key={i} text={turn.text} />;
-            }
-            const isLatest = turn === lastAssistant;
-            return (
-              <AssistantTurn
-                key={i}
-                proposal={turn.proposal}
-                onPickAngle={isLatest ? fillReplyWithAngle : undefined}
-              />
-            );
-          })}
+          {(() => {
+            // Each assistant turn renders with the beat metadata that
+            // matches its position in the arc. Assistant index 0 = Hook
+            // (the response to the topic). Index 1 = Tension (response
+            // to first reply). Etc. Clamped at Done.
+            let assistantIndex = 0;
+            return turns.map((turn, i) => {
+              if (turn.kind === 'user') {
+                return <UserTurn key={i} text={turn.text} />;
+              }
+              const beat = BEATS[Math.min(assistantIndex, BEATS.length - 1)];
+              const isLatest = turn === lastAssistant;
+              assistantIndex += 1;
+              return (
+                <AssistantTurn
+                  key={i}
+                  proposal={turn.proposal}
+                  beat={beat}
+                  onPickAngle={
+                    isLatest && beat.showAngles ? fillReplyWithAngle : undefined
+                  }
+                />
+              );
+            });
+          })()}
           {isProposing && (
             <div className="flex items-center gap-2">
               <SpinGlyph />
               <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag">
-                Thinking…
+                Thinking through that.
               </p>
             </div>
           )}
@@ -1188,7 +1267,7 @@ function CoachView({
           {showOffRamp && (
             <div className="flex items-center justify-between">
               <span className="font-sans text-[12px] text-tag">
-                Keep refining, or jump straight to the editor when ready.
+                Take it as far as you want here. The editor is a click away when you are ready.
               </span>
               <button
                 type="button"
@@ -1211,7 +1290,7 @@ function CoachView({
                   onSendReply();
                 }
               }}
-              placeholder="Reply… (Shift+Enter for a new paragraph)"
+              placeholder="Your turn. Shift+Enter for a new paragraph."
               rows={1}
               className="flex-1 resize-none bg-transparent border-0 outline-none font-sans text-[14.5px] text-ink placeholder:text-tag leading-snug min-h-[24px] max-h-[200px]"
             />
@@ -1259,9 +1338,11 @@ function UserTurn({ text }: { text: string }) {
 
 function AssistantTurn({
   proposal,
+  beat,
   onPickAngle,
 }: {
   proposal: SparProposal;
+  beat?: Beat;
   onPickAngle?: (angle: ProposeAngle) => void;
 }) {
   const { visibleThinking, angles, followUpQuestion } = proposal;
@@ -1274,27 +1355,42 @@ function AssistantTurn({
     .filter((s) => s.length > 0);
   const summaryParas = sentences.length > 0 ? sentences : [visibleThinking.summary];
   const interactive = typeof onPickAngle === 'function';
+  // Phase 23 v2 slice 4.7 (2026-05-06): the beat carries the craft
+  // intro that gets surfaced above the LLM output. When the beat
+  // says showAngles is false (Tension, Stakes, Done), the angles
+  // the LLM returned stay hidden so the user is not asked to pick.
+  // The craft intro becomes the primary text; the LLM follow-up
+  // question is the action prompt.
+  const showAngles = beat ? beat.showAngles : true;
   return (
     <div className="space-y-4">
       <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
-        Thoughtbed
+        Thoughtbed{beat ? ` · ${beat.label}` : ''}
       </p>
-      <div className="space-y-2">
-        {summaryParas.map((s, i) => (
-          <p
-            key={i}
-            className="font-sans text-[14px] text-ink leading-relaxed"
-          >
-            {s}
-          </p>
-        ))}
-      </div>
-      {angles.length > 0 && (
+      {beat && (
+        <p className="font-sans text-[14.5px] text-ink leading-relaxed">
+          {beat.coachIntro}
+        </p>
+      )}
+      {!beat && (
+        <div className="space-y-2">
+          {summaryParas.map((s, i) => (
+            <p
+              key={i}
+              className="font-sans text-[14px] text-ink leading-relaxed"
+            >
+              {s}
+            </p>
+          ))}
+        </div>
+      )}
+      {showAngles && angles.length > 0 && (
         <div>
           <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
-            {interactive
-              ? 'Click an angle to use it (then add direction below)'
-              : 'Angles from this round'}
+            {beat?.anglesIntro ??
+              (interactive
+                ? 'Click an angle to use it'
+                : 'Angles from this round')}
           </p>
           <ul className="space-y-1.5">
             {angles.map((angle, i) => {
@@ -1418,5 +1514,42 @@ function SpinGlyph() {
     >
       <path d="M6 1.5a4.5 4.5 0 1 1-4.5 4.5" />
     </svg>
+  );
+}
+
+
+function BeatProgress({
+  current,
+  totalWorking,
+}: {
+  current: Beat;
+  totalWorking: number;
+}) {
+  const currentIndex = BEATS.findIndex((b) => b.key === current.key);
+  return (
+    <div className="flex items-center gap-2.5" aria-label={`Coaching beat: ${current.label}`}>
+      <div className="flex items-center gap-1">
+        {BEATS.slice(0, totalWorking).map((b, i) => {
+          const isPast = i < currentIndex;
+          const isCurrent = i === currentIndex;
+          return (
+            <span
+              key={b.key}
+              className={`h-1.5 w-1.5 rounded-full ${
+                isCurrent
+                  ? 'bg-ink'
+                  : isPast
+                    ? 'bg-tag'
+                    : 'bg-rule'
+              }`}
+              aria-hidden="true"
+            />
+          );
+        })}
+      </div>
+      <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
+        {current.label}
+      </span>
+    </div>
   );
 }
