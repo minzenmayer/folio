@@ -135,3 +135,12 @@
   pointer-events: none;
   height: 0;
 }
+
+
+/* Phase 23 v2 slice 4.5 (2026-05-06): when the homepage transitions
+ * into the coaching stage, hide the studio sidebar so the chat thread
+ * gets the full width. The HomeComposer toggles the body class via a
+ * useEffect; the rule below does the rest. */
+body.tb-coach-mode .tb-studio-sidebar {
+  display: none !important;
+}

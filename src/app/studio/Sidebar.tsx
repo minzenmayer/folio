@@ -132,7 +132,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="hidden md:flex w-[260px] shrink-0 bg-bg flex-col h-screen sticky top-0"
+      className="tb-studio-sidebar hidden md:flex w-[260px] shrink-0 bg-bg flex-col h-screen sticky top-0"
       aria-label="Thoughtbed navigation"
     >
       {/* Brand block — wordmark + "[name]'s Space" workspace label */}

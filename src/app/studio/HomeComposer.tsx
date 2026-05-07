@@ -25,6 +25,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import {
   proposeFromTopic,
+  regenerateAngles,
   commitProposal,
   type ProposeFromTopicResult,
   type ProposeAngle,
@@ -35,7 +36,14 @@ type Path = 'writing' | 'ideation';
 // Phase 23 v2 slice 4 (2026-05-06): the homepage transitions through
 // these stages on a Writing × With-assistant submit. Other path × mode
 // combinations stay in 'default' for now and surface a placeholder.
-type Stage = 'default' | 'thinking' | 'thread' | 'error';
+type Stage = 'default' | 'thinking' | 'thread' | 'coaching' | 'error';
+
+// Phase 23 v2 slice 4.5 (2026-05-06): each turn in the coaching
+// thread. user turns are plain text; assistant turns carry the
+// proposeFromTopic structured result so angles render inline.
+type CoachTurn =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; proposal: SparProposal };
 
 // Narrow the success branch out so JSX can rely on the angles/outline/
 // question fields without re-checking ok every render.
@@ -87,8 +95,29 @@ export function HomeComposer() {
   const [proposal, setProposal] = useState<SparProposal | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [submittedTopic, setSubmittedTopic] = useState<string>('');
+  const [selectedAngleIndex, setSelectedAngleIndex] = useState<number | null>(
+    null
+  );
+  const [replyText, setReplyText] = useState<string>('');
+  const [coachTurns, setCoachTurns] = useState<CoachTurn[]>([]);
   const [isProposing, startProposeTransition] = useTransition();
+  const [isRegenerating, startRegenTransition] = useTransition();
   const [isCommitting, startCommitTransition] = useTransition();
+
+  // Phase 23 v2 slice 4.5 (2026-05-06): the studio sidebar hides
+  // while the coaching stage is active. We toggle the body class
+  // and clean up on unmount / stage change so the sidebar always
+  // returns when the user steps out of coaching.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (stage === 'coaching') {
+      document.body.classList.add('tb-coach-mode');
+      return () => {
+        document.body.classList.remove('tb-coach-mode');
+      };
+    }
+    document.body.classList.remove('tb-coach-mode');
+  }, [stage]);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -163,26 +192,131 @@ export function HomeComposer() {
     setProposal(null);
     setErrorMsg(null);
     setSubmittedTopic('');
+    setSelectedAngleIndex(null);
+    setReplyText('');
+    setCoachTurns([]);
   }
 
-  function pickAngle(angle: ProposeAngle) {
+  // Phase 23 v2 slice 4.5 (2026-05-06): cards toggle a selection
+  // (single-select). A second click on the same card deselects.
+  function toggleAngle(index: number) {
+    setSelectedAngleIndex((prev) => (prev === index ? null : index));
+  }
+
+  // Refresh the three angles in place. Uses regenerateAngles so the
+  // outline stays stable; the LLM rolls a different cut of angles
+  // against the same retrieval set.
+  function refreshAngles() {
     if (!proposal) return;
     const platform: 'newsletter' | 'linkedin' =
       proposal.platformGuess === 'linkedin' ? 'linkedin' : 'newsletter';
-    // commitProposal redirects on the server to /studio/page/[id].
-    // The redirect is thrown as a Next error inside the action, which
-    // Next handles automatically — we don't await a value back.
+    setSelectedAngleIndex(null);
+    startRegenTransition(async () => {
+      try {
+        const res = await regenerateAngles({
+          topic: proposal.topic,
+          outline: proposal.outline,
+          platformHint: platform,
+        });
+        if (res.ok) {
+          setProposal({ ...proposal, angles: res.angles });
+        } else {
+          setErrorMsg(res.message);
+        }
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : 'Unknown error.');
+      }
+    });
+  }
+
+  // "Continue →" — transition to the coach chat stage. Build the
+  // first user turn from the selected angle (if any) plus any extra
+  // direction the user typed, then immediately fire the next round
+  // of proposeFromTopic with conversation context so the assistant
+  // has something to say back.
+  function continueToCoaching() {
+    if (!proposal) return;
+    const selected =
+      selectedAngleIndex !== null ? proposal.angles[selectedAngleIndex] : null;
+    const reply = replyText.trim();
+    const userTurnText = composeUserTurn(selected, reply);
+    if (!userTurnText) return;
+    const initialThread: CoachTurn[] = [
+      { kind: 'assistant', proposal },
+      { kind: 'user', text: userTurnText },
+    ];
+    setCoachTurns(initialThread);
+    setReplyText('');
+    setSelectedAngleIndex(null);
+    setStage('coaching');
+    runCoachReply(initialThread, proposal.topic, proposal.platformGuess);
+  }
+
+  // Run a coach round — re-fire proposeFromTopic with the full
+  // transcript and append the assistant's response to the thread.
+  function runCoachReply(
+    thread: CoachTurn[],
+    topic: string,
+    platformGuess: SparProposal['platformGuess']
+  ) {
+    const platformHint =
+      platformGuess === 'linkedin' || platformGuess === 'newsletter'
+        ? platformGuess
+        : undefined;
+    startProposeTransition(async () => {
+      try {
+        const res = await proposeFromTopic({
+          topic,
+          conversationSoFar: renderTranscript(topic, thread),
+          ...(platformHint ? { platformHint } : {}),
+        });
+        if (res.ok) {
+          setCoachTurns((prev) => [...prev, { kind: 'assistant', proposal: res }]);
+        } else {
+          setErrorMsg(res.message);
+        }
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : 'Unknown error.');
+      }
+    });
+  }
+
+  function sendCoachReply() {
+    const reply = replyText.trim();
+    if (!reply || coachTurns.length === 0) return;
+    const lastAssistant = [...coachTurns]
+      .reverse()
+      .find((t): t is { kind: 'assistant'; proposal: SparProposal } =>
+        t.kind === 'assistant'
+      );
+    if (!lastAssistant) return;
+    const next: CoachTurn[] = [...coachTurns, { kind: 'user', text: reply }];
+    setCoachTurns(next);
+    setReplyText('');
+    runCoachReply(next, lastAssistant.proposal.topic, lastAssistant.proposal.platformGuess);
+  }
+
+  // Finalize from coaching: take the latest assistant turn's outline +
+  // topic, commit a draft, redirect to the editor at /studio/page/[id].
+  function openEditorFromCoaching() {
+    const lastAssistant = [...coachTurns]
+      .reverse()
+      .find((t): t is { kind: 'assistant'; proposal: SparProposal } =>
+        t.kind === 'assistant'
+      );
+    if (!lastAssistant) return;
+    const platform: 'newsletter' | 'linkedin' =
+      lastAssistant.proposal.platformGuess === 'linkedin'
+        ? 'linkedin'
+        : 'newsletter';
     startCommitTransition(async () => {
       try {
         await commitProposal({
-          topic: proposal.topic,
-          outline: proposal.outline,
+          topic: lastAssistant.proposal.topic,
+          outline: lastAssistant.proposal.outline,
           platform,
         });
       } catch (err) {
-        // Real redirects throw a NEXT_REDIRECT error that Next consumes
-        // before this catch sees it. Anything that lands here is an
-        // actual failure.
         setErrorMsg(err instanceof Error ? err.message : 'Unknown error.');
         setStage('error');
       }
@@ -209,11 +343,32 @@ export function HomeComposer() {
       <div className="w-full max-w-[720px] mx-auto">
         <ThreadView
           proposal={proposal}
-          isCommitting={isCommitting}
-          onPickAngle={pickAngle}
+          selectedAngleIndex={selectedAngleIndex}
+          replyText={replyText}
+          isRegenerating={isRegenerating}
+          isProposing={isProposing}
+          onToggleAngle={toggleAngle}
+          onRefreshAngles={refreshAngles}
+          onReplyChange={setReplyText}
+          onContinue={continueToCoaching}
           onStartOver={startOver}
         />
       </div>
+    );
+  }
+
+  if (stage === 'coaching') {
+    return (
+      <CoachView
+        turns={coachTurns}
+        replyText={replyText}
+        isProposing={isProposing}
+        isCommitting={isCommitting}
+        onReplyChange={setReplyText}
+        onSendReply={sendCoachReply}
+        onOpenEditor={openEditorFromCoaching}
+        onStartOver={startOver}
+      />
     );
   }
 
@@ -700,21 +855,36 @@ function ThinkingCard({ topic }: { topic: string }) {
 
 function ThreadView({
   proposal,
-  isCommitting,
-  onPickAngle,
+  selectedAngleIndex,
+  replyText,
+  isRegenerating,
+  isProposing,
+  onToggleAngle,
+  onRefreshAngles,
+  onReplyChange,
+  onContinue,
   onStartOver,
 }: {
   proposal: SparProposal;
-  isCommitting: boolean;
-  onPickAngle: (angle: ProposeAngle) => void;
+  selectedAngleIndex: number | null;
+  replyText: string;
+  isRegenerating: boolean;
+  isProposing: boolean;
+  onToggleAngle: (index: number) => void;
+  onRefreshAngles: () => void;
+  onReplyChange: (text: string) => void;
+  onContinue: () => void;
   onStartOver: () => void;
 }) {
   const { topic, visibleThinking, angles, outline, followUpQuestion } =
     proposal;
+  const canContinue =
+    !isProposing &&
+    !isRegenerating &&
+    (selectedAngleIndex !== null || replyText.trim().length >= 3);
   return (
     <div className="space-y-4">
       <div className="rounded-card border border-rule bg-paper p-6 space-y-5">
-        {/* User's topic as the first turn */}
         <div>
           <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-1">
             You
@@ -724,7 +894,6 @@ function ThreadView({
           </p>
         </div>
 
-        {/* Visible thinking — what the system pulled */}
         <div className="border-t border-rule pt-5">
           <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
             Thoughtbed
@@ -734,54 +903,93 @@ function ThreadView({
           </p>
         </div>
 
-        {/* Angles — multi-option proposals. Click an angle to commit
-            and open the editor with the outline pre-built. */}
         {angles.length > 0 && (
           <div>
-            <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
-              Three angles
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
+                {angles.length === 1 ? 'One angle' : `${angles.length} angles`}
+              </p>
+              <button
+                type="button"
+                onClick={onRefreshAngles}
+                disabled={isRegenerating || isProposing}
+                className="font-mono text-[10px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isRegenerating ? <SpinGlyph /> : <RefreshGlyph />}
+                {isRegenerating ? 'Refreshing' : 'New angles'}
+              </button>
+            </div>
             <ul className="space-y-2">
-              {angles.map((angle, i) => (
-                <li key={i}>
-                  <button
-                    type="button"
-                    onClick={() => onPickAngle(angle)}
-                    disabled={isCommitting}
-                    className="w-full text-left rounded-card border border-rule bg-paper px-4 py-3 hover:bg-paper-2 hover:border-rule-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
-                        {String.fromCharCode(65 + i)}
-                      </span>
-                      <span className="font-sans text-[14px] text-ink leading-snug flex-1">
-                        {angle.line}
-                      </span>
-                    </div>
-                    {angle.sources.length > 0 && (
-                      <div className="mt-2 ml-7 flex flex-wrap gap-1.5">
-                        {angle.sources.map((s) => (
-                          <span
-                            key={`${s.kind}-${s.id}`}
-                            className="font-mono text-[10px] text-tag bg-paper-2 border border-rule rounded-full px-2 py-0.5"
-                          >
-                            {s.label}
+              {angles.map((angle, i) => {
+                const selected = selectedAngleIndex === i;
+                return (
+                  <li key={`${i}-${angle.line.slice(0, 24)}`}>
+                    <button
+                      type="button"
+                      onClick={() => onToggleAngle(i)}
+                      aria-pressed={selected}
+                      className={`w-full text-left rounded-card border px-4 py-3 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
+                        selected
+                          ? 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100'
+                          : 'border-rule bg-paper hover:bg-paper-2 hover:border-rule-strong'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`font-mono text-[10px] pt-0.5 shrink-0 ${
+                            selected ? 'text-emerald-700' : 'text-tag'
+                          }`}
+                        >
+                          {String.fromCharCode(65 + i)}
+                        </span>
+                        <span
+                          className={`font-sans text-[14px] leading-snug flex-1 ${
+                            selected ? 'text-emerald-900' : 'text-ink'
+                          }`}
+                        >
+                          {angle.line}
+                        </span>
+                        {selected && (
+                          <span className="text-emerald-600 shrink-0">
+                            <CheckGlyph />
                           </span>
-                        ))}
+                        )}
                       </div>
-                    )}
-                  </button>
-                </li>
-              ))}
+                      {angle.sources.length > 0 && (
+                        <div className="mt-2 ml-7 flex flex-wrap gap-1.5">
+                          {angle.sources.map((s) => (
+                            <span
+                              key={`${s.kind}-${s.id}`}
+                              className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${
+                                selected
+                                  ? 'text-emerald-700 bg-emerald-100 border-emerald-200'
+                                  : 'text-tag bg-paper-2 border-rule'
+                              }`}
+                            >
+                              {s.label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
+            {selectedAngleIndex === null && (
+              <p className="mt-2 font-sans text-[12px] text-tag">
+                Click an angle to select it (click again to clear), refresh
+                for a new three, or skip selection and tell me where to take
+                this below.
+              </p>
+            )}
           </div>
         )}
 
-        {/* Outline preview */}
         {outline.length > 0 && (
           <div>
             <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
-              If you pick one, the page opens with this outline
+              Outline so far
             </p>
             <ol className="space-y-1.5 ml-1">
               {outline.map((b, i) => (
@@ -799,21 +1007,100 @@ function ThreadView({
           </div>
         )}
 
-        {/* Follow-up question */}
         {followUpQuestion && (
           <div className="border-t border-rule pt-4">
-            <p className="font-sans text-[14px] text-ink leading-snug">
+            <p className="font-sans text-[14px] text-ink leading-snug mb-3">
               {followUpQuestion}
             </p>
-            <p className="mt-2 font-sans text-[12px] text-tag">
-              Multi-turn replies land in slice 4.5 — for now, pick an angle
-              above to open the page, or start over with a different topic.
-            </p>
+            <textarea
+              value={replyText}
+              onChange={(e) => onReplyChange(e.target.value)}
+              placeholder="Add direction here, or just pick an angle above and continue."
+              rows={2}
+              className="w-full resize-none rounded-card border border-rule bg-paper px-3 py-2.5 font-sans text-[14px] text-ink placeholder:text-tag leading-snug focus:outline-none focus:border-rule-strong"
+            />
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onStartOver}
+          disabled={isProposing || isRegenerating}
+          className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag hover:text-ink transition-colors disabled:opacity-50"
+        >
+          ← Start over
+        </button>
+        <button
+          type="button"
+          onClick={onContinue}
+          disabled={!canContinue}
+          className="font-mono text-[11px] tracking-[0.18em] uppercase rounded-full px-4 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong disabled:bg-rule disabled:text-tag disabled:cursor-not-allowed bg-ink text-paper hover:bg-ink-soft"
+        >
+          Continue →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── helpers + CoachView ─────────────────────────────────────────────
+
+function composeUserTurn(
+  selected: ProposeAngle | null,
+  reply: string
+): string {
+  const parts: string[] = [];
+  if (selected) parts.push(`I'll go with: ${selected.line}`);
+  if (reply) parts.push(reply);
+  return parts.join('\n\n');
+}
+
+// Render the coach thread into the transcript shape proposeFromTopic
+// expects via conversationSoFar. Mirrors the Spar surface's format
+// (TOPIC: / USER: lines) so the LLM prompt sees a familiar shape.
+function renderTranscript(topic: string, turns: CoachTurn[]): string {
+  const lines: string[] = [`TOPIC: ${topic}`];
+  for (const t of turns) {
+    if (t.kind === 'user') lines.push(`USER: ${t.text}`);
+    if (t.kind === 'assistant') {
+      lines.push(`THOUGHTBED: ${t.proposal.followUpQuestion}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function CoachView({
+  turns,
+  replyText,
+  isProposing,
+  isCommitting,
+  onReplyChange,
+  onSendReply,
+  onOpenEditor,
+  onStartOver,
+}: {
+  turns: CoachTurn[];
+  replyText: string;
+  isProposing: boolean;
+  isCommitting: boolean;
+  onReplyChange: (text: string) => void;
+  onSendReply: () => void;
+  onOpenEditor: () => void;
+  onStartOver: () => void;
+}) {
+  const lastAssistant = [...turns]
+    .reverse()
+    .find((t): t is { kind: 'assistant'; proposal: SparProposal } =>
+      t.kind === 'assistant'
+    );
+  const canSend =
+    !isProposing && !isCommitting && replyText.trim().length >= 1;
+  const canOpen = !isCommitting && lastAssistant !== undefined;
+  return (
+    <div className="min-h-[calc(100vh-0px)] flex flex-col">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-rule shrink-0">
         <button
           type="button"
           onClick={onStartOver}
@@ -822,14 +1109,173 @@ function ThreadView({
         >
           ← Start over
         </button>
-        {isCommitting && (
-          <span className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag flex items-center gap-2">
-            <SpinGlyph />
-            Opening the page…
-          </span>
-        )}
+        <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
+          Coaching
+        </span>
+        <button
+          type="button"
+          onClick={onOpenEditor}
+          disabled={!canOpen}
+          className="font-mono text-[11px] tracking-[0.18em] uppercase rounded-full px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong disabled:opacity-50 disabled:cursor-not-allowed bg-paper-2 text-ink hover:bg-paper-3"
+        >
+          Open the editor →
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[720px] mx-auto px-6 py-8 space-y-6">
+          {turns.map((turn, i) =>
+            turn.kind === 'user' ? (
+              <UserTurn key={i} text={turn.text} />
+            ) : (
+              <AssistantTurn key={i} proposal={turn.proposal} />
+            )
+          )}
+          {isProposing && (
+            <div className="flex items-center gap-2">
+              <SpinGlyph />
+              <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag">
+                Thinking…
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="border-t border-rule px-6 py-4 shrink-0 bg-paper">
+        <div className="max-w-[720px] mx-auto">
+          <div className="flex items-end gap-2 rounded-card border border-rule bg-paper px-3 py-2">
+            <textarea
+              value={replyText}
+              onChange={(e) => onReplyChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (
+                  (e.metaKey || e.ctrlKey) &&
+                  e.key === 'Enter' &&
+                  !e.shiftKey
+                ) {
+                  e.preventDefault();
+                  onSendReply();
+                }
+              }}
+              placeholder="Reply…"
+              rows={1}
+              className="flex-1 resize-none bg-transparent border-0 outline-none font-sans text-[14.5px] text-ink placeholder:text-tag leading-snug min-h-[24px] max-h-[160px]"
+            />
+            <button
+              type="button"
+              onClick={onSendReply}
+              disabled={!canSend}
+              aria-label="Send reply"
+              title="Send reply"
+              className="p-1.5 rounded-full bg-ink text-paper hover:bg-ink-soft disabled:bg-rule disabled:text-tag disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong shrink-0"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <line x1="7" y1="11" x2="7" y2="3" />
+                <polyline points="3.5,6.5 7,3 10.5,6.5" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+function UserTurn({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[80%] rounded-card bg-paper-2 px-4 py-2.5">
+        <p className="font-sans text-[14.5px] text-ink leading-snug whitespace-pre-wrap">
+          {text}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AssistantTurn({ proposal }: { proposal: SparProposal }) {
+  const { visibleThinking, angles, followUpQuestion } = proposal;
+  return (
+    <div className="space-y-3">
+      <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
+        Thoughtbed
+      </p>
+      <p className="font-sans text-[13.5px] text-ink-soft leading-snug">
+        {visibleThinking.summary}
+      </p>
+      {angles.length > 0 && (
+        <ul className="space-y-1.5">
+          {angles.map((angle, i) => (
+            <li
+              key={`${i}-${angle.line.slice(0, 16)}`}
+              className="flex items-start gap-2.5 rounded-soft border border-rule bg-paper px-3 py-2"
+            >
+              <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
+                {String.fromCharCode(65 + i)}
+              </span>
+              <span className="font-sans text-[13.5px] text-ink leading-snug flex-1">
+                {angle.line}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {followUpQuestion && (
+        <p className="font-sans text-[14px] text-ink leading-snug pt-1">
+          {followUpQuestion}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function RefreshGlyph() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 6a4 4 0 0 1 7.2-2.4" />
+      <polyline points="9.5,2 9.5,4 7.5,4" />
+      <path d="M10 6a4 4 0 0 1-7.2 2.4" />
+      <polyline points="2.5,10 2.5,8 4.5,8" />
+    </svg>
+  );
+}
+
+function CheckGlyph() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="3,7.5 5.5,10 11,4" />
+    </svg>
   );
 }
 
