@@ -167,6 +167,54 @@ const BEATS: ReadonlyArray<Beat> = [
   },
 ];
 
+// Phase 23 v2 slice 6.1 (2026-05-07): when an assistant turn comes
+// in response to a user turn that carried a refinement key, we
+// override the linear-arc beat with a refinement-specific beat so
+// the angles + question render (instead of falling through to the
+// Done UI). Each refinement gets its own label + intro so the user
+// knows what they're looking at.
+function refinementBeat(key: RefinementKey): Beat {
+  if (key === 'sharpen_hook') {
+    return {
+      key: 'hook',
+      label: 'Sharpened hook',
+      coachIntro:
+        'Three sharper openers of your piece. Same angle, tighter line.',
+      showAngles: true,
+      anglesIntro: 'Pick the one closest to how you actually talk.',
+    };
+  }
+  if (key === 'add_takeaway') {
+    return {
+      key: 'close',
+      label: 'Takeaway',
+      coachIntro:
+        'Two candidate kicker lines. The kind a reader repeats after.',
+      showAngles: true,
+      anglesIntro: 'Pick the one that lands hardest.',
+    };
+  }
+  if (key === 'refine_stakes') {
+    return {
+      key: 'stakes',
+      label: 'Sharper stakes',
+      coachIntro:
+        'Two reframings of the stakes. Each names a specific reader behavior.',
+      showAngles: true,
+      anglesIntro: 'Pick the one closer to the truth.',
+    };
+  }
+  // add_depth
+  return {
+    key: 'tension',
+    label: 'Depth',
+    coachIntro:
+      'Notes you could pull in. Your space plus the wider web.',
+    showAngles: true,
+    anglesIntro: 'Each one is a thread worth tugging.',
+  };
+}
+
 function beatForTurnCount(userTurns: number): Beat {
   // beat 0 (Hook) = the system's first response (no user replies yet)
   // beat 1 (Tension) = after one user reply
@@ -1449,7 +1497,19 @@ function CoachView({
               if (turn.kind === 'user') {
                 return <UserTurn key={i} text={turn.text} />;
               }
-              const beat = BEATS[Math.min(assistantIndex, BEATS.length - 1)];
+              // Phase 23 v2 slice 6.1: if the prior user turn carried
+              // a refinementKey, this assistant turn is a refinement
+              // response. Use the refinement beat so angles + question
+              // render and DoneRefinements panel still shows.
+              const priorTurn = i > 0 ? turns[i - 1] : null;
+              const refinementKeyFromPrior =
+                priorTurn && priorTurn.kind === 'user'
+                  ? priorTurn.refinementKey
+                  : undefined;
+              const arcBeat = BEATS[Math.min(assistantIndex, BEATS.length - 1)];
+              const beat = refinementKeyFromPrior
+                ? refinementBeat(refinementKeyFromPrior)
+                : arcBeat;
               const isLatest = turn === lastAssistant;
               assistantIndex += 1;
               const nextTurn = turns[i + 1];
@@ -1464,6 +1524,9 @@ function CoachView({
               const carriedSourceIds = carriedIdsArr
                 ? new Set(carriedIdsArr)
                 : undefined;
+              const showRefinementsPanel = isLatest && (
+                arcBeat.key === 'done' || Boolean(refinementKeyFromPrior)
+              );
               return (
                 <AssistantTurn
                   key={i}
@@ -1480,13 +1543,14 @@ function CoachView({
                       : undefined
                   }
                   selectedRefinementLabel={
-                    isLatest && beat.key === 'done'
+                    showRefinementsPanel
                       ? selectedRefinement?.label ?? null
                       : null
                   }
                   onRefinementToggle={
-                    isLatest && beat.key === 'done' ? toggleRefinement : undefined
+                    showRefinementsPanel ? toggleRefinement : undefined
                   }
+                  showRefinementsPanel={showRefinementsPanel}
                   selectedSourceIds={isLatest ? selectedSourceIds : undefined}
                   onPickSource={isLatest ? openSourceModal : undefined}
                   carriedSourceIds={carriedSourceIds}
@@ -1596,6 +1660,7 @@ function AssistantTurn({
   onToggleAngle,
   selectedRefinementLabel,
   onRefinementToggle,
+  showRefinementsPanel,
   selectedSourceIds,
   onPickSource,
   carriedSourceIds,
@@ -1607,6 +1672,7 @@ function AssistantTurn({
   onToggleAngle?: (line: string) => void;
   selectedRefinementLabel?: string | null;
   onRefinementToggle?: (label: string, prompt: string, key: RefinementKey) => void;
+  showRefinementsPanel?: boolean;
   selectedSourceIds?: ReadonlySet<string>;
   onPickSource?: (source: AngleSource) => void;
   carriedSourceIds?: ReadonlySet<string>;
@@ -1740,7 +1806,7 @@ function AssistantTurn({
           {followUpQuestion}
         </p>
       )}
-      {isDone && onRefinementToggle && (
+      {showRefinementsPanel && onRefinementToggle && (
         <DoneRefinements
           selectedLabel={selectedRefinementLabel ?? null}
           onToggle={onRefinementToggle}
