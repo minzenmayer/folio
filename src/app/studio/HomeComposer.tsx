@@ -490,7 +490,10 @@ export function HomeComposer() {
     // it through commitSend. If it IS present, runCoachReply
     // should branch to runRefinement.
     if (typeof window !== 'undefined') {
-      console.log('[Thoughtbed] sendCoachReply meta:', meta);
+      console.log(
+        '[Thoughtbed] sendCoachReply meta JSON:',
+        JSON.stringify(meta ?? {}, null, 2)
+      );
     }
     const reply = replyText.trim();
     if (!reply || coachTurns.length === 0) return;
@@ -1457,6 +1460,12 @@ function CoachView({
   // the typed reply (any combination, in that priority order). Then
   // it clears the selections so they do not stick to the next turn.
   function commitSend() {
+    if (typeof window !== 'undefined') {
+      console.log(
+        '[Thoughtbed] commitSend selectedRefinement JSON:',
+        JSON.stringify(selectedRefinement ?? null)
+      );
+    }
     const parts: string[] = [];
     if (selectedAngleLineInLatest) {
       parts.push(`I will go with: ${selectedAngleLineInLatest}`);
