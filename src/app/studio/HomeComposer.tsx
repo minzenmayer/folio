@@ -452,6 +452,12 @@ export function HomeComposer() {
       platformGuess === 'linkedin' || platformGuess === 'newsletter'
         ? platformGuess
         : undefined;
+    if (typeof window !== 'undefined') {
+      console.log(
+        '[Thoughtbed] runCoachReply branch:',
+        refinementKey ? `runRefinement(${refinementKey})` : 'proposeFromTopic'
+      );
+    }
     startProposeTransition(async () => {
       try {
         const args = {
@@ -479,6 +485,13 @@ export function HomeComposer() {
     carriedSourceIds?: ReadonlyArray<string>;
     refinementKey?: RefinementKey;
   }) {
+    // Phase 23 v2 slice 6.4 (2026-05-07): instrumentation. If
+    // refinementKey is undefined here, the chip click never made
+    // it through commitSend. If it IS present, runCoachReply
+    // should branch to runRefinement.
+    if (typeof window !== 'undefined') {
+      console.log('[Thoughtbed] sendCoachReply meta:', meta);
+    }
     const reply = replyText.trim();
     if (!reply || coachTurns.length === 0) return;
     const lastAssistant = [...coachTurns]
@@ -1519,7 +1532,13 @@ function CoachView({
             let assistantIndex = 0;
             return turns.map((turn, i) => {
               if (turn.kind === 'user') {
-                return <UserTurn key={i} text={turn.text} />;
+                return (
+                  <UserTurn
+                    key={i}
+                    text={turn.text}
+                    refinementKey={turn.refinementKey}
+                  />
+                );
               }
               // Phase 23 v2 slice 6.1: if the prior user turn carried
               // a refinementKey, this assistant turn is a refinement
@@ -1672,9 +1691,31 @@ function CoachView({
   );
 }
 
-function UserTurn({ text }: { text: string }) {
+function UserTurn({
+  text,
+  refinementKey,
+}: {
+  text: string;
+  refinementKey?: RefinementKey;
+}) {
+  // Phase 23 v2 slice 6.4 (2026-05-07): when the user sent with a
+  // refinement chip selected, render a small badge above the
+  // bubble so they can SEE the system caught it. If this badge
+  // does not appear after clicking a chip + Enter, the chip
+  // selection never reached the send path.
+  const refinementLabel: Record<RefinementKey, string> = {
+    sharpen_hook: 'Sharpen hook',
+    add_takeaway: 'Takeaway',
+    refine_stakes: 'Sharpen stakes',
+    add_depth: 'Depth + research',
+  };
   return (
-    <div className="flex justify-end">
+    <div className="flex flex-col items-end gap-1">
+      {refinementKey && (
+        <span className="font-mono text-[10px] tracking-[0.18em] uppercase rounded-full border border-emerald-300 bg-emerald-50 text-emerald-700 px-2 py-0.5">
+          ▸ {refinementLabel[refinementKey]}
+        </span>
+      )}
       <div className="max-w-[80%] rounded-card bg-emerald-50 border border-emerald-100 px-4 py-2.5">
         <p className="font-sans text-[14.5px] text-emerald-900 leading-snug whitespace-pre-wrap">
           {text}
