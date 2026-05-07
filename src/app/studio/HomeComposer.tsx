@@ -99,6 +99,11 @@ type Beat = {
   coachIntro: string;
   showAngles: boolean;
   anglesIntro?: string;
+  // Phase 23 v2 slice 5.0 (2026-05-06): Tension and Stakes get a
+  // teaching sub-hint that lives below the LLM's follow-up question.
+  // The hint guides the user toward where to find the answer
+  // (Grammarly inline-coach pattern).
+  subHint?: string;
 };
 
 // Phase 23 v2 slice 4.8 (2026-05-06): one-line beat intros, no
@@ -117,12 +122,16 @@ const BEATS: ReadonlyArray<Beat> = [
     label: 'Tension',
     coachIntro: 'The spine. What is the question pulling against itself?',
     showAngles: false,
+    subHint:
+      'Look for the friction inside your own take. Where do you almost contradict yourself? That is usually the spine.',
   },
   {
     key: 'stakes',
     label: 'Stakes',
     coachIntro: 'What shifts if they read this? Be specific.',
     showAngles: false,
+    subHint:
+      'Stakes live in time and consequence. What does your reader keep doing if they miss this, and what do they get back if they catch it?',
   },
   {
     key: 'close',
@@ -1168,9 +1177,19 @@ function CoachView({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [replyText]);
 
-  function fillReplyWithAngle(angle: ProposeAngle) {
-    onReplyChange(`I'll go with: ${angle.line}`);
-    replyRef.current?.focus();
+  // Phase 23 v2 slice 5.0: selection of an angle in the latest
+  // assistant turn highlights it green. Travels with the next
+  // reply submission via the renderTranscript helper.
+  const [selectedAngleLineInLatest, setSelectedAngleLineInLatest] =
+    useState<string | null>(null);
+
+  // Phase 23 v2 slice 5.0 (2026-05-06): clicking an angle in the
+  // coach view now toggles a green highlight on the angle (single
+  // select) instead of auto-populating the reply textarea. The
+  // textarea stays for the user's own thoughts; the selection
+  // travels with the next reply via the conversation transcript.
+  function toggleSelectedAngleLine(line: string) {
+    setSelectedAngleLineInLatest((prev) => (prev === line ? null : line));
   }
 
   // Round = how many user turns the user has sent. Round 1 = the
@@ -1185,8 +1204,21 @@ function CoachView({
     .find((t): t is { kind: 'assistant'; proposal: SparProposal } =>
       t.kind === 'assistant'
     );
+
+  // Phase 23 v2 slice 5.0 (2026-05-06): refinement chip click
+  // fires a normal coach reply on the user's behalf, just with a
+  // structured prompt. The reply input remains for the user's own
+  // additions; the chip is a shortcut to a specific refinement.
+  function pickRefinement(prompt: string) {
+    onReplyChange(prompt);
+    // Defer the send a tick so the state update lands first.
+    setTimeout(() => onSendReply(), 0);
+  }
+
   const canSend =
-    !isProposing && !isCommitting && replyText.trim().length >= 1;
+    !isProposing &&
+    !isCommitting &&
+    (replyText.trim().length >= 1 || selectedAngleLineInLatest !== null);
   const canOpen = !isCommitting && lastAssistant !== undefined;
   return (
     <div className="min-h-[calc(100vh-0px)] flex flex-col">
@@ -1213,10 +1245,6 @@ function CoachView({
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-6 py-8 space-y-6">
           {(() => {
-            // Each assistant turn renders with the beat metadata that
-            // matches its position in the arc. Assistant index 0 = Hook
-            // (the response to the topic). Index 1 = Tension (response
-            // to first reply). Etc. Clamped at Done.
             let assistantIndex = 0;
             return turns.map((turn, i) => {
               if (turn.kind === 'user') {
@@ -1230,8 +1258,18 @@ function CoachView({
                   key={i}
                   proposal={turn.proposal}
                   beat={beat}
-                  onPickAngle={
-                    isLatest && beat.showAngles ? fillReplyWithAngle : undefined
+                  selectedAngleLine={
+                    isLatest && beat.showAngles
+                      ? selectedAngleLineInLatest
+                      : null
+                  }
+                  onToggleAngle={
+                    isLatest && beat.showAngles
+                      ? toggleSelectedAngleLine
+                      : undefined
+                  }
+                  onRefinementPick={
+                    isLatest && beat.key === 'done' ? pickRefinement : undefined
                   }
                 />
               );
@@ -1273,6 +1311,14 @@ function CoachView({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
+                  if (selectedAngleLineInLatest) {
+                    onReplyChange(
+                      `I will go with: ${selectedAngleLineInLatest}\n\n${replyText.trim()}`
+                    );
+                    setSelectedAngleLineInLatest(null);
+                    setTimeout(() => onSendReply(), 0);
+                    return;
+                  }
                   onSendReply();
                 }
               }}
@@ -1282,7 +1328,17 @@ function CoachView({
             />
             <button
               type="button"
-              onClick={onSendReply}
+              onClick={() => {
+                if (selectedAngleLineInLatest) {
+                  onReplyChange(
+                    `I will go with: ${selectedAngleLineInLatest}\n\n${replyText.trim()}`
+                  );
+                  setSelectedAngleLineInLatest(null);
+                  setTimeout(() => onSendReply(), 0);
+                  return;
+                }
+                onSendReply();
+              }}
               disabled={!canSend}
               aria-label="Send reply"
               title="Send reply"
@@ -1325,11 +1381,15 @@ function UserTurn({ text }: { text: string }) {
 function AssistantTurn({
   proposal,
   beat,
-  onPickAngle,
+  selectedAngleLine,
+  onToggleAngle,
+  onRefinementPick,
 }: {
   proposal: SparProposal;
   beat?: Beat;
-  onPickAngle?: (angle: ProposeAngle) => void;
+  selectedAngleLine?: string | null;
+  onToggleAngle?: (line: string) => void;
+  onRefinementPick?: (refinement: string) => void;
 }) {
   const { visibleThinking, angles, followUpQuestion } = proposal;
   // Break the summary into sentences so a wall of LLM prose reads as
@@ -1340,7 +1400,7 @@ function AssistantTurn({
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   const summaryParas = sentences.length > 0 ? sentences : [visibleThinking.summary];
-  const interactive = typeof onPickAngle === 'function';
+  const interactive = typeof onToggleAngle === 'function';
   // Phase 23 v2 slice 4.7 (2026-05-06): the beat carries the craft
   // intro that gets surfaced above the LLM output. When the beat
   // says showAngles is false (Tension, Stakes, Done), the angles
@@ -1348,6 +1408,7 @@ function AssistantTurn({
   // The craft intro becomes the primary text; the LLM follow-up
   // question is the action prompt.
   const showAngles = beat ? beat.showAngles : true;
+  const isDone = beat?.key === 'done';
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -1373,7 +1434,9 @@ function AssistantTurn({
           ))}
         </div>
       )}
-      <SpaceStrip sources={angles.flatMap((a) => a.sources)} />
+      {!isDone && (
+        <SpaceStrip sources={angles.flatMap((a) => a.sources)} />
+      )}
       {showAngles && angles.length > 0 && (
         <div>
           <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
@@ -1401,13 +1464,19 @@ function AssistantTurn({
                   )}
                 </div>
               );
+              const selected = selectedAngleLine === angle.line;
               return (
                 <li key={`${i}-${angle.line.slice(0, 16)}`}>
                   {interactive ? (
                     <button
                       type="button"
-                      onClick={() => onPickAngle?.(angle)}
-                      className="w-full text-left rounded-soft border border-rule bg-paper hover:bg-paper-2 hover:border-rule-strong px-3 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+                      onClick={() => onToggleAngle?.(angle.line)}
+                      aria-pressed={selected}
+                      className={`w-full text-left rounded-soft border px-3 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
+                        selected
+                          ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100'
+                          : 'bg-paper border-rule hover:bg-paper-2 hover:border-rule-strong'
+                      }`}
                     >
                       {inner}
                     </button>
@@ -1422,11 +1491,75 @@ function AssistantTurn({
           </ul>
         </div>
       )}
-      {followUpQuestion && (
+      {followUpQuestion && !isDone && (
         <p className="font-sans text-[15px] text-ink font-medium leading-snug pt-1">
           {followUpQuestion}
         </p>
       )}
+      {beat?.subHint && (
+        <p className="font-sans text-[12.5px] text-tag leading-snug">
+          {beat.subHint}
+        </p>
+      )}
+      {isDone && onRefinementPick && (
+        <DoneRefinements onPick={onRefinementPick} />
+      )}
+    </div>
+  );
+}
+
+// Phase 23 v2 slice 5.0 (2026-05-06): on the Done beat the user
+// already has enough to draft. Surface refinement options as
+// optional next steps before they click Open the editor — each
+// chip fires a focused round on that aspect of the piece. The
+// 'From your space' strip retires here; it does not match the
+// shape of this moment.
+function DoneRefinements({
+  onPick,
+}: {
+  onPick: (refinement: string) => void;
+}) {
+  const options: ReadonlyArray<{ label: string; prompt: string }> = [
+    {
+      label: 'Sharpen the hook',
+      prompt: 'Sharpen the hook. Tighten the opener so it lands harder.',
+    },
+    {
+      label: 'Add a key takeaway',
+      prompt:
+        'Add a key takeaway. What is the one line a reader should walk away repeating to themselves?',
+    },
+    {
+      label: 'Refine why this matters',
+      prompt:
+        'Refine why this matters. Make the stakes specific to the reader, not generic.',
+    },
+    {
+      label: 'Add depth and research',
+      prompt:
+        'Add depth. Pull in more from my space — relevant evidence, lines I have already written, examples.',
+    },
+  ];
+  return (
+    <div className="space-y-3 border-t border-rule pt-4">
+      <p className="font-sans text-[14.5px] text-ink leading-snug">
+        Want to keep refining before you open the editor?
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((opt) => (
+          <button
+            key={opt.label}
+            type="button"
+            onClick={() => onPick(opt.prompt)}
+            className="font-sans text-[12.5px] text-ink rounded-full border border-rule bg-paper px-3 py-1.5 hover:bg-paper-2 hover:border-rule-strong transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="font-sans text-[13px] text-tag leading-snug">
+        Or tell me what else you would add — what makes this distinctly yours?
+      </p>
     </div>
   );
 }
@@ -1613,6 +1746,22 @@ function BeatIcon({ beat }: { beat: Beat }) {
 type SourcePillTone = 'default' | 'selected';
 type AngleSource = ProposeAngle['sources'][number];
 
+// Phase 23 v2 slice 5.0 (2026-05-06): per-kind tint for source
+// pills. Lets the eye scan source kinds at a glance without
+// reading the words. Selected pills override to emerald (matches
+// the Writing-path selection color used elsewhere in the chat).
+function kindColorClasses(short: string, selected: boolean): string {
+  if (selected) {
+    return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+  }
+  if (short === 'garden') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (short === 'CSL') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (short === 'LinkedIn') return 'bg-sky-50 text-sky-700 border-sky-200';
+  if (short === 'vault') return 'bg-violet-50 text-violet-700 border-violet-200';
+  if (short === 'inbox') return 'bg-rose-50 text-rose-700 border-rose-200';
+  return 'text-tag bg-paper-2 border-rule';
+}
+
 function shortenSourceLabel(raw: string): string {
   const lower = raw.toLowerCase();
   if (lower.includes('garden')) return 'garden';
@@ -1640,30 +1789,24 @@ function SourcePills({
       unique.push(short);
     }
   }
-  const visible = unique.slice(0, 2);
-  const overflow = unique.length - visible.length;
-  const cls =
-    tone === 'selected'
-      ? 'text-emerald-700 bg-emerald-100 border-emerald-200'
-      : 'text-tag bg-paper-2 border-rule';
+  // Phase 23 v2 slice 5.0 (2026-05-06): per-kind colors, no +N
+  // overflow. The strip is descriptive — the user does not click
+  // these pills (they live under angle cards, not in the
+  // SpaceStrip). Three kinds covers most angles.
+  const visible = unique.slice(0, 3);
   return (
     <div className="flex flex-wrap gap-1.5">
       {visible.map((label) => (
         <span
           key={label}
-          className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${cls}`}
+          className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${kindColorClasses(
+            label,
+            tone === 'selected'
+          )}`}
         >
           {label}
         </span>
       ))}
-      {overflow > 0 && (
-        <span
-          className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${cls}`}
-          aria-label={`${overflow} more source${overflow === 1 ? '' : 's'}`}
-        >
-          +{overflow}
-        </span>
-      )}
     </div>
   );
 }
@@ -1685,31 +1828,34 @@ function SpaceStrip({ sources }: { sources: ReadonlyArray<AngleSource> }) {
     }
   }
   if (unique.length === 0) return null;
+  // Phase 23 v2 slice 5.0 (2026-05-06): four max, no +N (the
+  // overflow indicator was uninformative — users could not click
+  // it). Per-kind color on each pill so the strip reads kinds at
+  // a glance: garden green, CSL amber, LinkedIn sky, vault violet,
+  // inbox rose. Pills wider so titles read fully (most do).
   const visible = unique.slice(0, 4);
-  const overflow = unique.length - visible.length;
   return (
     <div className="space-y-1.5">
       <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
         From your space
       </p>
       <div className="flex flex-wrap gap-1.5">
-        {visible.map((s) => (
-          <span
-            key={s.id}
-            title={s.title ?? undefined}
-            className="flex items-center gap-1.5 max-w-[240px] rounded-full bg-paper-2 border border-rule px-2.5 py-1"
-          >
-            <KindGlyph kind={s.kind} />
-            <span className="font-sans text-[12px] text-ink leading-none truncate">
-              {s.title || 'Untitled'}
+        {visible.map((s) => {
+          const short = shortenSourceLabel(s.label);
+          const cls = kindColorClasses(short, false);
+          return (
+            <span
+              key={s.id}
+              title={s.title ?? undefined}
+              className={`flex items-start gap-1.5 max-w-[320px] rounded-full border px-2.5 py-1 ${cls}`}
+            >
+              <KindGlyph kind={s.kind} />
+              <span className="font-sans text-[12px] leading-snug line-clamp-2">
+                {s.title || 'Untitled'}
+              </span>
             </span>
-          </span>
-        ))}
-        {overflow > 0 && (
-          <span className="flex items-center font-mono text-[10px] text-tag bg-paper-2 border border-rule rounded-full px-2 py-0.5">
-            +{overflow}
-          </span>
-        )}
+          );
+        })}
       </div>
     </div>
   );
