@@ -2440,7 +2440,18 @@ export type GetSourceDetailResult =
       ok: true;
       kind: SimilarKind;
       title: string;
+      // One-line essence — drawn from the source's summary field
+      // when available (Garden ideas have an essence column;
+      // newsletter issues have a subtitle). Optional.
+      summary?: string | null;
+      // Body paragraph(s) for the modal. May contain multiple
+      // sentences/paragraphs separated by \n\n.
       excerpt: string;
+      // Categorical metadata for ideas — surfaced as chips at the
+      // foot of the modal so the user sees what bucket this lives
+      // in. Empty array for kinds without these fields.
+      themes?: string[];
+      tags?: string[];
       url: string | null;
       isExternal: boolean;
     }
@@ -2516,6 +2527,8 @@ export async function getSourceDetail(
           title: ideas.title,
           essence: ideas.essence,
           body: ideas.body,
+          themes: ideas.themes,
+          tags: ideas.tags,
         })
         .from(ideas)
         .where(and(eq(ideas.id, id), eq(ideas.userId, user.id)))
@@ -2523,12 +2536,15 @@ export async function getSourceDetail(
       if (!row) {
         return { ok: false, reason: 'not_found', message: 'Source not found.' };
       }
-      const excerpt = truncateForExcerpt(row.essence ?? row.body ?? '');
+      const excerpt = truncateForExcerpt(row.body ?? row.essence ?? '');
       return {
         ok: true,
         kind,
         title: row.title,
+        summary: row.essence,
         excerpt,
+        themes: row.themes ?? [],
+        tags: row.tags ?? [],
         url: `/studio/ideas/${id}`,
         isExternal: false,
       };
@@ -2552,13 +2568,12 @@ export async function getSourceDetail(
       if (!row) {
         return { ok: false, reason: 'not_found', message: 'Source not found.' };
       }
-      const excerpt = truncateForExcerpt(
-        row.subtitle ?? row.bodyText ?? ''
-      );
+      const excerpt = truncateForExcerpt(row.bodyText ?? row.subtitle ?? '');
       return {
         ok: true,
         kind,
         title: row.title,
+        summary: row.subtitle,
         excerpt,
         url: row.webUrl ?? '/studio/insights?tab=beehiiv',
         isExternal: row.webUrl !== null,

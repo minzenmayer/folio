@@ -2233,12 +2233,14 @@ function SpaceStrip({
               onClick={interactive ? () => onPick?.(s) : undefined}
               title={s.title ?? undefined}
               aria-pressed={interactive ? isSelected : undefined}
-              className={`flex items-start gap-1.5 max-w-[320px] rounded-full border px-2.5 py-1 transition-colors text-left ${cls} ${
+              className={`flex items-center gap-2 max-w-[340px] rounded-2xl border px-3 py-1.5 transition-colors text-left ${cls} ${
                 interactive ? 'hover:border-rule-strong cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong' : ''
               }`}
             >
-              <KindGlyph kind={s.kind} />
-              <span className="font-sans text-[12px] leading-snug line-clamp-2">
+              <span className="shrink-0 self-start mt-0.5">
+                <KindGlyph kind={s.kind} />
+              </span>
+              <span className="font-sans text-[12px] leading-[1.45] line-clamp-2">
                 {s.title || 'Untitled'}
               </span>
             </Tag>
@@ -2427,7 +2429,7 @@ function SourceDetailModal({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
           <h2 className="font-sans text-[18px] font-semibold text-ink leading-snug">
             {headerTitle}
           </h2>
@@ -2443,9 +2445,68 @@ function SourceDetailModal({
             </p>
           )}
           {detail && !loading && (
-            <p className="font-sans text-[14px] text-ink-soft leading-relaxed whitespace-pre-wrap">
-              {detail.excerpt || 'No excerpt available for this source.'}
-            </p>
+            <>
+              {detail.summary && (
+                <div className="space-y-1">
+                  <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
+                    Summary
+                  </p>
+                  <p className="font-sans text-[14px] text-ink leading-relaxed">
+                    {detail.summary}
+                  </p>
+                </div>
+              )}
+              {detail.excerpt && (
+                <div className="space-y-1">
+                  <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
+                    {detail.summary ? 'Body' : 'Excerpt'}
+                  </p>
+                  <div className="space-y-2">
+                    {detail.excerpt
+                      .split(/\n\s*\n/)
+                      .map((para, i) => (
+                        <p
+                          key={i}
+                          className="font-sans text-[14px] text-ink-soft leading-relaxed whitespace-pre-wrap"
+                        >
+                          {para}
+                        </p>
+                      ))}
+                  </div>
+                </div>
+              )}
+              {((detail.themes && detail.themes.length > 0) ||
+                (detail.tags && detail.tags.length > 0)) && (
+                <div className="space-y-1.5">
+                  <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
+                    Themes &amp; tags
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(detail.themes ?? []).map((t) => (
+                      <span
+                        key={`theme-${t}`}
+                        className="font-mono text-[10px] rounded-full border border-violet-200 bg-violet-50 text-violet-700 px-2 py-0.5"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                    {(detail.tags ?? []).map((t) => (
+                      <span
+                        key={`tag-${t}`}
+                        className="font-mono text-[10px] rounded-full border border-rule bg-paper-2 text-tag px-2 py-0.5"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!detail.summary && !detail.excerpt && (
+                <p className="font-sans text-[14px] text-tag leading-snug">
+                  No excerpt available for this source.
+                </p>
+              )}
+            </>
           )}
         </div>
 
