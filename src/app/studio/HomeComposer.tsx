@@ -480,22 +480,19 @@ export function HomeComposer() {
     });
   }
 
-  function sendCoachReply(meta?: {
+  function sendCoachReply(meta: {
+    text: string;
     carriedAngleLine?: string;
     carriedSourceIds?: ReadonlyArray<string>;
     refinementKey?: RefinementKey;
   }) {
-    // Phase 23 v2 slice 6.4 (2026-05-07): instrumentation. If
-    // refinementKey is undefined here, the chip click never made
-    // it through commitSend. If it IS present, runCoachReply
-    // should branch to runRefinement.
     if (typeof window !== 'undefined') {
       console.log(
         '[Thoughtbed] sendCoachReply meta JSON:',
-        JSON.stringify(meta ?? {}, null, 2)
+        JSON.stringify(meta, null, 2)
       );
     }
-    const reply = replyText.trim();
+    const reply = meta.text.trim();
     if (!reply || coachTurns.length === 0) return;
     const lastAssistant = [...coachTurns]
       .reverse()
@@ -1350,7 +1347,8 @@ function CoachView({
   isProposing: boolean;
   isCommitting: boolean;
   onReplyChange: (text: string) => void;
-  onSendReply: (meta?: {
+  onSendReply: (meta: {
+    text: string;
     carriedAngleLine?: string;
     carriedSourceIds?: ReadonlyArray<string>;
     refinementKey?: RefinementKey;
@@ -1486,22 +1484,31 @@ function CoachView({
     const typed = replyText.trim();
     if (typed) parts.push(typed);
     if (parts.length === 0) return;
-    const carriedAngle = selectedAngleLineInLatest;
-    const carriedIds = Array.from(selectedSourceIds);
-    const refinementKey = selectedRefinement?.key;
-    onReplyChange(parts.join('\n\n'));
+    // Phase 23 v2 slice 6.7 (2026-05-07): pass the composed message
+    // text directly through meta.text instead of going through
+    // onReplyChange + setTimeout. The previous approach hit a
+    // stale-closure bug: the setTimeout captured the parent's
+    // sendCoachReply with its OLD replyText value, so when only a
+    // chip was selected (textarea empty), sendCoachReply early-
+    // returned on the empty-reply guard and never fired the LLM.
+    const message = parts.join('\n\n');
+    const meta = {
+      text: message,
+      ...(selectedAngleLineInLatest
+        ? { carriedAngleLine: selectedAngleLineInLatest }
+        : {}),
+      ...(selectedSourceIds.size > 0
+        ? { carriedSourceIds: Array.from(selectedSourceIds) }
+        : {}),
+      ...(selectedRefinement?.key
+        ? { refinementKey: selectedRefinement.key }
+        : {}),
+    };
+    onReplyChange('');
     setSelectedAngleLineInLatest(null);
     setSelectedRefinement(null);
     setSelectedSourceIds(new Set());
-    setTimeout(
-      () =>
-        onSendReply({
-          ...(carriedAngle ? { carriedAngleLine: carriedAngle } : {}),
-          ...(carriedIds.length > 0 ? { carriedSourceIds: carriedIds } : {}),
-          ...(refinementKey ? { refinementKey } : {}),
-        }),
-      0
-    );
+    onSendReply(meta);
   }
 
   const canSend =
