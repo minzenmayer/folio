@@ -2701,3 +2701,176 @@ export async function getSourceDetail(
     };
   }
 }
+
+// ─── runRefinement — Phase 23 v2 slice 6 ─────────────────────────────
+//
+// Refinement-specific server action. Same return shape as
+// proposeFromTopic so the client UI does not change — the LLM just
+// produces refinement-shaped angles instead of generic angles.
+//
+// For 'add_depth' specifically, also fires Exa neural search for
+// external research (graceful fallback when EXA_API_KEY is not set).
+
+import {
+  generateRefinement as llmGenerateRefinement,
+  type RefinementKind,
+} from '@/lib/llm';
+import { exaSearch, isExaConfigured } from '@/lib/exa';
+
+const runRefinementSchema = z.object({
+  refinement: z.enum([
+    'sharpen_hook',
+    'add_takeaway',
+    'refine_stakes',
+    'add_depth',
+  ]),
+  topic: z.string().min(1).max(2000),
+  conversationSoFar: z.string().max(8000).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+});
+
+export type RunRefinementResult = ProposeFromTopicResult;
+
+export async function runRefinement(
+  input: unknown
+): Promise<RunRefinementResult> {
+  let parsed: z.infer<typeof runRefinementSchema>;
+  try {
+    parsed = runRefinementSchema.parse(input);
+  } catch {
+    return {
+      ok: false,
+      reason: 'too_short',
+      message: 'Need a topic for refinement.',
+    };
+  }
+
+  const user = await requireUser();
+
+  // Shared retrieval — same shape as proposeFromTopic so the LLM sees
+  // the same voice + knowledge buckets it already knows how to read.
+  let hits: SimilarHit[] = [];
+  try {
+    hits = await findSimilar({
+      text: parsed.topic,
+      kinds: [...SIMILAR_KINDS],
+      limit: 12,
+    });
+  } catch (err) {
+    console.warn('[runRefinement] findSimilar failed', err);
+    hits = [];
+  }
+
+  const retrievalItems: ProposalRetrievalItem[] = hits.map((h, i) => ({
+    index: i + 1,
+    bucket: bucket({ kind: h.kind, sourceKind: h.sourceKind ?? null }),
+    label: labelForHit(h),
+    title: h.title,
+    body: bodyForHit(h),
+  }));
+
+  // For 'add_depth' specifically: extend retrieval with Exa neural
+  // search results (when configured). External hits get a synthetic
+  // 'knowledge' bucket since they read like things-the-user-reads,
+  // not voice samples.
+  if (parsed.refinement === 'add_depth' && isExaConfigured()) {
+    try {
+      const externalHits = await exaSearch(parsed.topic, 5);
+      let nextIndex = retrievalItems.length + 1;
+      for (const r of externalHits) {
+        retrievalItems.push({
+          index: nextIndex,
+          bucket: 'knowledge',
+          label: 'external',
+          title: r.title,
+          body: r.content,
+        });
+        nextIndex += 1;
+      }
+    } catch (err) {
+      console.warn('[runRefinement] exa failed', err);
+    }
+  }
+
+  let voiceProfile: Awaited<ReturnType<typeof getVoiceProfile>> = {};
+  try {
+    voiceProfile = await getVoiceProfile(user.id);
+  } catch (err) {
+    console.warn('[runRefinement] getVoiceProfile failed', err);
+    voiceProfile = {};
+  }
+
+  try {
+    const result = await llmGenerateRefinement({
+      refinement: parsed.refinement as RefinementKind,
+      topic: parsed.topic,
+      conversationSoFar: parsed.conversationSoFar,
+      platformHint: parsed.platformHint,
+      voiceProfile,
+      retrieval: retrievalItems,
+    });
+
+    // Map the LLM's sourceCitations back to source rows so the client
+    // pills can show titles + ids. Mirror proposeFromTopic's pattern.
+    const angles: ProposeAngle[] = result.angles.map((a) => {
+      const sources = (a.sourceCitations ?? [])
+        .map((idx) => {
+          const item = retrievalItems[idx - 1];
+          const hit = hits[idx - 1];
+          if (!item) return null;
+          // External (Exa) hits don't have a SimilarHit backing.
+          // Surface them as a synthetic source with a stable id derived
+          // from the index so the client renders a chip.
+          if (!hit && item.label === 'external') {
+            return {
+              index: idx,
+              kind: 'gmail_message' as SimilarKind,
+              bucket: item.bucket,
+              label: 'external',
+              title: item.title,
+              id: `external:${idx}`,
+            };
+          }
+          if (!hit) return null;
+          return {
+            index: idx,
+            kind: hit.kind,
+            bucket: item.bucket,
+            label: item.label,
+            title: hit.title,
+            id: hit.id,
+          };
+        })
+        .filter((s): s is NonNullable<typeof s> => s !== null);
+      return { line: a.line, sources };
+    });
+
+    return {
+      ok: true,
+      topic: parsed.topic,
+      platformGuess: result.platformGuess,
+      visibleThinking: {
+        lines: [],
+        summary: result.retrievalSummary,
+        kindCounts: {
+          ideas: hits.filter((h) => h.kind === 'extracted_idea').length,
+          cslIssues: hits.filter((h) => h.kind === 'newsletter_issue').length,
+          linkedin: hits.filter((h) => h.kind === 'linkedin_post').length,
+          vault: hits.filter((h) => h.kind === 'obsidian_note').length,
+          gmail: hits.filter((h) => h.kind === 'gmail_message').length,
+        },
+      },
+      angles,
+      hook: result.hook,
+      outline: result.outline,
+      followUpQuestion: result.followUpQuestion,
+      retrievalCount: retrievalItems.length,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'unknown',
+    };
+  }
+}
