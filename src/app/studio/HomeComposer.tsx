@@ -100,44 +100,40 @@ type Beat = {
   anglesIntro?: string;
 };
 
+// Phase 23 v2 slice 4.8 (2026-05-06): one-line beat intros, no
+// writer-credit copy. Each beat has a matching icon (rendered by
+// BeatIcon) so the eye anchors before the words.
 const BEATS: ReadonlyArray<Beat> = [
   {
     key: 'hook',
     label: 'Hook',
-    coachIntro:
-      "McPhee's rule was write the lead first, polish it, let it tell you the rest of the structure. So that's where we start. The hook is the smallest concrete moment that makes a stranger lean in.",
+    coachIntro: 'The smallest moment that makes a stranger lean in.',
     showAngles: true,
-    anglesIntro:
-      'Three places this could open. React to one, or tell me where you would start.',
+    anglesIntro: 'Three openers. React to one, or tell me yours.',
   },
   {
     key: 'tension',
     label: 'Tension',
-    coachIntro:
-      "Now the spine. Every piece worth reading has one question pulling against itself the whole way through. Saunders calls it escalation: each beat raises the stakes of the question. What is the question this piece refuses to let go of?",
+    coachIntro: 'The spine. What is the question pulling against itself?',
     showAngles: false,
   },
   {
     key: 'stakes',
     label: 'Stakes',
-    coachIntro:
-      "If a reader can put this down without something shifting in them, you do not have a piece yet. What is the cost of not reading? Be specific. Generic stakes do not move people.",
+    coachIntro: 'What shifts if they read this? Be specific.',
     showAngles: false,
   },
   {
     key: 'close',
     label: 'Close',
-    coachIntro:
-      'The kicker. Not a summary. The line a reader remembers on the drive home. How should this land?',
+    coachIntro: 'The line they remember after.',
     showAngles: true,
-    anglesIntro:
-      'Three shapes for the close. React to one, or tell me how you would land it.',
+    anglesIntro: 'Three closer-shapes. React to one, or tell me yours.',
   },
   {
     key: 'done',
-    label: 'Ready to draft',
-    coachIntro:
-      'Enough to draft. Open the editor and see how it sits on the page. You can keep refining there.',
+    label: 'Ready',
+    coachIntro: 'Enough to draft. Open the editor.',
     showAngles: false,
   },
 ];
@@ -1032,22 +1028,10 @@ function ThreadView({
                           </span>
                         )}
                       </div>
-                      {angle.sources.length > 0 && (
-                        <div className="mt-2 ml-7 flex flex-wrap gap-1.5">
-                          {angle.sources.map((s) => (
-                            <span
-                              key={`${s.kind}-${s.id}`}
-                              className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${
-                                selected
-                                  ? 'text-emerald-700 bg-emerald-100 border-emerald-200'
-                                  : 'text-tag bg-paper-2 border-rule'
-                              }`}
-                            >
-                              {s.label}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <SourcePills
+                        sources={angle.sources}
+                        tone={selected ? 'selected' : 'default'}
+                      />
                     </button>
                   </li>
                 );
@@ -1364,11 +1348,14 @@ function AssistantTurn({
   const showAngles = beat ? beat.showAngles : true;
   return (
     <div className="space-y-4">
-      <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
-        Thoughtbed{beat ? ` · ${beat.label}` : ''}
-      </p>
+      <div className="flex items-center gap-2">
+        {beat && <BeatIcon beat={beat} />}
+        <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
+          {beat ? beat.label : 'Thoughtbed'}
+        </p>
+      </div>
       {beat && (
-        <p className="font-sans text-[14.5px] text-ink leading-relaxed">
+        <p className="font-sans text-[14px] text-ink leading-snug">
           {beat.coachIntro}
         </p>
       )}
@@ -1395,13 +1382,20 @@ function AssistantTurn({
           <ul className="space-y-1.5">
             {angles.map((angle, i) => {
               const inner = (
-                <div className="flex items-start gap-2.5">
-                  <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
-                    {String.fromCharCode(65 + i)}
-                  </span>
-                  <span className="font-sans text-[13.5px] text-ink leading-snug flex-1">
-                    {angle.line}
-                  </span>
+                <div className="space-y-1.5">
+                  <div className="flex items-start gap-2.5">
+                    <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
+                      {String.fromCharCode(65 + i)}
+                    </span>
+                    <span className="font-sans text-[13.5px] text-ink leading-snug flex-1">
+                      {angle.line}
+                    </span>
+                  </div>
+                  {angle.sources.length > 0 && (
+                    <div className="ml-6">
+                      <SourcePills sources={angle.sources} tone="default" />
+                    </div>
+                  )}
                 </div>
               );
               return (
@@ -1550,6 +1544,123 @@ function BeatProgress({
       <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
         {current.label}
       </span>
+    </div>
+  );
+}
+
+
+// Phase 23 v2 slice 4.8 (2026-05-06): per-beat anchor icon.
+function BeatIcon({ beat }: { beat: Beat }) {
+  const svgProps = {
+    width: 14,
+    height: 14,
+    viewBox: '0 0 14 14',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+    className: 'text-ink-soft shrink-0',
+  };
+  if (beat.key === 'hook') {
+    return (
+      <svg {...svgProps}>
+        <line x1="3.2" y1="10.8" x2="10.5" y2="3.5" />
+        <polyline points="6.5,3.5 10.5,3.5 10.5,7.5" />
+      </svg>
+    );
+  }
+  if (beat.key === 'tension') {
+    return (
+      <svg {...svgProps}>
+        <polyline points="2,7 5,4 7,8 9,4 12,7" />
+      </svg>
+    );
+  }
+  if (beat.key === 'stakes') {
+    return (
+      <svg {...svgProps}>
+        <path d="M7 2c0 2 2.5 3 2.5 5.5A2.5 2.5 0 0 1 7 10a2.5 2.5 0 0 1-2.5-2.5C4.5 5.5 5.5 4 7 2Z" />
+        <path d="M5.5 11.5h3" />
+      </svg>
+    );
+  }
+  if (beat.key === 'close') {
+    return (
+      <svg {...svgProps}>
+        <circle cx="7" cy="7" r="4.5" />
+        <circle cx="7" cy="7" r="2" />
+        <circle cx="7" cy="7" r="0.6" fill="currentColor" />
+      </svg>
+    );
+  }
+  // done — checkmark
+  return (
+    <svg {...svgProps}>
+      <polyline points="3,7.5 5.8,10.2 11,4.5" />
+    </svg>
+  );
+}
+
+// Phase 23 v2 slice 4.8 (2026-05-06): tightened source pills.
+// Dedupes by short label, caps at 2 visible with a +N overflow,
+// and uses crisper one-word names so the chrome under each angle
+// stays calm.
+type SourcePillTone = 'default' | 'selected';
+type AngleSource = ProposeAngle['sources'][number];
+
+function shortenSourceLabel(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('garden')) return 'garden';
+  if (lower.includes('vault')) return 'vault';
+  if (lower.includes('linkedin')) return 'LinkedIn';
+  if (lower.includes('csl')) return 'CSL';
+  if (lower.includes('newsletter')) return 'inbox';
+  return raw;
+}
+
+function SourcePills({
+  sources,
+  tone,
+}: {
+  sources: ReadonlyArray<AngleSource>;
+  tone: SourcePillTone;
+}) {
+  if (sources.length === 0) return null;
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const s of sources) {
+    const short = shortenSourceLabel(s.label);
+    if (!seen.has(short)) {
+      seen.add(short);
+      unique.push(short);
+    }
+  }
+  const visible = unique.slice(0, 2);
+  const overflow = unique.length - visible.length;
+  const cls =
+    tone === 'selected'
+      ? 'text-emerald-700 bg-emerald-100 border-emerald-200'
+      : 'text-tag bg-paper-2 border-rule';
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {visible.map((label) => (
+        <span
+          key={label}
+          className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${cls}`}
+        >
+          {label}
+        </span>
+      ))}
+      {overflow > 0 && (
+        <span
+          className={`font-mono text-[10px] rounded-full px-2 py-0.5 border ${cls}`}
+          aria-label={`${overflow} more source${overflow === 1 ? '' : 's'}`}
+        >
+          +{overflow}
+        </span>
+      )}
     </div>
   );
 }
