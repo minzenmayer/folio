@@ -121,8 +121,8 @@ export default async function StudioHome() {
   return (
     <section>
       <div className="max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
-        {/* Greeting */}
-        <div className="mb-8">
+        {/* Greeting — hides on chat-active stages (Phase 23 v2 slice 4.6) */}
+        <div className="mb-8 tb-default-extras">
           <p className="font-sans text-[16px] text-ink-soft mb-1">
             Hello, {firstName}
           </p>
@@ -136,9 +136,9 @@ export default async function StudioHome() {
             stays in the codebase but no longer renders here. */}
         <HomeComposer />
 
-        {/* Recent drafts + recent ideas */}
+        {/* Recent drafts + recent ideas — hides on chat-active stages */}
         {(recentDrafts.length > 0 || recentIdeas.length > 0) && (
-          <div className="mt-10 grid sm:grid-cols-2 gap-6">
+          <div className="mt-10 grid sm:grid-cols-2 gap-6 tb-default-extras">
             {recentDrafts.length > 0 && (
               <div>
                 <div className="flex items-baseline justify-between mb-3">
@@ -209,9 +209,9 @@ export default async function StudioHome() {
           </div>
         )}
 
-        {/* Inbox callout */}
+        {/* Inbox callout — hides on chat-active stages */}
         {inboxCount > 0 && (
-          <div className="mt-8 rounded-card bg-paper border border-rule px-5 py-4 flex items-center gap-3">
+          <div className="mt-8 rounded-card bg-paper border border-rule px-5 py-4 flex items-center gap-3 tb-default-extras">
             <p className="font-sans text-[13.5px] text-ink-soft flex-1">
               <span className="font-medium text-ink">
                 {inboxCount}
@@ -227,12 +227,14 @@ export default async function StudioHome() {
           </div>
         )}
 
-        {/* Maintenance — backfill embeddings (admin) */}
-        <BackfillButton />
+        {/* Maintenance — backfill embeddings (admin); hides on chat-active stages */}
+        <div className="tb-default-extras">
+          <BackfillButton />
+        </div>
 
-        {/* First-run guide */}
+        {/* First-run guide — hides on chat-active stages */}
         {isEmpty && (
-          <div className="border-t border-rule pt-8 mt-12">
+          <div className="border-t border-rule pt-8 mt-12 tb-default-extras">
             <h2 className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag font-medium mb-5">
               How it works
             </h2>

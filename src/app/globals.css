@@ -144,3 +144,13 @@
 body.tb-coach-mode .tb-studio-sidebar {
   display: none !important;
 }
+
+/* Phase 23 v2 slice 4.6 (2026-05-06): when the homepage transitions
+ * out of the default state (any non-default stage in HomeComposer),
+ * the recent-drafts / recent-ideas / inbox callout / first-run guide
+ * blocks hide — the user has moved past the entry surface and those
+ * blocks distract from the chat. The HomeComposer toggles tb-chat-active
+ * on body; everything tagged tb-default-extras hides under it. */
+body.tb-chat-active .tb-default-extras {
+  display: none !important;
+}

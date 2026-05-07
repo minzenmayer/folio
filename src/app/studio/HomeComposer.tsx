@@ -105,18 +105,21 @@ export function HomeComposer() {
   const [isCommitting, startCommitTransition] = useTransition();
 
   // Phase 23 v2 slice 4.5 (2026-05-06): the studio sidebar hides
-  // while the coaching stage is active. We toggle the body class
-  // and clean up on unmount / stage change so the sidebar always
-  // returns when the user steps out of coaching.
+  // while the coaching stage is active. Slice 4.6 (2026-05-06) also
+  // toggles tb-chat-active on every non-default stage so the
+  // homepage's recent-drafts / recent-ideas / inbox blocks hide
+  // once the user has moved past the entry surface.
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    if (stage === 'coaching') {
-      document.body.classList.add('tb-coach-mode');
-      return () => {
-        document.body.classList.remove('tb-coach-mode');
-      };
-    }
-    document.body.classList.remove('tb-coach-mode');
+    const body = document.body;
+    if (stage === 'coaching') body.classList.add('tb-coach-mode');
+    else body.classList.remove('tb-coach-mode');
+    if (stage !== 'default') body.classList.add('tb-chat-active');
+    else body.classList.remove('tb-chat-active');
+    return () => {
+      body.classList.remove('tb-coach-mode');
+      body.classList.remove('tb-chat-active');
+    };
   }, [stage]);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -389,11 +392,7 @@ export function HomeComposer() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (
-                (e.metaKey || e.ctrlKey) &&
-                e.key === 'Enter' &&
-                !e.shiftKey
-              ) {
+              if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSubmit();
               }
@@ -876,6 +875,13 @@ function ThreadView({
   onContinue: () => void;
   onStartOver: () => void;
 }) {
+  const threadReplyRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = threadReplyRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [replyText]);
   const { topic, visibleThinking, angles, outline, followUpQuestion } =
     proposal;
   const canContinue =
@@ -1013,11 +1019,18 @@ function ThreadView({
               {followUpQuestion}
             </p>
             <textarea
+              ref={threadReplyRef}
               value={replyText}
               onChange={(e) => onReplyChange(e.target.value)}
-              placeholder="Add direction here, or just pick an angle above and continue."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  onContinue();
+                }
+              }}
+              placeholder="Add direction here, or just pick an angle above and continue. (Shift+Enter for a new paragraph.)"
               rows={2}
-              className="w-full resize-none rounded-card border border-rule bg-paper px-3 py-2.5 font-sans text-[14px] text-ink placeholder:text-tag leading-snug focus:outline-none focus:border-rule-strong"
+              className="w-full resize-none rounded-card border border-rule bg-paper px-3 py-2.5 font-sans text-[14px] text-ink placeholder:text-tag leading-snug focus:outline-none focus:border-rule-strong min-h-[56px] max-h-[200px]"
             />
           </div>
         )}
@@ -1090,6 +1103,28 @@ function CoachView({
   onOpenEditor: () => void;
   onStartOver: () => void;
 }) {
+  const replyRef = useRef<HTMLTextAreaElement | null>(null);
+  // Auto-grow the reply textarea as the user types so long replies
+  // don't clip behind a single-line preview (slice 4.6).
+  useEffect(() => {
+    const el = replyRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [replyText]);
+
+  function fillReplyWithAngle(angle: ProposeAngle) {
+    onReplyChange(`I'll go with: ${angle.line}`);
+    replyRef.current?.focus();
+  }
+
+  // Round = how many user turns the user has sent. Round 1 = the
+  // continuation from the angles page; bumps with each subsequent
+  // reply. After a couple of rounds we surface a softer 'open the
+  // editor' invitation near the reply box.
+  const round = turns.filter((t) => t.kind === 'user').length;
+  const showOffRamp = round >= 2;
+
   const lastAssistant = [...turns]
     .reverse()
     .find((t): t is { kind: 'assistant'; proposal: SparProposal } =>
@@ -1110,7 +1145,7 @@ function CoachView({
           ← Start over
         </button>
         <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
-          Coaching
+          Coaching · Round {round || 1}
         </span>
         <button
           type="button"
@@ -1124,13 +1159,19 @@ function CoachView({
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[720px] mx-auto px-6 py-8 space-y-6">
-          {turns.map((turn, i) =>
-            turn.kind === 'user' ? (
-              <UserTurn key={i} text={turn.text} />
-            ) : (
-              <AssistantTurn key={i} proposal={turn.proposal} />
-            )
-          )}
+          {turns.map((turn, i) => {
+            if (turn.kind === 'user') {
+              return <UserTurn key={i} text={turn.text} />;
+            }
+            const isLatest = turn === lastAssistant;
+            return (
+              <AssistantTurn
+                key={i}
+                proposal={turn.proposal}
+                onPickAngle={isLatest ? fillReplyWithAngle : undefined}
+              />
+            );
+          })}
           {isProposing && (
             <div className="flex items-center gap-2">
               <SpinGlyph />
@@ -1143,24 +1184,36 @@ function CoachView({
       </div>
 
       <div className="border-t border-rule px-6 py-4 shrink-0 bg-paper">
-        <div className="max-w-[720px] mx-auto">
+        <div className="max-w-[720px] mx-auto space-y-2">
+          {showOffRamp && (
+            <div className="flex items-center justify-between">
+              <span className="font-sans text-[12px] text-tag">
+                Keep refining, or jump straight to the editor when ready.
+              </span>
+              <button
+                type="button"
+                onClick={onOpenEditor}
+                disabled={!canOpen}
+                className="font-mono text-[11px] tracking-[0.18em] uppercase rounded-full px-3 py-1 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong disabled:opacity-50 disabled:cursor-not-allowed bg-ink text-paper hover:bg-ink-soft"
+              >
+                Open the editor →
+              </button>
+            </div>
+          )}
           <div className="flex items-end gap-2 rounded-card border border-rule bg-paper px-3 py-2">
             <textarea
               value={replyText}
               onChange={(e) => onReplyChange(e.target.value)}
+              ref={replyRef}
               onKeyDown={(e) => {
-                if (
-                  (e.metaKey || e.ctrlKey) &&
-                  e.key === 'Enter' &&
-                  !e.shiftKey
-                ) {
+                if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   onSendReply();
                 }
               }}
-              placeholder="Reply…"
+              placeholder="Reply… (Shift+Enter for a new paragraph)"
               rows={1}
-              className="flex-1 resize-none bg-transparent border-0 outline-none font-sans text-[14.5px] text-ink placeholder:text-tag leading-snug min-h-[24px] max-h-[160px]"
+              className="flex-1 resize-none bg-transparent border-0 outline-none font-sans text-[14.5px] text-ink placeholder:text-tag leading-snug min-h-[24px] max-h-[200px]"
             />
             <button
               type="button"
@@ -1195,8 +1248,8 @@ function CoachView({
 function UserTurn({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-card bg-paper-2 px-4 py-2.5">
-        <p className="font-sans text-[14.5px] text-ink leading-snug whitespace-pre-wrap">
+      <div className="max-w-[80%] rounded-card bg-emerald-50 border border-emerald-100 px-4 py-2.5">
+        <p className="font-sans text-[14.5px] text-emerald-900 leading-snug whitespace-pre-wrap">
           {text}
         </p>
       </div>
@@ -1204,35 +1257,80 @@ function UserTurn({ text }: { text: string }) {
   );
 }
 
-function AssistantTurn({ proposal }: { proposal: SparProposal }) {
+function AssistantTurn({
+  proposal,
+  onPickAngle,
+}: {
+  proposal: SparProposal;
+  onPickAngle?: (angle: ProposeAngle) => void;
+}) {
   const { visibleThinking, angles, followUpQuestion } = proposal;
+  // Break the summary into sentences so a wall of LLM prose reads as
+  // separate paragraphs. Falls back to one block if the regex finds
+  // nothing to split on.
+  const sentences = visibleThinking.summary
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const summaryParas = sentences.length > 0 ? sentences : [visibleThinking.summary];
+  const interactive = typeof onPickAngle === 'function';
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
         Thoughtbed
       </p>
-      <p className="font-sans text-[13.5px] text-ink-soft leading-snug">
-        {visibleThinking.summary}
-      </p>
+      <div className="space-y-2">
+        {summaryParas.map((s, i) => (
+          <p
+            key={i}
+            className="font-sans text-[14px] text-ink leading-relaxed"
+          >
+            {s}
+          </p>
+        ))}
+      </div>
       {angles.length > 0 && (
-        <ul className="space-y-1.5">
-          {angles.map((angle, i) => (
-            <li
-              key={`${i}-${angle.line.slice(0, 16)}`}
-              className="flex items-start gap-2.5 rounded-soft border border-rule bg-paper px-3 py-2"
-            >
-              <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
-                {String.fromCharCode(65 + i)}
-              </span>
-              <span className="font-sans text-[13.5px] text-ink leading-snug flex-1">
-                {angle.line}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div>
+          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+            {interactive
+              ? 'Click an angle to use it (then add direction below)'
+              : 'Angles from this round'}
+          </p>
+          <ul className="space-y-1.5">
+            {angles.map((angle, i) => {
+              const inner = (
+                <div className="flex items-start gap-2.5">
+                  <span className="font-mono text-[10px] text-tag pt-0.5 shrink-0">
+                    {String.fromCharCode(65 + i)}
+                  </span>
+                  <span className="font-sans text-[13.5px] text-ink leading-snug flex-1">
+                    {angle.line}
+                  </span>
+                </div>
+              );
+              return (
+                <li key={`${i}-${angle.line.slice(0, 16)}`}>
+                  {interactive ? (
+                    <button
+                      type="button"
+                      onClick={() => onPickAngle?.(angle)}
+                      className="w-full text-left rounded-soft border border-rule bg-paper hover:bg-paper-2 hover:border-rule-strong px-3 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+                    >
+                      {inner}
+                    </button>
+                  ) : (
+                    <div className="rounded-soft border border-rule bg-paper px-3 py-2">
+                      {inner}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
       {followUpQuestion && (
-        <p className="font-sans text-[14px] text-ink leading-snug pt-1">
+        <p className="font-sans text-[15px] text-ink font-medium leading-snug pt-1">
           {followUpQuestion}
         </p>
       )}
