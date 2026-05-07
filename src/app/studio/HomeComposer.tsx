@@ -96,14 +96,15 @@ type BeatKey = 'hook' | 'tension' | 'stakes' | 'close' | 'done';
 type Beat = {
   key: BeatKey;
   label: string;
+  // Phase 23 v2 slice 5.1 (2026-05-06): coachIntro is the
+  // definition / teaching that lands directly under the beat
+  // header, BEFORE the SpaceStrip + LLM follow-up question. For
+  // Tension and Stakes that means a longer line that frames what
+  // the beat is hunting for; for Hook and Close it stays a short
+  // craft note.
   coachIntro: string;
   showAngles: boolean;
   anglesIntro?: string;
-  // Phase 23 v2 slice 5.0 (2026-05-06): Tension and Stakes get a
-  // teaching sub-hint that lives below the LLM's follow-up question.
-  // The hint guides the user toward where to find the answer
-  // (Grammarly inline-coach pattern).
-  subHint?: string;
 };
 
 // Phase 23 v2 slice 4.8 (2026-05-06): one-line beat intros, no
@@ -120,18 +121,16 @@ const BEATS: ReadonlyArray<Beat> = [
   {
     key: 'tension',
     label: 'Tension',
-    coachIntro: 'The spine. What is the question pulling against itself?',
+    coachIntro:
+      'The spine. The question pulling against itself the whole way through. Look for the friction inside your own take. Where do you almost contradict yourself?',
     showAngles: false,
-    subHint:
-      'Look for the friction inside your own take. Where do you almost contradict yourself? That is usually the spine.',
   },
   {
     key: 'stakes',
     label: 'Stakes',
-    coachIntro: 'What shifts if they read this? Be specific.',
-    showAngles: false,
-    subHint:
+    coachIntro:
       'Stakes live in time and consequence. What does your reader keep doing if they miss this, and what do they get back if they catch it?',
+    showAngles: false,
   },
   {
     key: 'close',
@@ -1039,10 +1038,12 @@ function ThreadView({
                           </span>
                         )}
                       </div>
-                      <SourcePills
-                        sources={angle.sources}
-                        tone={selected ? 'selected' : 'default'}
-                      />
+                      <div className="mt-2 flex justify-end">
+                        <SourcePills
+                          sources={angle.sources}
+                          tone={selected ? 'selected' : 'default'}
+                        />
+                      </div>
                     </button>
                   </li>
                 );
@@ -1205,20 +1206,46 @@ function CoachView({
       t.kind === 'assistant'
     );
 
-  // Phase 23 v2 slice 5.0 (2026-05-06): refinement chip click
-  // fires a normal coach reply on the user's behalf, just with a
-  // structured prompt. The reply input remains for the user's own
-  // additions; the chip is a shortcut to a specific refinement.
-  function pickRefinement(prompt: string) {
-    onReplyChange(prompt);
-    // Defer the send a tick so the state update lands first.
+  // Phase 23 v2 slice 5.1 (2026-05-06): refinement chip click
+  // toggles a selection without populating the reply textarea. The
+  // textarea stays for the user's own additions. Send combines the
+  // selected refinement and the typed reply (either, both, or
+  // refinement alone).
+  const [selectedRefinement, setSelectedRefinement] = useState<{
+    label: string;
+    prompt: string;
+  } | null>(null);
+  function toggleRefinement(label: string, prompt: string) {
+    setSelectedRefinement((prev) => (prev?.label === label ? null : { label, prompt }));
+  }
+
+  // Phase 23 v2 slice 5.1 (2026-05-06): commitSend builds the user
+  // turn from any selected angle, any selected refinement chip, and
+  // the typed reply (any combination, in that priority order). Then
+  // it clears the selections so they do not stick to the next turn.
+  function commitSend() {
+    const parts: string[] = [];
+    if (selectedAngleLineInLatest) {
+      parts.push(`I will go with: ${selectedAngleLineInLatest}`);
+    }
+    if (selectedRefinement) {
+      parts.push(selectedRefinement.prompt);
+    }
+    const typed = replyText.trim();
+    if (typed) parts.push(typed);
+    if (parts.length === 0) return;
+    onReplyChange(parts.join('\n\n'));
+    setSelectedAngleLineInLatest(null);
+    setSelectedRefinement(null);
     setTimeout(() => onSendReply(), 0);
   }
 
   const canSend =
     !isProposing &&
     !isCommitting &&
-    (replyText.trim().length >= 1 || selectedAngleLineInLatest !== null);
+    (replyText.trim().length >= 1 ||
+      selectedAngleLineInLatest !== null ||
+      selectedRefinement !== null);
   const canOpen = !isCommitting && lastAssistant !== undefined;
   return (
     <div className="min-h-[calc(100vh-0px)] flex flex-col">
@@ -1268,8 +1295,13 @@ function CoachView({
                       ? toggleSelectedAngleLine
                       : undefined
                   }
-                  onRefinementPick={
-                    isLatest && beat.key === 'done' ? pickRefinement : undefined
+                  selectedRefinementLabel={
+                    isLatest && beat.key === 'done'
+                      ? selectedRefinement?.label ?? null
+                      : null
+                  }
+                  onRefinementToggle={
+                    isLatest && beat.key === 'done' ? toggleRefinement : undefined
                   }
                 />
               );
@@ -1311,15 +1343,7 @@ function CoachView({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  if (selectedAngleLineInLatest) {
-                    onReplyChange(
-                      `I will go with: ${selectedAngleLineInLatest}\n\n${replyText.trim()}`
-                    );
-                    setSelectedAngleLineInLatest(null);
-                    setTimeout(() => onSendReply(), 0);
-                    return;
-                  }
-                  onSendReply();
+                  commitSend();
                 }
               }}
               placeholder="Your turn. Shift+Enter for a new paragraph."
@@ -1328,17 +1352,7 @@ function CoachView({
             />
             <button
               type="button"
-              onClick={() => {
-                if (selectedAngleLineInLatest) {
-                  onReplyChange(
-                    `I will go with: ${selectedAngleLineInLatest}\n\n${replyText.trim()}`
-                  );
-                  setSelectedAngleLineInLatest(null);
-                  setTimeout(() => onSendReply(), 0);
-                  return;
-                }
-                onSendReply();
-              }}
+              onClick={() => commitSend()}
               disabled={!canSend}
               aria-label="Send reply"
               title="Send reply"
@@ -1383,13 +1397,15 @@ function AssistantTurn({
   beat,
   selectedAngleLine,
   onToggleAngle,
-  onRefinementPick,
+  selectedRefinementLabel,
+  onRefinementToggle,
 }: {
   proposal: SparProposal;
   beat?: Beat;
   selectedAngleLine?: string | null;
   onToggleAngle?: (line: string) => void;
-  onRefinementPick?: (refinement: string) => void;
+  selectedRefinementLabel?: string | null;
+  onRefinementToggle?: (label: string, prompt: string) => void;
 }) {
   const { visibleThinking, angles, followUpQuestion } = proposal;
   // Break the summary into sentences so a wall of LLM prose reads as
@@ -1458,8 +1474,13 @@ function AssistantTurn({
                     </span>
                   </div>
                   {angle.sources.length > 0 && (
-                    <div className="ml-6">
-                      <SourcePills sources={angle.sources} tone="default" />
+                    <div className="flex justify-end">
+                      <SourcePills
+                        sources={angle.sources}
+                        tone={
+                          selectedAngleLine === angle.line ? 'selected' : 'default'
+                        }
+                      />
                     </div>
                   )}
                 </div>
@@ -1496,13 +1517,11 @@ function AssistantTurn({
           {followUpQuestion}
         </p>
       )}
-      {beat?.subHint && (
-        <p className="font-sans text-[12.5px] text-tag leading-snug">
-          {beat.subHint}
-        </p>
-      )}
-      {isDone && onRefinementPick && (
-        <DoneRefinements onPick={onRefinementPick} />
+      {isDone && onRefinementToggle && (
+        <DoneRefinements
+          selectedLabel={selectedRefinementLabel ?? null}
+          onToggle={onRefinementToggle}
+        />
       )}
     </div>
   );
@@ -1515,9 +1534,11 @@ function AssistantTurn({
 // 'From your space' strip retires here; it does not match the
 // shape of this moment.
 function DoneRefinements({
-  onPick,
+  selectedLabel,
+  onToggle,
 }: {
-  onPick: (refinement: string) => void;
+  selectedLabel: string | null;
+  onToggle: (label: string, prompt: string) => void;
 }) {
   const options: ReadonlyArray<{ label: string; prompt: string }> = [
     {
@@ -1537,7 +1558,7 @@ function DoneRefinements({
     {
       label: 'Add depth and research',
       prompt:
-        'Add depth. Pull in more from my space — relevant evidence, lines I have already written, examples.',
+        'Add depth. Pull in more from my space: relevant evidence, lines I have already written, examples.',
     },
   ];
   return (
@@ -1546,19 +1567,27 @@ function DoneRefinements({
         Want to keep refining before you open the editor?
       </p>
       <div className="flex flex-wrap gap-1.5">
-        {options.map((opt) => (
-          <button
-            key={opt.label}
-            type="button"
-            onClick={() => onPick(opt.prompt)}
-            className="font-sans text-[12.5px] text-ink rounded-full border border-rule bg-paper px-3 py-1.5 hover:bg-paper-2 hover:border-rule-strong transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
-          >
-            {opt.label}
-          </button>
-        ))}
+        {options.map((opt) => {
+          const selected = selectedLabel === opt.label;
+          return (
+            <button
+              key={opt.label}
+              type="button"
+              onClick={() => onToggle(opt.label, opt.prompt)}
+              aria-pressed={selected}
+              className={`font-sans text-[12.5px] rounded-full border px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
+                selected
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                  : 'bg-paper text-ink border-rule hover:bg-paper-2 hover:border-rule-strong'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
       <p className="font-sans text-[13px] text-tag leading-snug">
-        Or tell me what else you would add — what makes this distinctly yours?
+        Or tell me what else you would add. What makes this distinctly yours?
       </p>
     </div>
   );
@@ -1750,15 +1779,19 @@ type AngleSource = ProposeAngle['sources'][number];
 // pills. Lets the eye scan source kinds at a glance without
 // reading the words. Selected pills override to emerald (matches
 // the Writing-path selection color used elsewhere in the chat).
+// Phase 23 v2 slice 5.1 (2026-05-06): subtler kind tints. Pills
+// stay gray on the inside; only the border carries the kind color.
+// Selected pills tip into a soft emerald fill so the active state
+// reads clearly against the calmer rest. Saturated fills retired.
 function kindColorClasses(short: string, selected: boolean): string {
   if (selected) {
-    return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+    return 'bg-emerald-50 text-emerald-700 border-emerald-300';
   }
-  if (short === 'garden') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (short === 'CSL') return 'bg-amber-50 text-amber-700 border-amber-200';
-  if (short === 'LinkedIn') return 'bg-sky-50 text-sky-700 border-sky-200';
-  if (short === 'vault') return 'bg-violet-50 text-violet-700 border-violet-200';
-  if (short === 'inbox') return 'bg-rose-50 text-rose-700 border-rose-200';
+  if (short === 'garden') return 'bg-paper-2 text-tag border-emerald-200';
+  if (short === 'CSL') return 'bg-paper-2 text-tag border-amber-200';
+  if (short === 'LinkedIn') return 'bg-paper-2 text-tag border-sky-200';
+  if (short === 'vault') return 'bg-paper-2 text-tag border-violet-200';
+  if (short === 'inbox') return 'bg-paper-2 text-tag border-rose-200';
   return 'text-tag bg-paper-2 border-rule';
 }
 
