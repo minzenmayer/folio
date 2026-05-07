@@ -28,6 +28,7 @@ import {
   regenerateAngles,
   commitProposal,
   getSourceDetail,
+  runRefinement,
   type ProposeFromTopicResult,
   type ProposeAngle,
   type GetSourceDetailResult,
@@ -437,12 +438,15 @@ export function HomeComposer() {
     runCoachReply(initialThread, proposal.topic, proposal.platformGuess);
   }
 
-  // Run a coach round — re-fire proposeFromTopic with the full
-  // transcript and append the assistant's response to the thread.
+  // Run a coach round. If a refinement key is set, fires the
+  // refinement-specific server action (sharpens hook / adds
+  // takeaway / refines stakes / adds depth + external research).
+  // Otherwise the generic proposeFromTopic continues the chat.
   function runCoachReply(
     thread: CoachTurn[],
     topic: string,
-    platformGuess: SparProposal['platformGuess']
+    platformGuess: SparProposal['platformGuess'],
+    refinementKey?: RefinementKey
   ) {
     const platformHint =
       platformGuess === 'linkedin' || platformGuess === 'newsletter'
@@ -450,15 +454,19 @@ export function HomeComposer() {
         : undefined;
     startProposeTransition(async () => {
       try {
-        const res = await proposeFromTopic({
+        const args = {
           topic,
           conversationSoFar: renderTranscript(topic, thread),
           ...(platformHint ? { platformHint } : {}),
-        });
+        };
+        const res = refinementKey
+          ? await runRefinement({ ...args, refinement: refinementKey })
+          : await proposeFromTopic(args);
         if (res.ok) {
           setCoachTurns((prev) => [...prev, { kind: 'assistant', proposal: res }]);
+          setErrorMsg(null);
         } else {
-          setErrorMsg(res.message);
+          setErrorMsg(res.message || 'Something failed on the server.');
         }
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : 'Unknown error.');
@@ -469,6 +477,7 @@ export function HomeComposer() {
   function sendCoachReply(meta?: {
     carriedAngleLine?: string;
     carriedSourceIds?: ReadonlyArray<string>;
+    refinementKey?: RefinementKey;
   }) {
     const reply = replyText.trim();
     if (!reply || coachTurns.length === 0) return;
@@ -485,11 +494,17 @@ export function HomeComposer() {
       ...(meta?.carriedSourceIds && meta.carriedSourceIds.length > 0
         ? { carriedSourceIds: meta.carriedSourceIds }
         : {}),
+      ...(meta?.refinementKey ? { refinementKey: meta.refinementKey } : {}),
     };
     const next: CoachTurn[] = [...coachTurns, userTurn];
     setCoachTurns(next);
     setReplyText('');
-    runCoachReply(next, lastAssistant.proposal.topic, lastAssistant.proposal.platformGuess);
+    runCoachReply(
+      next,
+      lastAssistant.proposal.topic,
+      lastAssistant.proposal.platformGuess,
+      meta?.refinementKey
+    );
   }
 
   // Finalize from coaching: take the latest assistant turn's outline +
@@ -569,6 +584,7 @@ export function HomeComposer() {
         onSendReply={sendCoachReply}
         onOpenEditor={openEditorFromCoaching}
         onStartOver={startOver}
+        errorBanner={errorMsg}
       />
     );
   }
@@ -1311,6 +1327,7 @@ function CoachView({
   onSendReply,
   onOpenEditor,
   onStartOver,
+  errorBanner,
 }: {
   turns: CoachTurn[];
   replyText: string;
@@ -1320,9 +1337,11 @@ function CoachView({
   onSendReply: (meta?: {
     carriedAngleLine?: string;
     carriedSourceIds?: ReadonlyArray<string>;
+    refinementKey?: RefinementKey;
   }) => void;
   onOpenEditor: () => void;
   onStartOver: () => void;
+  errorBanner?: string | null;
 }) {
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   // Auto-grow the reply textarea as the user types so long replies
@@ -1370,9 +1389,12 @@ function CoachView({
   const [selectedRefinement, setSelectedRefinement] = useState<{
     label: string;
     prompt: string;
+    key: RefinementKey;
   } | null>(null);
-  function toggleRefinement(label: string, prompt: string) {
-    setSelectedRefinement((prev) => (prev?.label === label ? null : { label, prompt }));
+  function toggleRefinement(label: string, prompt: string, key: RefinementKey) {
+    setSelectedRefinement((prev) =>
+      prev?.label === label ? null : { label, prompt, key }
+    );
   }
 
   // Phase 23 v2 slice 5.2 (2026-05-06): selected sources (pills the
@@ -1444,6 +1466,7 @@ function CoachView({
     if (parts.length === 0) return;
     const carriedAngle = selectedAngleLineInLatest;
     const carriedIds = Array.from(selectedSourceIds);
+    const refinementKey = selectedRefinement?.key;
     onReplyChange(parts.join('\n\n'));
     setSelectedAngleLineInLatest(null);
     setSelectedRefinement(null);
@@ -1453,6 +1476,7 @@ function CoachView({
         onSendReply({
           ...(carriedAngle ? { carriedAngleLine: carriedAngle } : {}),
           ...(carriedIds.length > 0 ? { carriedSourceIds: carriedIds } : {}),
+          ...(refinementKey ? { refinementKey } : {}),
         }),
       0
     );
@@ -1564,6 +1588,13 @@ function CoachView({
               <SpinGlyph />
               <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag">
                 Thinking through that.
+              </p>
+            </div>
+          )}
+          {errorBanner && !isProposing && (
+            <div className="rounded-soft border border-rose-200 bg-rose-50 px-3 py-2">
+              <p className="font-sans text-[13px] text-rose-700 leading-snug">
+                {errorBanner}
               </p>
             </div>
           )}
