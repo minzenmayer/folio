@@ -31,12 +31,12 @@ import {
   runRefinement,
   createChatSession,
   updateChatSession,
-  chatSessionTitleFromTopic,
   type ProposeFromTopicResult,
   type ProposeAngle,
   type GetSourceDetailResult,
   type ChatSessionDetail,
 } from './actions';
+import { chatSessionTitleFromTopic } from './chatSessionTitle';
 import { useRouter } from 'next/navigation';
 import { type SimilarKind } from '@/lib/retrieval-kinds';
 
@@ -1122,7 +1122,7 @@ function ArrowOutGlyph() {
 // a stronger signal when the user used the curated sub-prompts.
 function inferPlatformHint(
   text: string
-): 'newsletter' | 'linkedin' | undefined {
+): 'newsletter' | 'linkedin' | 'blog' | 'note' | undefined {
   const lower = text.toLowerCase();
   if (lower.includes('linkedin')) return 'linkedin';
   if (
@@ -1132,6 +1132,8 @@ function inferPlatformHint(
   ) {
     return 'newsletter';
   }
+  if (lower.includes('blog post') || lower.includes('blog ')) return 'blog';
+  if (lower.includes('quick note') || lower.includes('journal entry')) return 'note';
   return undefined;
 }
 

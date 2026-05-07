@@ -35,3 +35,24 @@ export function getPlatformSkill(platform: Platform): string {
 export function listPlatformSkillNames(): Platform[] {
   return Object.keys(SKILL_FILES) as Platform[];
 }
+
+// ─── Phase 23 v2 slice 8 · safe loader for per-format depth ─────────
+//
+// generateProposal / generateRefinement get a possibly-undefined or
+// possibly-'unknown' platformHint (the LLM sometimes returns
+// platformGuess: 'unknown'). They want the skill body when it exists
+// and `null` when it doesn't, without throwing. This wrapper keeps
+// the strict typing of getPlatformSkill intact while letting prompt
+// builders be lenient.
+
+const PLATFORM_KEYS: Set<string> = new Set(Object.keys(SKILL_FILES));
+
+export function loadPlatformSkillSafe(
+  platform: string | null | undefined,
+): { platform: Platform; body: string } | null {
+  if (!platform) return null;
+  if (!PLATFORM_KEYS.has(platform)) return null;
+  const p = platform as Platform;
+  return { platform: p, body: getPlatformSkill(p) };
+}
+

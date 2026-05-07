@@ -1210,7 +1210,7 @@ const proposeFromTopicSchema = z.object({
   topic: z.string().min(3).max(2000),
   // Optional clarification when the user has already answered the
   // platform question in the spar conversation.
-  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin', 'blog', 'note']).optional(),
   // Concatenated spar transcript so the partner can advance the
   // thinking instead of restarting on every iteration. Client decides
   // shape — usually `Q: ...\nA: ...` lines.
@@ -1621,7 +1621,7 @@ const regenerateAnglesSchema = z.object({
   topic: z.string().min(1).max(2000),
   outline: z.array(z.object({ beat: z.string().min(1).max(800) })).min(1).max(8),
   conversationSoFar: z.string().max(8000).optional(),
-  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin', 'blog', 'note']).optional(),
 });
 
 export type RegenerateAnglesResult =
@@ -1723,7 +1723,7 @@ const regenerateOutlineSchema = z.object({
   // Beats the user has anchored. Optional; empty array = nothing pinned.
   anchoredBeats: z.array(z.string().min(1).max(800)).max(8).optional(),
   conversationSoFar: z.string().max(8000).optional(),
-  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin', 'blog', 'note']).optional(),
 });
 
 export type RegenerateOutlineResult =
@@ -2741,7 +2741,7 @@ const runRefinementSchema = z.object({
   ]),
   topic: z.string().min(1).max(2000),
   conversationSoFar: z.string().max(8000).optional(),
-  platformHint: z.enum(['newsletter', 'linkedin']).optional(),
+  platformHint: z.enum(['newsletter', 'linkedin', 'blog', 'note']).optional(),
 });
 
 export type RunRefinementResult = ProposeFromTopicResult;
@@ -3074,16 +3074,3 @@ export async function listRecentChatSessions(
   }
 }
 
-// Title-from-topic helper. Cheap deterministic version: title-case
-// the first phrase, truncate to ~50 chars. Used at session-create
-// time so the sidebar entry has a readable name immediately.
-export function chatSessionTitleFromTopic(topic: string): string {
-  const trimmed = topic.trim().replace(/\s+/g, ' ');
-  if (!trimmed) return 'Untitled';
-  const cut = trimmed.slice(0, 50);
-  // Strip trailing partial word
-  const stop = cut.lastIndexOf(' ');
-  const safe = trimmed.length > 50 && stop > 20 ? cut.slice(0, stop) : cut;
-  // Capitalize first letter
-  return safe.charAt(0).toUpperCase() + safe.slice(1);
-}

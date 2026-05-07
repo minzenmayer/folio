@@ -23,6 +23,7 @@ import { generateText, generateObject } from 'ai';
 import { z } from 'zod';
 
 import type { SimilarKind } from '@/lib/retrieval-kinds';
+import { loadPlatformSkillSafe } from '@/lib/platform-skills';
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.warn(
@@ -331,7 +332,7 @@ export async function generateProposal({
 }: {
   topic: string;
   conversationSoFar?: string;
-  platformHint?: 'newsletter' | 'linkedin';
+  platformHint?: 'newsletter' | 'linkedin' | 'blog' | 'note';
   // Phase 15a will populate; 15b leaves undefined.
   voiceProfile?: {
     longform?: ProposalVoiceProfile;
@@ -389,6 +390,29 @@ export async function generateProposal({
   const platformHintLine = platformHint
     ? `The user already indicated this is a ${platformHint} piece. Don't ask again — set platformGuess accordingly.`
     : 'If the topic shape clearly suggests newsletter (essay-length, multi-beat) or linkedin (single-thread, hooky), set platformGuess. Otherwise leave it "unknown" and ask the platform clarifying question as your follow-up.';
+
+  // Phase 23 v2 slice 8 — per-format depth.
+  // When we know the format up front, load the matching platform-skill
+  // markdown and pass it into the prompt so angles + outline + hook
+  // honor format-specific craft (LinkedIn cold-open shapes, newsletter
+  // Lede + sections + closer arc, blog ~700-1500 word section discipline,
+  // note-mode quiet companion). When the platform is unknown, no block
+  // is injected and the LLM falls back to its general writing partner
+  // judgment.
+  const platformSkill = loadPlatformSkillSafe(platformHint);
+  const platformCraftBlock = platformSkill
+    ? `
+
+<platform_craft platform="${platformSkill.platform}">
+${platformSkill.body.trim()}
+</platform_craft>
+
+The platform_craft block above describes the craft rules for ${platformSkill.platform}. Your angles, hook, and outline must be shaped to this format. Specifically:
+  - Angles must commit to the shape this format rewards (e.g. for linkedin, angles should be hooky and single-thread; for newsletter, angles should sketch an essay arc).
+  - The outline beats must obey the section discipline named in the craft.
+  - The follow-up question can reference the format's pressure points if relevant.
+Do NOT quote or restate the craft rules in your output — internalize them and let them shape the work.`
+    : '';
 
   const sparseCorpusNote =
     retrieval.length < 3
@@ -494,7 +518,7 @@ ${renderBlock(knowledge)}
 ${voiceProfileBlock}
 </voice_profile>
 
-${platformHintLine}
+${platformHintLine}${platformCraftBlock}
 ${sparseCorpusNote}
 
 Voice rules. No "I notice that", no "It seems like", no "Great topic", no "Here's what I came up with", no preamble. No emoji. No tone-policing. No "Have you considered". Editorial restraint. When you cite an angle's source, the UI will render the citation; you don't need to write "based on your CSL issue X" in the angle line itself — keep the line tight, let sourceCitations do the work.
@@ -993,7 +1017,7 @@ export async function regenerateAngles({
 }: {
   topic: string;
   conversationSoFar?: string;
-  platformHint?: 'newsletter' | 'linkedin';
+  platformHint?: 'newsletter' | 'linkedin' | 'blog' | 'note';
   voiceProfile?: {
     longform?: ProposalVoiceProfile;
     linkedin?: ProposalVoiceProfile;
@@ -1042,6 +1066,18 @@ export async function regenerateAngles({
   const platformLine = platformHint
     ? `Platform is ${platformHint}.`
     : 'Platform is unknown — keep angles flexible enough to fit either newsletter or linkedin.';
+
+  // Phase 23 v2 slice 8 — per-format depth (angles re-spin path).
+  const _platformSkillAngles = loadPlatformSkillSafe(platformHint);
+  const platformCraftBlockAngles = _platformSkillAngles
+    ? `
+
+<platform_craft platform="${_platformSkillAngles.platform}">
+${_platformSkillAngles.body.trim()}
+</platform_craft>
+
+The angles you produce must obey the craft rules above. Do NOT restate them.`
+    : '';
 
   const outlineFrame = existingOutline
     .map((b, i) => `  ${String(i + 1).padStart(2, '0')} ${b.beat}`)
@@ -1092,7 +1128,7 @@ ${voiceProfileBlock}
 ${outlineFrame}
 </existing_outline_keep_intact>
 
-${platformLine}
+${platformLine}${platformCraftBlockAngles}
 
 Voice rules. No "I notice that", no "It seems like", no preamble. No emoji. Editorial restraint. Cite source indices via sourceCitations; the UI renders the citation. Three angles default; two if the topic has a clear two-direction tension; four if open-ended.
 
@@ -1130,7 +1166,7 @@ export async function regenerateOutline({
 }: {
   topic: string;
   conversationSoFar?: string;
-  platformHint?: 'newsletter' | 'linkedin';
+  platformHint?: 'newsletter' | 'linkedin' | 'blog' | 'note';
   voiceProfile?: {
     longform?: ProposalVoiceProfile;
     linkedin?: ProposalVoiceProfile;
@@ -1182,6 +1218,18 @@ export async function regenerateOutline({
     ? `Platform is ${platformHint}.`
     : 'Platform is unknown — outline shape can lean either newsletter or linkedin.';
 
+  // Phase 23 v2 slice 8 — per-format depth (outline re-spin path).
+  const _platformSkillOutline = loadPlatformSkillSafe(platformHint);
+  const platformCraftBlockOutline = _platformSkillOutline
+    ? `
+
+<platform_craft platform="${_platformSkillOutline.platform}">
+${_platformSkillOutline.body.trim()}
+</platform_craft>
+
+The outline you produce must obey the section discipline named in the craft above. Do NOT restate the rules.`
+    : '';
+
   const anglesFrame = existingAngles
     .map((a, i) => `  - ${a.line}`)
     .join('\n');
@@ -1228,7 +1276,7 @@ ${voiceProfileBlock}
 ${anglesFrame}
 </existing_angles>${anchoredFrame}
 
-${platformLine}
+${platformLine}${platformCraftBlockOutline}
 
 Voice rules: no preamble, no emoji, editorial restraint. Section-shape for newsletter (one line per beat); hooky-and-tight for linkedin (one beat = one move). 3 to 5 beats default; up to 8 if the topic warrants. Tight, no padding.
 
@@ -1382,7 +1430,7 @@ export async function generateRefinement({
   refinement: RefinementKind;
   topic: string;
   conversationSoFar?: string;
-  platformHint?: 'newsletter' | 'linkedin';
+  platformHint?: 'newsletter' | 'linkedin' | 'blog' | 'note';
   voiceProfile?: {
     longform?: ProposalVoiceProfile;
     linkedin?: ProposalVoiceProfile;
@@ -1437,6 +1485,22 @@ export async function generateRefinement({
   const platformLine = platformHint
     ? `Platform: ${platformHint}.`
     : 'Platform: not yet locked.';
+
+  // Phase 23 v2 slice 8 — per-format depth.
+  // For sharpen_hook the format craft drives hook shape; for
+  // add_takeaway it drives kicker rhythm; for refine_stakes the
+  // craft surfaces the reader-behavior slot; for add_depth the
+  // craft gates which research/voice angles fit this format.
+  const platformSkill = loadPlatformSkillSafe(platformHint);
+  const platformCraftBlock = platformSkill
+    ? `
+
+<platform_craft platform="${platformSkill.platform}">
+${platformSkill.body.trim()}
+</platform_craft>
+
+The platform_craft block above describes the craft rules for ${platformSkill.platform}. The refinement output you produce must obey those rules. For sharpen_hook, your hook variants must follow the format's opening patterns. For add_takeaway, the kicker shape must fit the format's closing pressure. For refine_stakes, the reader-behavior slot must be the one this format actually addresses. For add_depth, prefer depth angles that strengthen the format's specific job. Do NOT quote or restate the craft rules — let them shape the work.`
+    : '';
 
   const conversationBlock = trimmedConvo
     ? `
@@ -1520,7 +1584,7 @@ ${trimmedTopic}
 ${voiceProfileBlock}
 </voice_profile>
 
-${platformLine}
+${platformLine}${platformCraftBlock}
 
 The retrieval blocks below are split by source. Use them per the refinement instructions.
 
