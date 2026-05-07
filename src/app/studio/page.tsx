@@ -11,6 +11,7 @@ import { requireUser } from '@/lib/auth';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import { HomeComposer } from './HomeComposer';
+import { getChatSession } from './actions';
 import { BackfillButton } from './BackfillButton';
 
 function timeAgo(date: Date | string | null): string {
@@ -27,9 +28,30 @@ function timeAgo(date: Date | string | null): string {
   return `${Math.floor(days / 30)}mo`;
 }
 
-export default async function StudioHome() {
+type StudioSearchParams = Promise<{ chat?: string | string[] }>;
+
+export default async function StudioHome({
+  searchParams,
+}: {
+  searchParams?: StudioSearchParams;
+}) {
   const { userId: clerkId } = await auth();
   if (!clerkId) redirect('/sign-in');
+
+  // Phase 23 v2 slice 7 (2026-05-07): if the URL carries ?chat=<id>,
+  // hydrate that chat_sessions row and pass it to HomeComposer so
+  // the route renders the coaching thread instead of the default
+  // entry. Non-uuid values fall through to default state.
+  const params = searchParams ? await searchParams : undefined;
+  const rawChatId = params?.chat;
+  const chatId = Array.isArray(rawChatId) ? rawChatId[0] : rawChatId;
+  const initialSession =
+    chatId &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      chatId
+    )
+      ? await getChatSession(chatId)
+      : null;
 
   const user = await requireUser();
   let clerk: Awaited<ReturnType<typeof currentUser>> | null = null;
@@ -134,7 +156,7 @@ export default async function StudioHome() {
         {/* Phase 23 v2 slice 1 (2026-05-06) — homepage chat box,
             mode dropdown, two path chips. The Phase 15b/16 Spar
             stays in the codebase but no longer renders here. */}
-        <HomeComposer />
+        <HomeComposer initialSession={initialSession ?? undefined} />
 
         {/* Recent drafts + recent ideas — hides on chat-active stages */}
         {(recentDrafts.length > 0 || recentIdeas.length > 0) && (

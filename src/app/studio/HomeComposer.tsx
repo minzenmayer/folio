@@ -29,10 +29,15 @@ import {
   commitProposal,
   getSourceDetail,
   runRefinement,
+  createChatSession,
+  updateChatSession,
+  chatSessionTitleFromTopic,
   type ProposeFromTopicResult,
   type ProposeAngle,
   type GetSourceDetailResult,
+  type ChatSessionDetail,
 } from './actions';
+import { useRouter } from 'next/navigation';
 import { type SimilarKind } from '@/lib/retrieval-kinds';
 
 type Mode = 'with-assistant' | 'beside' | 'self-driving';
@@ -225,7 +230,12 @@ function beatForTurnCount(userTurns: number): Beat {
   return BEATS[idx];
 }
 
-export function HomeComposer() {
+export function HomeComposer({
+  initialSession,
+}: {
+  initialSession?: ChatSessionDetail;
+} = {}) {
+  const router = useRouter();
   const [text, setText] = useState('');
   const [mode, setMode] = useState<Mode>('with-assistant');
   const [path, setPath] = useState<Path | null>(null);
@@ -233,18 +243,35 @@ export function HomeComposer() {
   const [placeholderResult, setPlaceholderResult] = useState<string | null>(
     null
   );
-  const [stage, setStage] = useState<Stage>('default');
+  // Phase 23 v2 slice 7 (2026-05-07): when the route loads with a
+  // ?chat=<id> param, initialSession is hydrated by the server
+  // component and passed in. We seed state from it so the
+  // coaching thread reappears exactly where the user left off.
+  const initialStage: Stage = initialSession
+    ? initialSession.stage === 'finalized'
+      ? 'default'
+      : 'coaching'
+    : 'default';
+  const initialTurns = (initialSession?.turns ?? []) as CoachTurn[];
+  const [stage, setStage] = useState<Stage>(initialStage);
   const [proposal, setProposal] = useState<SparProposal | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [submittedTopic, setSubmittedTopic] = useState<string>('');
+  const [submittedTopic, setSubmittedTopic] = useState<string>(
+    initialSession?.topic ?? ''
+  );
   const [selectedAngleIndex, setSelectedAngleIndex] = useState<number | null>(
     null
   );
   const [replyText, setReplyText] = useState<string>('');
-  const [coachTurns, setCoachTurns] = useState<CoachTurn[]>([]);
+  const [coachTurns, setCoachTurns] = useState<CoachTurn[]>(initialTurns);
   const [isProposing, startProposeTransition] = useTransition();
   const [isRegenerating, startRegenTransition] = useTransition();
   const [isCommitting, startCommitTransition] = useTransition();
+  // Phase 23 v2 slice 7: the persisted session id. Created on the
+  // first proposal that comes back; updated on every turn change.
+  const [chatSessionId, setChatSessionId] = useState<string | null>(
+    initialSession?.id ?? null
+  );
 
   // Phase 23 v2 slice 5.2 (2026-05-06): the angles page (ThreadView)
   // also supports the expand-pill modal + 'bring this with me'
@@ -331,6 +358,32 @@ export function HomeComposer() {
           if (res.ok) {
             setProposal(res);
             setStage('thread');
+            // Phase 23 v2 slice 7: create a chat session record up
+            // front so navigating away (clicking 'open in garden'
+            // on a source pill, getting pulled into a meeting)
+            // does not lose the thread. Subsequent turns flow
+            // through updateChatSession.
+            const initialAssistantTurn: CoachTurn = {
+              kind: 'assistant',
+              proposal: res,
+            };
+            const sessionRes = await createChatSession({
+              topic: trimmed,
+              title: chatSessionTitleFromTopic(trimmed),
+              platformGuess: res.platformGuess,
+              turns: [initialAssistantTurn],
+              stage: 'thread',
+            });
+            if (sessionRes.ok) {
+              setChatSessionId(sessionRes.id);
+              // Reflect the session id in the URL without forcing a
+              // navigation. Lets the user share or bookmark.
+              if (typeof window !== 'undefined') {
+                const url = new URL(window.location.href);
+                url.searchParams.set('chat', sessionRes.id);
+                window.history.replaceState({}, '', url.toString());
+              }
+            }
           } else {
             setErrorMsg(res.message);
             setStage('error');
@@ -360,6 +413,16 @@ export function HomeComposer() {
     setCoachTurns([]);
     setThreadSelectedSourceIds(new Set());
     setThreadModalSource(null);
+    setChatSessionId(null);
+    // Drop ?chat=<id> from the URL so a fresh entry does not
+    // accidentally look like a resume.
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('chat')) {
+        url.searchParams.delete('chat');
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
   }
 
   // Phase 23 v2 slice 4.5 (2026-05-06): cards toggle a selection
@@ -435,7 +498,29 @@ export function HomeComposer() {
     setThreadSelectedSourceIds(new Set());
     setThreadModalSource(null);
     setStage('coaching');
+    void persistTurns(initialThread, 'coaching');
     runCoachReply(initialThread, proposal.topic, proposal.platformGuess);
+  }
+
+  // Phase 23 v2 slice 7 (2026-05-07): write the turn array back
+  // to the chat_sessions row whenever it changes. Best-effort
+  // (errors logged but do not surface to the user). chatSessionId
+  // gets set the moment the first proposal lands; before that
+  // these calls are no-ops.
+  function persistTurns(
+    turns: CoachTurn[],
+    nextStage: 'thread' | 'coaching' | 'finalized' = 'coaching'
+  ): Promise<void> {
+    if (!chatSessionId) return Promise.resolve();
+    return updateChatSession({
+      id: chatSessionId,
+      turns,
+      stage: nextStage,
+    })
+      .then(() => undefined)
+      .catch((err) => {
+        console.warn('[Thoughtbed] persistTurns failed', err);
+      });
   }
 
   // Run a coach round. If a refinement key is set, fires the
@@ -463,7 +548,11 @@ export function HomeComposer() {
           ? await runRefinement({ ...args, refinement: refinementKey })
           : await proposeFromTopic(args);
         if (res.ok) {
-          setCoachTurns((prev) => [...prev, { kind: 'assistant', proposal: res }]);
+          setCoachTurns((prev) => {
+            const next = [...prev, { kind: 'assistant', proposal: res } as CoachTurn];
+            void persistTurns(next, 'coaching');
+            return next;
+          });
           setErrorMsg(null);
         } else {
           setErrorMsg(res.message || 'Something failed on the server.');
@@ -500,6 +589,7 @@ export function HomeComposer() {
     const next: CoachTurn[] = [...coachTurns, userTurn];
     setCoachTurns(next);
     setReplyText('');
+    void persistTurns(next, 'coaching');
     runCoachReply(
       next,
       lastAssistant.proposal.topic,
@@ -523,6 +613,10 @@ export function HomeComposer() {
         : 'newsletter';
     startCommitTransition(async () => {
       try {
+        // Phase 23 v2 slice 7: mark the session as finalized so a
+        // future return via ?chat=<id> shows the homepage default
+        // state, not a stale coaching thread.
+        await persistTurns(coachTurns, 'finalized');
         await commitProposal({
           topic: lastAssistant.proposal.topic,
           outline: lastAssistant.proposal.outline,

@@ -34,7 +34,9 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
 
 export type RecentItem = {
-  kind: 'draft' | 'idea';
+  // Phase 23 v2 slice 7 (2026-05-07): 'chat' = a Writing × With-
+  // assistant coaching session. Resumes via /studio?chat=<id>.
+  kind: 'draft' | 'idea' | 'chat';
   id: string;
   title: string | null;
   href: string;

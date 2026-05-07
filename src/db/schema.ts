@@ -1235,3 +1235,49 @@ export const ideaClusters = pgTable(
 export type IdeaClusterRow = typeof ideaClusters.$inferSelect;
 export type NewIdeaCluster = typeof ideaClusters.$inferInsert;
 
+
+// ────────────────────────────────────────────
+// CHAT_SESSIONS — Phase 23 v2 slice 7
+// Persists a Writing × With-assistant coaching thread so the user
+// can navigate away (open a source in a new tab, get pulled into a
+// meeting) and come back via /studio?chat=<id> without losing the
+// conversation. Sidebar surfaces recent sessions.
+// ────────────────────────────────────────────
+export const chatSessions = pgTable(
+  'chat_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    title: text('title').notNull(),
+    topic: text('topic').notNull(),
+
+    // 'newsletter' | 'linkedin' | 'unknown'
+    platformGuess: text('platform_guess').notNull().default('unknown'),
+
+    // CoachTurn[] — { kind: 'user' | 'assistant', text?, proposal?,
+    // carriedAngleLine?, carriedSourceIds?, refinementKey? }.
+    turns: jsonb('turns').notNull().default([]),
+
+    // 'thread' | 'coaching' | 'finalized'
+    stage: text('stage').notNull().default('coaching'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    userUpdatedIdx: index('chat_sessions_user_updated_idx').on(
+      table.userId,
+      table.updatedAt
+    ),
+  })
+);
+
+export type ChatSessionRow = typeof chatSessions.$inferSelect;
+export type NewChatSession = typeof chatSessions.$inferInsert;

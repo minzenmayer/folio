@@ -17,6 +17,7 @@ import { eq, desc } from 'drizzle-orm';
 import { db, drafts, ideas } from '@/db';
 import { requireUser } from '@/lib/auth';
 import { Sidebar, type RecentItem } from './Sidebar';
+import { listRecentChatSessions } from './actions';
 import { SettingsModal } from './SettingsModal';
 
 const RECENT_PER_KIND = 15;
@@ -38,10 +39,10 @@ export default async function StudioLayout({
   const firstName =
     clerk?.firstName || user.name?.split(' ')[0] || 'Your';
 
-  // Pull recent drafts + ideas in parallel. Each capped at RECENT_PER_KIND
-  // so the merged + truncated list still leaves room for the other kind
-  // even if one side dominates.
-  const [draftRows, ideaRows] = await Promise.all([
+  // Pull recent drafts + ideas + chat sessions in parallel. Each
+  // capped at RECENT_PER_KIND so the merged + truncated list still
+  // leaves room for the other kinds even if one dominates.
+  const [draftRows, ideaRows, chatRows] = await Promise.all([
     db
       .select({
         id: drafts.id,
@@ -63,6 +64,7 @@ export default async function StudioLayout({
       .where(eq(ideas.userId, user.id))
       .orderBy(desc(ideas.lastVisitedAt))
       .limit(RECENT_PER_KIND),
+    listRecentChatSessions(RECENT_PER_KIND),
   ]);
 
   const items: RecentItem[] = [
@@ -81,6 +83,13 @@ export default async function StudioLayout({
       // Prefer lastVisitedAt for ideas — it tracks engagement; fall back
       // to updatedAt and finally epoch-zero if both are null.
       iso: toIso(i.lastVisitedAt ?? i.updatedAt),
+    })),
+    ...chatRows.map((c): RecentItem => ({
+      kind: 'chat',
+      id: c.id,
+      title: c.title,
+      href: `/studio?chat=${c.id}`,
+      iso: c.updatedAt,
     })),
   ];
 

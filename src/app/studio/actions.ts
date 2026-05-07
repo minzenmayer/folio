@@ -2889,3 +2889,201 @@ export async function runRefinement(
     };
   }
 }
+
+// ─── chat_sessions — Phase 23 v2 slice 7 ─────────────────────────────
+//
+// Persist a Writing × With-assistant coaching thread so the user can
+// step away (open a source in a new tab, get pulled into a meeting)
+// and return without losing the conversation. The sidebar surfaces
+// recent sessions; /studio?chat=<id> rehydrates a session.
+
+import { chatSessions } from '@/db';
+
+const createChatSessionSchema = z.object({
+  topic: z.string().min(1).max(2000),
+  title: z.string().min(1).max(120),
+  platformGuess: z.enum(['newsletter', 'linkedin', 'unknown']).default('unknown'),
+  // CoachTurn[] — opaque from the server's perspective. The shape is
+  // owned by the client. We just persist the JSON and hand it back
+  // on resume.
+  turns: z.array(z.unknown()),
+  stage: z.enum(['thread', 'coaching', 'finalized']).default('coaching'),
+});
+
+export type CreateChatSessionResult =
+  | { ok: true; id: string }
+  | { ok: false; reason: 'invalid_input' | 'error'; message: string };
+
+export async function createChatSession(
+  input: unknown
+): Promise<CreateChatSessionResult> {
+  let parsed: z.infer<typeof createChatSessionSchema>;
+  try {
+    parsed = createChatSessionSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+
+  try {
+    const [row] = await db
+      .insert(chatSessions)
+      .values({
+        userId: user.id,
+        title: parsed.title.slice(0, 120),
+        topic: parsed.topic.slice(0, 2000),
+        platformGuess: parsed.platformGuess,
+        turns: parsed.turns,
+        stage: parsed.stage,
+      })
+      .returning({ id: chatSessions.id });
+    return { ok: true, id: row.id };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'unknown',
+    };
+  }
+}
+
+const updateChatSessionSchema = z.object({
+  id: z.string().uuid(),
+  turns: z.array(z.unknown()),
+  stage: z.enum(['thread', 'coaching', 'finalized']).optional(),
+});
+
+export async function updateChatSession(
+  input: unknown
+): Promise<{ ok: true } | { ok: false; reason: string; message: string }> {
+  let parsed: z.infer<typeof updateChatSessionSchema>;
+  try {
+    parsed = updateChatSessionSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+
+  try {
+    await db
+      .update(chatSessions)
+      .set({
+        turns: parsed.turns,
+        ...(parsed.stage ? { stage: parsed.stage } : {}),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chatSessions.id, parsed.id),
+          eq(chatSessions.userId, user.id)
+        )
+      );
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'unknown',
+    };
+  }
+}
+
+export type ChatSessionDetail = {
+  id: string;
+  title: string;
+  topic: string;
+  platformGuess: 'newsletter' | 'linkedin' | 'unknown';
+  turns: unknown[];
+  stage: 'thread' | 'coaching' | 'finalized';
+};
+
+export async function getChatSession(
+  id: unknown
+): Promise<ChatSessionDetail | null> {
+  if (typeof id !== 'string') return null;
+  const user = await requireUser();
+  try {
+    const [row] = await db
+      .select({
+        id: chatSessions.id,
+        title: chatSessions.title,
+        topic: chatSessions.topic,
+        platformGuess: chatSessions.platformGuess,
+        turns: chatSessions.turns,
+        stage: chatSessions.stage,
+      })
+      .from(chatSessions)
+      .where(
+        and(eq(chatSessions.id, id), eq(chatSessions.userId, user.id))
+      )
+      .limit(1);
+    if (!row) return null;
+    return {
+      id: row.id,
+      title: row.title,
+      topic: row.topic,
+      platformGuess: row.platformGuess as ChatSessionDetail['platformGuess'],
+      turns: Array.isArray(row.turns) ? row.turns : [],
+      stage: row.stage as ChatSessionDetail['stage'],
+    };
+  } catch (err) {
+    console.warn('[getChatSession] failed', err);
+    return null;
+  }
+}
+
+export type ChatSessionListItem = {
+  id: string;
+  title: string;
+  updatedAt: string;
+};
+
+export async function listRecentChatSessions(
+  limit: number = 12
+): Promise<ChatSessionListItem[]> {
+  const user = await requireUser();
+  try {
+    const rows = await db
+      .select({
+        id: chatSessions.id,
+        title: chatSessions.title,
+        updatedAt: chatSessions.updatedAt,
+      })
+      .from(chatSessions)
+      .where(eq(chatSessions.userId, user.id))
+      .orderBy(desc(chatSessions.updatedAt))
+      .limit(Math.max(1, Math.min(limit, 40)));
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      updatedAt: r.updatedAt.toISOString(),
+    }));
+  } catch (err) {
+    console.warn('[listRecentChatSessions] failed', err);
+    return [];
+  }
+}
+
+// Title-from-topic helper. Cheap deterministic version: title-case
+// the first phrase, truncate to ~50 chars. Used at session-create
+// time so the sidebar entry has a readable name immediately.
+export function chatSessionTitleFromTopic(topic: string): string {
+  const trimmed = topic.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return 'Untitled';
+  const cut = trimmed.slice(0, 50);
+  // Strip trailing partial word
+  const stop = cut.lastIndexOf(' ');
+  const safe = trimmed.length > 50 && stop > 20 ? cut.slice(0, stop) : cut;
+  // Capitalize first letter
+  return safe.charAt(0).toUpperCase() + safe.slice(1);
+}
