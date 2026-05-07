@@ -45,7 +45,17 @@ type Stage = 'default' | 'thinking' | 'thread' | 'coaching' | 'error';
 // thread. user turns are plain text; assistant turns carry the
 // proposeFromTopic structured result so angles render inline.
 type CoachTurn =
-  | { kind: 'user'; text: string }
+  | {
+      kind: 'user';
+      text: string;
+      // Phase 23 v2 slice 5.3 (2026-05-06): the user turn records
+      // which angle / sources were 'carried' along when the user
+      // sent. Lets the prior assistant turn render persistent
+      // emerald outlines on those items so the user keeps seeing
+      // what traveled with them.
+      carriedAngleLine?: string;
+      carriedSourceIds?: ReadonlyArray<string>;
+    }
   | { kind: 'assistant'; proposal: SparProposal };
 
 // Narrow the success branch out so JSX can rely on the angles/outline/
@@ -350,9 +360,17 @@ export function HomeComposer() {
     }
     const userTurnText = composeUserTurn(selected, reply, sourceTitles);
     if (!userTurnText) return;
+    const carriedSourceIds = Array.from(threadSelectedSourceIds);
     const initialThread: CoachTurn[] = [
       { kind: 'assistant', proposal },
-      { kind: 'user', text: userTurnText },
+      {
+        kind: 'user',
+        text: userTurnText,
+        ...(selected ? { carriedAngleLine: selected.line } : {}),
+        ...(carriedSourceIds.length > 0
+          ? { carriedSourceIds }
+          : {}),
+      },
     ];
     setCoachTurns(initialThread);
     setReplyText('');
@@ -392,7 +410,10 @@ export function HomeComposer() {
     });
   }
 
-  function sendCoachReply() {
+  function sendCoachReply(meta?: {
+    carriedAngleLine?: string;
+    carriedSourceIds?: ReadonlyArray<string>;
+  }) {
     const reply = replyText.trim();
     if (!reply || coachTurns.length === 0) return;
     const lastAssistant = [...coachTurns]
@@ -401,7 +422,15 @@ export function HomeComposer() {
         t.kind === 'assistant'
       );
     if (!lastAssistant) return;
-    const next: CoachTurn[] = [...coachTurns, { kind: 'user', text: reply }];
+    const userTurn: CoachTurn = {
+      kind: 'user',
+      text: reply,
+      ...(meta?.carriedAngleLine ? { carriedAngleLine: meta.carriedAngleLine } : {}),
+      ...(meta?.carriedSourceIds && meta.carriedSourceIds.length > 0
+        ? { carriedSourceIds: meta.carriedSourceIds }
+        : {}),
+    };
+    const next: CoachTurn[] = [...coachTurns, userTurn];
     setCoachTurns(next);
     setReplyText('');
     runCoachReply(next, lastAssistant.proposal.topic, lastAssistant.proposal.platformGuess);
@@ -1232,7 +1261,10 @@ function CoachView({
   isProposing: boolean;
   isCommitting: boolean;
   onReplyChange: (text: string) => void;
-  onSendReply: () => void;
+  onSendReply: (meta?: {
+    carriedAngleLine?: string;
+    carriedSourceIds?: ReadonlyArray<string>;
+  }) => void;
   onOpenEditor: () => void;
   onStartOver: () => void;
 }) {
@@ -1354,11 +1386,20 @@ function CoachView({
     const typed = replyText.trim();
     if (typed) parts.push(typed);
     if (parts.length === 0) return;
+    const carriedAngle = selectedAngleLineInLatest;
+    const carriedIds = Array.from(selectedSourceIds);
     onReplyChange(parts.join('\n\n'));
     setSelectedAngleLineInLatest(null);
     setSelectedRefinement(null);
     setSelectedSourceIds(new Set());
-    setTimeout(() => onSendReply(), 0);
+    setTimeout(
+      () =>
+        onSendReply({
+          ...(carriedAngle ? { carriedAngleLine: carriedAngle } : {}),
+          ...(carriedIds.length > 0 ? { carriedSourceIds: carriedIds } : {}),
+        }),
+      0
+    );
   }
 
   const canSend =
@@ -1403,6 +1444,18 @@ function CoachView({
               const beat = BEATS[Math.min(assistantIndex, BEATS.length - 1)];
               const isLatest = turn === lastAssistant;
               assistantIndex += 1;
+              const nextTurn = turns[i + 1];
+              const carriedAngleLine =
+                nextTurn && nextTurn.kind === 'user'
+                  ? nextTurn.carriedAngleLine ?? null
+                  : null;
+              const carriedIdsArr =
+                nextTurn && nextTurn.kind === 'user'
+                  ? nextTurn.carriedSourceIds ?? null
+                  : null;
+              const carriedSourceIds = carriedIdsArr
+                ? new Set(carriedIdsArr)
+                : undefined;
               return (
                 <AssistantTurn
                   key={i}
@@ -1426,8 +1479,10 @@ function CoachView({
                   onRefinementToggle={
                     isLatest && beat.key === 'done' ? toggleRefinement : undefined
                   }
-                  selectedSourceIds={selectedSourceIds}
-                  onPickSource={openSourceModal}
+                  selectedSourceIds={isLatest ? selectedSourceIds : undefined}
+                  onPickSource={isLatest ? openSourceModal : undefined}
+                  carriedSourceIds={carriedSourceIds}
+                  carriedAngleLine={carriedAngleLine}
                 />
               );
             });
@@ -1535,6 +1590,8 @@ function AssistantTurn({
   onRefinementToggle,
   selectedSourceIds,
   onPickSource,
+  carriedSourceIds,
+  carriedAngleLine,
 }: {
   proposal: SparProposal;
   beat?: Beat;
@@ -1544,6 +1601,8 @@ function AssistantTurn({
   onRefinementToggle?: (label: string, prompt: string) => void;
   selectedSourceIds?: ReadonlySet<string>;
   onPickSource?: (source: AngleSource) => void;
+  carriedSourceIds?: ReadonlySet<string>;
+  carriedAngleLine?: string | null;
 }) {
   const { visibleThinking, angles, followUpQuestion } = proposal;
   // Break the summary into sentences so a wall of LLM prose reads as
@@ -1592,6 +1651,7 @@ function AssistantTurn({
         <SpaceStrip
           sources={angles.flatMap((a) => a.sources)}
           selectedIds={selectedSourceIds ?? undefined}
+          carriedIds={carriedSourceIds ?? undefined}
           onPick={onPickSource}
         />
       )}
@@ -1628,6 +1688,11 @@ function AssistantTurn({
                 </div>
               );
               const selected = selectedAngleLine === angle.line;
+              const carried =
+                !selected &&
+                carriedAngleLine !== undefined &&
+                carriedAngleLine !== null &&
+                carriedAngleLine === angle.line;
               return (
                 <li key={`${i}-${angle.line.slice(0, 16)}`}>
                   {interactive ? (
@@ -1638,13 +1703,21 @@ function AssistantTurn({
                       className={`w-full text-left rounded-soft border px-3 py-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
                         selected
                           ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100'
-                          : 'bg-paper border-rule hover:bg-paper-2 hover:border-rule-strong'
+                          : carried
+                            ? 'bg-paper border-emerald-300 hover:bg-paper-2'
+                            : 'bg-paper border-rule hover:bg-paper-2 hover:border-rule-strong'
                       }`}
                     >
                       {inner}
                     </button>
                   ) : (
-                    <div className="rounded-soft border border-rule bg-paper px-3 py-2">
+                    <div
+                      className={`rounded-soft border px-3 py-2 ${
+                        carried
+                          ? 'bg-paper border-emerald-300'
+                          : 'bg-paper border-rule'
+                      }`}
+                    >
                       {inner}
                     </div>
                   )}
@@ -1996,10 +2069,12 @@ function SourcePills({
 function SpaceStrip({
   sources,
   selectedIds,
+  carriedIds,
   onPick,
 }: {
   sources: ReadonlyArray<AngleSource>;
   selectedIds?: ReadonlySet<string>;
+  carriedIds?: ReadonlySet<string>;
   onPick?: (source: AngleSource) => void;
 }) {
   const seen = new Set<string>();
@@ -2026,10 +2101,17 @@ function SpaceStrip({
       <div className="flex flex-wrap gap-1.5">
         {visible.map((s) => {
           const isSelected = selectedIds?.has(s.id) ?? false;
+          const isCarried = carriedIds?.has(s.id) ?? false;
           const interactive = typeof onPick === 'function';
+          // Three pill states: active selection (filled emerald,
+          // about to ride along on the next reply), carried
+          // (subtle emerald outline, has already traveled with a
+          // prior reply — persistent indicator), and neutral.
           const cls = isSelected
             ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-            : 'bg-paper-2 text-tag border-rule';
+            : isCarried
+              ? 'bg-paper-2 text-emerald-700 border-emerald-300'
+              : 'bg-paper-2 text-tag border-rule';
           const Tag = interactive ? 'button' : 'span';
           return (
             <Tag
@@ -2270,8 +2352,8 @@ function SourceDetailModal({
           {detail?.url && (
             <a
               href={detail.url}
-              target={detail.isExternal ? '_blank' : undefined}
-              rel={detail.isExternal ? 'noopener noreferrer' : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
               className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink hover:text-tag transition-colors"
             >
               Open in garden →
