@@ -27,8 +27,10 @@ import {
   proposeFromTopic,
   regenerateAngles,
   commitProposal,
+  getSourceDetail,
   type ProposeFromTopicResult,
   type ProposeAngle,
+  type GetSourceDetailResult,
 } from './actions';
 import { type SimilarKind } from '@/lib/retrieval-kinds';
 
@@ -177,6 +179,24 @@ export function HomeComposer() {
   const [isRegenerating, startRegenTransition] = useTransition();
   const [isCommitting, startCommitTransition] = useTransition();
 
+  // Phase 23 v2 slice 5.2 (2026-05-06): the angles page (ThreadView)
+  // also supports the expand-pill modal + 'bring this with me'
+  // selection. State lives at this level so the Continue → handoff
+  // can include selected source titles in the first coach turn.
+  const [threadSelectedSourceIds, setThreadSelectedSourceIds] = useState<
+    Set<string>
+  >(new Set());
+  const [threadModalSource, setThreadModalSource] =
+    useState<AngleSource | null>(null);
+  function toggleThreadSourceSelection(id: string) {
+    setThreadSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   // Phase 23 v2 slice 4.5 (2026-05-06): the studio sidebar hides
   // while the coaching stage is active. Slice 4.6 (2026-05-06) also
   // toggles tb-chat-active on every non-default stage so the
@@ -271,6 +291,8 @@ export function HomeComposer() {
     setSelectedAngleIndex(null);
     setReplyText('');
     setCoachTurns([]);
+    setThreadSelectedSourceIds(new Set());
+    setThreadModalSource(null);
   }
 
   // Phase 23 v2 slice 4.5 (2026-05-06): cards toggle a selection
@@ -315,7 +337,18 @@ export function HomeComposer() {
     const selected =
       selectedAngleIndex !== null ? proposal.angles[selectedAngleIndex] : null;
     const reply = replyText.trim();
-    const userTurnText = composeUserTurn(selected, reply);
+    // Phase 23 v2 slice 5.2 (2026-05-06): selected sources from
+    // the angles page travel into the first coach turn so the LLM
+    // sees what the user wants to anchor on.
+    const sourceTitles: string[] = [];
+    if (threadSelectedSourceIds.size > 0) {
+      const allSources = proposal.angles.flatMap((a) => a.sources);
+      for (const id of threadSelectedSourceIds) {
+        const src = allSources.find((s) => s.id === id);
+        if (src && src.title) sourceTitles.push(src.title);
+      }
+    }
+    const userTurnText = composeUserTurn(selected, reply, sourceTitles);
     if (!userTurnText) return;
     const initialThread: CoachTurn[] = [
       { kind: 'assistant', proposal },
@@ -324,6 +357,8 @@ export function HomeComposer() {
     setCoachTurns(initialThread);
     setReplyText('');
     setSelectedAngleIndex(null);
+    setThreadSelectedSourceIds(new Set());
+    setThreadModalSource(null);
     setStage('coaching');
     runCoachReply(initialThread, proposal.topic, proposal.platformGuess);
   }
@@ -428,6 +463,11 @@ export function HomeComposer() {
           onReplyChange={setReplyText}
           onContinue={continueToCoaching}
           onStartOver={startOver}
+          selectedSourceIds={threadSelectedSourceIds}
+          onPickSource={(src) => setThreadModalSource(src)}
+          modalSource={threadModalSource}
+          onCloseModal={() => setThreadModalSource(null)}
+          onToggleSelectSource={toggleThreadSourceSelection}
         />
       </div>
     );
@@ -936,6 +976,11 @@ function ThreadView({
   onReplyChange,
   onContinue,
   onStartOver,
+  selectedSourceIds,
+  onPickSource,
+  modalSource,
+  onCloseModal,
+  onToggleSelectSource,
 }: {
   proposal: SparProposal;
   selectedAngleIndex: number | null;
@@ -947,6 +992,11 @@ function ThreadView({
   onReplyChange: (text: string) => void;
   onContinue: () => void;
   onStartOver: () => void;
+  selectedSourceIds: ReadonlySet<string>;
+  onPickSource: (source: AngleSource) => void;
+  modalSource: AngleSource | null;
+  onCloseModal: () => void;
+  onToggleSelectSource: (id: string) => void;
 }) {
   const threadReplyRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
@@ -962,6 +1012,7 @@ function ThreadView({
     !isRegenerating &&
     (selectedAngleIndex !== null || replyText.trim().length >= 3);
   return (
+    <>
     <div className="space-y-4">
       <div className="rounded-card border border-rule bg-paper p-6 space-y-5">
         <div>
@@ -980,7 +1031,11 @@ function ThreadView({
           <p className="font-sans text-[13px] text-ink-soft leading-snug">
             {visibleThinking.summary}
           </p>
-          <SpaceStrip sources={angles.flatMap((a) => a.sources)} />
+          <SpaceStrip
+            sources={angles.flatMap((a) => a.sources)}
+            selectedIds={selectedSourceIds}
+            onPick={onPickSource}
+          />
         </div>
 
         {angles.length > 0 && (
@@ -1120,6 +1175,15 @@ function ThreadView({
         </button>
       </div>
     </div>
+    {modalSource && (
+      <SourceDetailModal
+        source={modalSource}
+        selected={selectedSourceIds.has(modalSource.id)}
+        onToggleSelect={() => onToggleSelectSource(modalSource.id)}
+        onClose={onCloseModal}
+      />
+    )}
+    </>
   );
 }
 
@@ -1127,10 +1191,14 @@ function ThreadView({
 
 function composeUserTurn(
   selected: ProposeAngle | null,
-  reply: string
+  reply: string,
+  sourceTitles: ReadonlyArray<string> = []
 ): string {
   const parts: string[] = [];
   if (selected) parts.push(`I'll go with: ${selected.line}`);
+  if (sourceTitles.length > 0) {
+    parts.push(`Pulling from my space: ${sourceTitles.join('; ')}`);
+  }
   if (reply) parts.push(reply);
   return parts.join('\n\n');
 }
@@ -1219,6 +1287,48 @@ function CoachView({
     setSelectedRefinement((prev) => (prev?.label === label ? null : { label, prompt }));
   }
 
+  // Phase 23 v2 slice 5.2 (2026-05-06): selected sources (pills the
+  // user wants to bring along) + modal state for the source detail
+  // popup. Selected source titles ride along on the next reply via
+  // commitSend so the LLM sees what the user wants to anchor on.
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [modalSource, setModalSource] = useState<AngleSource | null>(null);
+  const [allSources, setAllSources] = useState<Map<string, AngleSource>>(
+    new Map()
+  );
+  // Keep an index of every source seen across turns so commitSend can
+  // resolve ids → titles when building the user turn.
+  useEffect(() => {
+    setAllSources((prev) => {
+      const next = new Map(prev);
+      for (const turn of turns) {
+        if (turn.kind !== 'assistant') continue;
+        for (const angle of turn.proposal.angles) {
+          for (const src of angle.sources) {
+            if (!next.has(src.id)) next.set(src.id, src);
+          }
+        }
+      }
+      return next;
+    });
+  }, [turns]);
+  function toggleSourceSelection(id: string) {
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function openSourceModal(source: AngleSource) {
+    setModalSource(source);
+  }
+  function closeSourceModal() {
+    setModalSource(null);
+  }
+
   // Phase 23 v2 slice 5.1 (2026-05-06): commitSend builds the user
   // turn from any selected angle, any selected refinement chip, and
   // the typed reply (any combination, in that priority order). Then
@@ -1231,12 +1341,23 @@ function CoachView({
     if (selectedRefinement) {
       parts.push(selectedRefinement.prompt);
     }
+    if (selectedSourceIds.size > 0) {
+      const titles: string[] = [];
+      for (const id of selectedSourceIds) {
+        const src = allSources.get(id);
+        if (src && src.title) titles.push(src.title);
+      }
+      if (titles.length > 0) {
+        parts.push(`Pulling from my space: ${titles.join('; ')}`);
+      }
+    }
     const typed = replyText.trim();
     if (typed) parts.push(typed);
     if (parts.length === 0) return;
     onReplyChange(parts.join('\n\n'));
     setSelectedAngleLineInLatest(null);
     setSelectedRefinement(null);
+    setSelectedSourceIds(new Set());
     setTimeout(() => onSendReply(), 0);
   }
 
@@ -1245,9 +1366,11 @@ function CoachView({
     !isCommitting &&
     (replyText.trim().length >= 1 ||
       selectedAngleLineInLatest !== null ||
-      selectedRefinement !== null);
+      selectedRefinement !== null ||
+      selectedSourceIds.size > 0);
   const canOpen = !isCommitting && lastAssistant !== undefined;
   return (
+    <>
     <div className="min-h-[calc(100vh-0px)] flex flex-col">
       <div className="flex items-center justify-between px-6 py-4 border-b border-rule shrink-0">
         <button
@@ -1303,6 +1426,8 @@ function CoachView({
                   onRefinementToggle={
                     isLatest && beat.key === 'done' ? toggleRefinement : undefined
                   }
+                  selectedSourceIds={selectedSourceIds}
+                  onPickSource={openSourceModal}
                 />
               );
             });
@@ -1377,6 +1502,15 @@ function CoachView({
         </div>
       </div>
     </div>
+    {modalSource && (
+      <SourceDetailModal
+        source={modalSource}
+        selected={selectedSourceIds.has(modalSource.id)}
+        onToggleSelect={() => toggleSourceSelection(modalSource.id)}
+        onClose={closeSourceModal}
+      />
+    )}
+    </>
   );
 }
 
@@ -1399,6 +1533,8 @@ function AssistantTurn({
   onToggleAngle,
   selectedRefinementLabel,
   onRefinementToggle,
+  selectedSourceIds,
+  onPickSource,
 }: {
   proposal: SparProposal;
   beat?: Beat;
@@ -1406,6 +1542,8 @@ function AssistantTurn({
   onToggleAngle?: (line: string) => void;
   selectedRefinementLabel?: string | null;
   onRefinementToggle?: (label: string, prompt: string) => void;
+  selectedSourceIds?: ReadonlySet<string>;
+  onPickSource?: (source: AngleSource) => void;
 }) {
   const { visibleThinking, angles, followUpQuestion } = proposal;
   // Break the summary into sentences so a wall of LLM prose reads as
@@ -1451,7 +1589,11 @@ function AssistantTurn({
         </div>
       )}
       {!isDone && (
-        <SpaceStrip sources={angles.flatMap((a) => a.sources)} />
+        <SpaceStrip
+          sources={angles.flatMap((a) => a.sources)}
+          selectedIds={selectedSourceIds ?? undefined}
+          onPick={onPickSource}
+        />
       )}
       {showAngles && angles.length > 0 && (
         <div>
@@ -1851,7 +1993,15 @@ function SourcePills({
 // assistant turn so the user can see what the system is pulling
 // from. Dedupes by source id, caps at four visible, falls silent
 // when there are no sources to surface.
-function SpaceStrip({ sources }: { sources: ReadonlyArray<AngleSource> }) {
+function SpaceStrip({
+  sources,
+  selectedIds,
+  onPick,
+}: {
+  sources: ReadonlyArray<AngleSource>;
+  selectedIds?: ReadonlySet<string>;
+  onPick?: (source: AngleSource) => void;
+}) {
   const seen = new Set<string>();
   const unique: AngleSource[] = [];
   for (const s of sources) {
@@ -1861,11 +2011,12 @@ function SpaceStrip({ sources }: { sources: ReadonlyArray<AngleSource> }) {
     }
   }
   if (unique.length === 0) return null;
-  // Phase 23 v2 slice 5.0 (2026-05-06): four max, no +N (the
-  // overflow indicator was uninformative — users could not click
-  // it). Per-kind color on each pill so the strip reads kinds at
-  // a glance: garden green, CSL amber, LinkedIn sky, vault violet,
-  // inbox rose. Pills wider so titles read fully (most do).
+  // Phase 23 v2 slice 5.2 (2026-05-06): pills are now clickable
+  // expand-buttons (the kind-colored border was reading as a
+  // permanent selected state — confusing). Default pills are
+  // neutral gray; selected pills tip to emerald to match other
+  // selection states across the chat. Clicking a pill opens a
+  // modal with the title + excerpt + 'open in garden' link.
   const visible = unique.slice(0, 4);
   return (
     <div className="space-y-1.5">
@@ -1874,19 +2025,28 @@ function SpaceStrip({ sources }: { sources: ReadonlyArray<AngleSource> }) {
       </p>
       <div className="flex flex-wrap gap-1.5">
         {visible.map((s) => {
-          const short = shortenSourceLabel(s.label);
-          const cls = kindColorClasses(short, false);
+          const isSelected = selectedIds?.has(s.id) ?? false;
+          const interactive = typeof onPick === 'function';
+          const cls = isSelected
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+            : 'bg-paper-2 text-tag border-rule';
+          const Tag = interactive ? 'button' : 'span';
           return (
-            <span
+            <Tag
               key={s.id}
+              type={interactive ? 'button' : undefined}
+              onClick={interactive ? () => onPick?.(s) : undefined}
               title={s.title ?? undefined}
-              className={`flex items-start gap-1.5 max-w-[320px] rounded-full border px-2.5 py-1 ${cls}`}
+              aria-pressed={interactive ? isSelected : undefined}
+              className={`flex items-start gap-1.5 max-w-[320px] rounded-full border px-2.5 py-1 transition-colors text-left ${cls} ${
+                interactive ? 'hover:border-rule-strong cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong' : ''
+              }`}
             >
               <KindGlyph kind={s.kind} />
               <span className="font-sans text-[12px] leading-snug line-clamp-2">
                 {s.title || 'Untitled'}
               </span>
-            </span>
+            </Tag>
           );
         })}
       </div>
@@ -1964,5 +2124,161 @@ function KindGlyph({ kind }: { kind: SimilarKind }) {
     <svg {...svgProps}>
       <circle cx="7" cy="7" r="2.5" />
     </svg>
+  );
+}
+
+// Phase 23 v2 slice 5.2 (2026-05-06): expand-pill modal. Click a
+// 'From your space' chip to open this — title + ~120-word excerpt
+// + 'open in garden →' link + 'Bring this with me' select toggle +
+// close. Detail is fetched lazily via getSourceDetail. Backdrop
+// click and Esc close the modal. The select toggle persists state
+// up in CoachView so the source travels with the next reply.
+function SourceDetailModal({
+  source,
+  selected,
+  onToggleSelect,
+  onClose,
+}: {
+  source: AngleSource;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<
+    Extract<GetSourceDetailResult, { ok: true }> | null
+  >(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setDetail(null);
+    setError(null);
+    getSourceDetail({ id: source.id, kind: source.kind })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setDetail(res);
+        } else {
+          setError(res.message);
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Unknown error.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source.id, source.kind]);
+
+  // Esc closes.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const kindLabel = shortenSourceLabel(source.label);
+  const headerTitle = detail?.title ?? source.title ?? 'Untitled';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-[8vh]">
+      <button
+        type="button"
+        aria-label="Close"
+        className="absolute inset-0 bg-ink/40 cursor-default"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={headerTitle}
+        className="relative w-full max-w-[600px] rounded-card bg-paper border border-rule shadow-modal flex flex-col max-h-[80vh] overflow-hidden"
+      >
+        <div className="border-b border-rule px-5 py-3 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <KindGlyph kind={source.kind} />
+            <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-tag">
+              {kindLabel}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close detail"
+            title="Close"
+            className="p-1.5 rounded-soft text-tag hover:text-ink hover:bg-paper-2 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <line x1="3.5" y1="3.5" x2="10.5" y2="10.5" />
+              <line x1="10.5" y1="3.5" x2="3.5" y2="10.5" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-3">
+          <h2 className="font-sans text-[18px] font-semibold text-ink leading-snug">
+            {headerTitle}
+          </h2>
+          {loading && (
+            <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-tag flex items-center gap-2">
+              <SpinGlyph />
+              Pulling the rest.
+            </p>
+          )}
+          {error && !loading && (
+            <p className="font-sans text-[14px] text-ink-soft leading-snug">
+              {error}
+            </p>
+          )}
+          {detail && !loading && (
+            <p className="font-sans text-[14px] text-ink-soft leading-relaxed whitespace-pre-wrap">
+              {detail.excerpt || 'No excerpt available for this source.'}
+            </p>
+          )}
+        </div>
+
+        <div className="border-t border-rule px-5 py-3 flex items-center justify-between gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleSelect}
+            aria-pressed={selected}
+            className={`font-mono text-[11px] tracking-[0.18em] uppercase rounded-full px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong border ${
+              selected
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                : 'bg-paper text-ink border-rule hover:bg-paper-2 hover:border-rule-strong'
+            }`}
+          >
+            {selected ? 'Selected ✓' : 'Bring this with me'}
+          </button>
+          {detail?.url && (
+            <a
+              href={detail.url}
+              target={detail.isExternal ? '_blank' : undefined}
+              rel={detail.isExternal ? 'noopener noreferrer' : undefined}
+              className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink hover:text-tag transition-colors"
+            >
+              Open in garden →
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

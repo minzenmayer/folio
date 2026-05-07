@@ -2423,3 +2423,281 @@ export async function proposeClosers(
 ): Promise<ProposeHookCloserResult> {
   return runHookCloser('closer', input);
 }
+
+// ─── getSourceDetail — Phase 23 v2 slice 5.2 ─────────────────────────
+//
+// Expand a 'From your space' pill into a modal. Each kind hits a
+// different table for its title + excerpt. Read-only; lazy — only
+// called when the user actually clicks a pill.
+
+const getSourceDetailSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(SIMILAR_KINDS_FOR_ZOD),
+});
+
+export type GetSourceDetailResult =
+  | {
+      ok: true;
+      kind: SimilarKind;
+      title: string;
+      excerpt: string;
+      url: string | null;
+      isExternal: boolean;
+    }
+  | {
+      ok: false;
+      reason: 'invalid_input' | 'not_found' | 'error';
+      message: string;
+    };
+
+const SOURCE_EXCERPT_MAX = 600; // roughly 120 words
+
+function truncateForExcerpt(
+  s: string | null | undefined,
+  n: number = SOURCE_EXCERPT_MAX
+): string {
+  if (!s) return '';
+  const trimmed = s.trim().replace(/\s+/g, ' ');
+  if (trimmed.length <= n) return trimmed;
+  return trimmed.slice(0, n).trimEnd() + '…';
+}
+
+export async function getSourceDetail(
+  input: unknown
+): Promise<GetSourceDetailResult> {
+  let parsed: z.infer<typeof getSourceDetailSchema>;
+  try {
+    parsed = getSourceDetailSchema.parse(input);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'invalid_input',
+      message: err instanceof Error ? err.message : 'invalid input',
+    };
+  }
+
+  const user = await requireUser();
+  const { id, kind } = parsed;
+
+  try {
+    if (kind === 'extracted_idea') {
+      const [row] = await db
+        .select({
+          title: extractedIdeas.title,
+          claim: extractedIdeas.claim,
+          evidence: extractedIdeas.evidence,
+        })
+        .from(extractedIdeas)
+        .where(
+          and(
+            eq(extractedIdeas.id, id),
+            eq(extractedIdeas.userId, user.id)
+          )
+        )
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const excerpt = truncateForExcerpt(
+        [row.claim, row.evidence].filter(Boolean).join('\n\n')
+      );
+      return {
+        ok: true,
+        kind,
+        title: row.title,
+        excerpt,
+        url: '/studio/insights',
+        isExternal: false,
+      };
+    }
+    if (kind === 'idea') {
+      const [row] = await db
+        .select({
+          title: ideas.title,
+          essence: ideas.essence,
+          body: ideas.body,
+        })
+        .from(ideas)
+        .where(and(eq(ideas.id, id), eq(ideas.userId, user.id)))
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const excerpt = truncateForExcerpt(row.essence ?? row.body ?? '');
+      return {
+        ok: true,
+        kind,
+        title: row.title,
+        excerpt,
+        url: `/studio/ideas/${id}`,
+        isExternal: false,
+      };
+    }
+    if (kind === 'newsletter_issue') {
+      const [row] = await db
+        .select({
+          title: newsletterIssues.title,
+          subtitle: newsletterIssues.subtitle,
+          bodyText: newsletterIssues.bodyText,
+          webUrl: newsletterIssues.webUrl,
+        })
+        .from(newsletterIssues)
+        .where(
+          and(
+            eq(newsletterIssues.id, id),
+            eq(newsletterIssues.userId, user.id)
+          )
+        )
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const excerpt = truncateForExcerpt(
+        row.subtitle ?? row.bodyText ?? ''
+      );
+      return {
+        ok: true,
+        kind,
+        title: row.title,
+        excerpt,
+        url: row.webUrl ?? '/studio/insights?tab=beehiiv',
+        isExternal: row.webUrl !== null,
+      };
+    }
+    if (kind === 'linkedin_post') {
+      const [row] = await db
+        .select({
+          content: linkedinPosts.content,
+          bodyClean: linkedinPosts.bodyClean,
+          linkedinUrl: linkedinPosts.linkedinUrl,
+        })
+        .from(linkedinPosts)
+        .where(
+          and(eq(linkedinPosts.id, id), eq(linkedinPosts.userId, user.id))
+        )
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const fullBody = row.bodyClean ?? row.content ?? '';
+      const excerpt = truncateForExcerpt(fullBody);
+      const title =
+        fullBody.split('\n').find((l) => l.trim().length > 0)?.slice(0, 80) ??
+        'LinkedIn post';
+      return {
+        ok: true,
+        kind,
+        title,
+        excerpt,
+        url: row.linkedinUrl,
+        isExternal: true,
+      };
+    }
+    if (kind === 'obsidian_note') {
+      const [row] = await db
+        .select({
+          title: obsidianNotes.title,
+          bodyText: obsidianNotes.bodyText,
+        })
+        .from(obsidianNotes)
+        .where(
+          and(
+            eq(obsidianNotes.id, id),
+            eq(obsidianNotes.userId, user.id)
+          )
+        )
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const excerpt = truncateForExcerpt(row.bodyText ?? '');
+      return {
+        ok: true,
+        kind,
+        title: row.title,
+        excerpt,
+        url: '/studio/insights?tab=obsidian',
+        isExternal: false,
+      };
+    }
+    if (kind === 'gmail_message') {
+      const [row] = await db
+        .select({
+          subject: gmailMessages.subject,
+          snippet: gmailMessages.snippet,
+          bodyClean: gmailMessages.bodyClean,
+        })
+        .from(gmailMessages)
+        .where(
+          and(
+            eq(gmailMessages.id, id),
+            eq(gmailMessages.userId, user.id)
+          )
+        )
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const excerpt = truncateForExcerpt(row.bodyClean ?? row.snippet ?? '');
+      return {
+        ok: true,
+        kind,
+        title: row.subject ?? 'Untitled message',
+        excerpt,
+        url: '/studio/insights?tab=gmail',
+        isExternal: false,
+      };
+    }
+    if (kind === 'draft') {
+      const [row] = await db
+        .select({ title: drafts.title })
+        .from(drafts)
+        .where(and(eq(drafts.id, id), eq(drafts.userId, user.id)))
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      return {
+        ok: true,
+        kind,
+        title: row.title ?? 'Untitled draft',
+        excerpt: 'Open the draft to see the full text.',
+        url: `/studio/page/${id}`,
+        isExternal: false,
+      };
+    }
+    if (kind === 'capture') {
+      const [row] = await db
+        .select({
+          body: captures.body,
+          summary: captures.summary,
+        })
+        .from(captures)
+        .where(and(eq(captures.id, id), eq(captures.userId, user.id)))
+        .limit(1);
+      if (!row) {
+        return { ok: false, reason: 'not_found', message: 'Source not found.' };
+      }
+      const excerpt = truncateForExcerpt(row.body ?? '');
+      return {
+        ok: true,
+        kind,
+        title: row.summary ?? 'Captured note',
+        excerpt,
+        url: '/studio/inbox',
+        isExternal: false,
+      };
+    }
+    return {
+      ok: false,
+      reason: 'not_found',
+      message: `Unknown source kind: ${kind}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'error',
+      message: err instanceof Error ? err.message : 'unknown',
+    };
+  }
+}
