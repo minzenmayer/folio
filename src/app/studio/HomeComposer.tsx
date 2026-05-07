@@ -2252,7 +2252,7 @@ function SpaceStrip({
       <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
         From your space
       </p>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
         {visible.map((s) => {
           const isSelected = selectedIds?.has(s.id) ?? false;
           const isCarried = carriedIds?.has(s.id) ?? false;
@@ -2274,7 +2274,7 @@ function SpaceStrip({
               onClick={interactive ? () => onPick?.(s) : undefined}
               title={s.title ?? undefined}
               aria-pressed={interactive ? isSelected : undefined}
-              className={`flex items-center gap-2 max-w-[340px] rounded-2xl border px-3 py-1.5 transition-colors text-left ${cls} ${
+              className={`flex items-center gap-2 w-full rounded-2xl border px-3 py-1.5 transition-colors text-left ${cls} ${
                 interactive ? 'hover:border-rule-strong cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong' : ''
               }`}
             >
@@ -2503,16 +2503,14 @@ function SourceDetailModal({
                     {detail.summary ? 'Body' : 'Excerpt'}
                   </p>
                   <div className="space-y-2">
-                    {detail.excerpt
-                      .split(/\n\s*\n/)
-                      .map((para, i) => (
-                        <p
-                          key={i}
-                          className="font-sans text-[14px] text-ink-soft leading-relaxed whitespace-pre-wrap"
-                        >
-                          {para}
-                        </p>
-                      ))}
+                    {splitForReading(detail.excerpt).map((para, i) => (
+                      <p
+                        key={i}
+                        className="font-sans text-[14px] text-ink-soft leading-relaxed whitespace-pre-wrap"
+                      >
+                        {para}
+                      </p>
+                    ))}
                   </div>
                 </div>
               )}
@@ -2579,3 +2577,30 @@ function SourceDetailModal({
     </div>
   );
 }
+
+// Phase 23 v2 slice 6.5 (2026-05-07): split a body excerpt for
+// readable rendering. If the excerpt has explicit paragraph breaks
+// (blank lines), use those. Otherwise group sentences into chunks
+// of three so LinkedIn-style single-block bodies still get visual
+// rhythm in the modal.
+function splitForReading(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const explicit = trimmed
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (explicit.length > 1) return explicit;
+  // No explicit paragraphs. Split into sentences, group by 3.
+  const sentences = trimmed
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (sentences.length <= 3) return [trimmed];
+  const chunks: string[] = [];
+  for (let i = 0; i < sentences.length; i += 3) {
+    chunks.push(sentences.slice(i, i + 3).join(' '));
+  }
+  return chunks;
+}
+
