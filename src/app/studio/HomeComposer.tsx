@@ -30,6 +30,7 @@ import {
   type ProposeFromTopicResult,
   type ProposeAngle,
 } from './actions';
+import { type SimilarKind } from '@/lib/retrieval-kinds';
 
 type Mode = 'with-assistant' | 'beside' | 'self-driving';
 type Path = 'writing' | 'ideation';
@@ -964,13 +965,14 @@ function ThreadView({
           </p>
         </div>
 
-        <div className="border-t border-rule pt-5">
-          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
+        <div className="border-t border-rule pt-5 space-y-3">
+          <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
             Thoughtbed
           </p>
           <p className="font-sans text-[13px] text-ink-soft leading-snug">
             {visibleThinking.summary}
           </p>
+          <SpaceStrip sources={angles.flatMap((a) => a.sources)} />
         </div>
 
         {angles.length > 0 && (
@@ -1371,6 +1373,7 @@ function AssistantTurn({
           ))}
         </div>
       )}
+      <SpaceStrip sources={angles.flatMap((a) => a.sources)} />
       {showAngles && angles.length > 0 && (
         <div>
           <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag mb-2">
@@ -1662,5 +1665,125 @@ function SourcePills({
         </span>
       )}
     </div>
+  );
+}
+
+
+// Phase 23 v2 slice 4.9 (2026-05-06): Garden surfacing in the chat
+// flow. The angles the LLM returns already cite source ids back to
+// retrieval — we lift those into a compact strip at the top of every
+// assistant turn so the user can see what the system is pulling
+// from. Dedupes by source id, caps at four visible, falls silent
+// when there are no sources to surface.
+function SpaceStrip({ sources }: { sources: ReadonlyArray<AngleSource> }) {
+  const seen = new Set<string>();
+  const unique: AngleSource[] = [];
+  for (const s of sources) {
+    if (!seen.has(s.id)) {
+      seen.add(s.id);
+      unique.push(s);
+    }
+  }
+  if (unique.length === 0) return null;
+  const visible = unique.slice(0, 4);
+  const overflow = unique.length - visible.length;
+  return (
+    <div className="space-y-1.5">
+      <p className="font-mono text-[10px] tracking-[0.2em] uppercase text-tag">
+        From your space
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {visible.map((s) => (
+          <span
+            key={s.id}
+            title={s.title ?? undefined}
+            className="flex items-center gap-1.5 max-w-[240px] rounded-full bg-paper-2 border border-rule px-2.5 py-1"
+          >
+            <KindGlyph kind={s.kind} />
+            <span className="font-sans text-[12px] text-ink leading-none truncate">
+              {s.title || 'Untitled'}
+            </span>
+          </span>
+        ))}
+        {overflow > 0 && (
+          <span className="flex items-center font-mono text-[10px] text-tag bg-paper-2 border border-rule rounded-full px-2 py-0.5">
+            +{overflow}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Tiny kind glyph rendered next to source titles. Stays monochrome
+// (zinc family) so the strip reads as ornament, not alarm. Each
+// kind has its own line silhouette so the eye learns the shape.
+function KindGlyph({ kind }: { kind: SimilarKind }) {
+  const svgProps = {
+    width: 11,
+    height: 11,
+    viewBox: '0 0 14 14',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.4,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+    className: 'text-tag shrink-0',
+  };
+  if (kind === 'extracted_idea') {
+    // garden — leaf
+    return (
+      <svg {...svgProps}>
+        <path d="M3 11C3 6 6 3 11 3C11 8 8 11 3 11Z" />
+        <line x1="3" y1="11" x2="7" y2="7" />
+      </svg>
+    );
+  }
+  if (kind === 'newsletter_issue') {
+    // CSL — envelope
+    return (
+      <svg {...svgProps}>
+        <rect x="2" y="4" width="10" height="6.5" rx="1" />
+        <polyline points="2.5,4.5 7,8 11.5,4.5" />
+      </svg>
+    );
+  }
+  if (kind === 'linkedin_post') {
+    // LinkedIn — rounded square with a quote stroke
+    return (
+      <svg {...svgProps}>
+        <rect x="2" y="2" width="10" height="10" rx="1.5" />
+        <line x1="5" y1="6" x2="5" y2="10" />
+        <circle cx="5" cy="4" r="0.6" fill="currentColor" />
+        <path d="M8 10V7c0-1 .8-1.5 1.5-1.5S11 6 11 7v3" />
+      </svg>
+    );
+  }
+  if (kind === 'obsidian_note') {
+    // vault — notebook
+    return (
+      <svg {...svgProps}>
+        <rect x="3" y="2.5" width="8" height="9" rx="0.5" />
+        <line x1="3" y1="5" x2="11" y2="5" />
+        <line x1="5" y1="7" x2="9" y2="7" />
+        <line x1="5" y1="9" x2="9" y2="9" />
+      </svg>
+    );
+  }
+  if (kind === 'gmail_message') {
+    // inbox — tray
+    return (
+      <svg {...svgProps}>
+        <polyline points="2,8 5,8 6.5,10 7.5,10 9,8 12,8" />
+        <path d="M2 8V4l1.5-1.5h7L12 4v4" />
+      </svg>
+    );
+  }
+  // fallback dot
+  return (
+    <svg {...svgProps}>
+      <circle cx="7" cy="7" r="2.5" />
+    </svg>
   );
 }
