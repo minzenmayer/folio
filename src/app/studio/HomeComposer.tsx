@@ -452,12 +452,6 @@ export function HomeComposer() {
       platformGuess === 'linkedin' || platformGuess === 'newsletter'
         ? platformGuess
         : undefined;
-    if (typeof window !== 'undefined') {
-      console.log(
-        '[Thoughtbed] runCoachReply branch:',
-        refinementKey ? `runRefinement(${refinementKey})` : 'proposeFromTopic'
-      );
-    }
     startProposeTransition(async () => {
       try {
         const args = {
@@ -486,12 +480,6 @@ export function HomeComposer() {
     carriedSourceIds?: ReadonlyArray<string>;
     refinementKey?: RefinementKey;
   }) {
-    if (typeof window !== 'undefined') {
-      console.log(
-        '[Thoughtbed] sendCoachReply meta JSON:',
-        JSON.stringify(meta, null, 2)
-      );
-    }
     const reply = meta.text.trim();
     if (!reply || coachTurns.length === 0) return;
     const lastAssistant = [...coachTurns]
@@ -1458,12 +1446,6 @@ function CoachView({
   // the typed reply (any combination, in that priority order). Then
   // it clears the selections so they do not stick to the next turn.
   function commitSend() {
-    if (typeof window !== 'undefined') {
-      console.log(
-        '[Thoughtbed] commitSend selectedRefinement JSON:',
-        JSON.stringify(selectedRefinement ?? null)
-      );
-    }
     const parts: string[] = [];
     if (selectedAngleLineInLatest) {
       parts.push(`I will go with: ${selectedAngleLineInLatest}`);
@@ -1714,11 +1696,10 @@ function UserTurn({
   text: string;
   refinementKey?: RefinementKey;
 }) {
-  // Phase 23 v2 slice 6.4 (2026-05-07): when the user sent with a
-  // refinement chip selected, render a small badge above the
-  // bubble so they can SEE the system caught it. If this badge
-  // does not appear after clicking a chip + Enter, the chip
-  // selection never reached the send path.
+  // Phase 23 v2 slice 6.4+6.8 (2026-05-07): a small badge above the
+  // bubble surfaces which refinement chip rode along on a user
+  // turn. Helps the eye scan the thread for which moves were
+  // explicit refinements vs free-form replies.
   const refinementLabel: Record<RefinementKey, string> = {
     sharpen_hook: 'Sharpen hook',
     add_takeaway: 'Takeaway',
@@ -1728,8 +1709,8 @@ function UserTurn({
   return (
     <div className="flex flex-col items-end gap-1">
       {refinementKey && (
-        <span className="font-mono text-[10px] tracking-[0.18em] uppercase rounded-full border border-emerald-300 bg-emerald-50 text-emerald-700 px-2 py-0.5">
-          ▸ {refinementLabel[refinementKey]}
+        <span className="font-mono text-[10px] tracking-[0.18em] uppercase rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 px-2 py-0.5">
+          {refinementLabel[refinementKey]}
         </span>
       )}
       <div className="max-w-[80%] rounded-card bg-emerald-50 border border-emerald-100 px-4 py-2.5">
