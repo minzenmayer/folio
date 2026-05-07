@@ -44,17 +44,25 @@ type Stage = 'default' | 'thinking' | 'thread' | 'coaching' | 'error';
 // Phase 23 v2 slice 4.5 (2026-05-06): each turn in the coaching
 // thread. user turns are plain text; assistant turns carry the
 // proposeFromTopic structured result so angles render inline.
+// Phase 23 v2 slice 6 (2026-05-06): refinement keys mirror
+// RefinementKind in src/lib/llm.ts so the action layer and UI
+// stay in lockstep.
+type RefinementKey =
+  | 'sharpen_hook'
+  | 'add_takeaway'
+  | 'refine_stakes'
+  | 'add_depth';
+
 type CoachTurn =
   | {
       kind: 'user';
       text: string;
-      // Phase 23 v2 slice 5.3 (2026-05-06): the user turn records
-      // which angle / sources were 'carried' along when the user
-      // sent. Lets the prior assistant turn render persistent
-      // emerald outlines on those items so the user keeps seeing
-      // what traveled with them.
       carriedAngleLine?: string;
       carriedSourceIds?: ReadonlyArray<string>;
+      // Phase 23 v2 slice 6 (2026-05-06): the refinement chip the
+      // user had selected when they sent. Drives runRefinement
+      // instead of generic proposeFromTopic on the next round.
+      refinementKey?: RefinementKey;
     }
   | { kind: 'assistant'; proposal: SparProposal };
 
@@ -1598,7 +1606,7 @@ function AssistantTurn({
   selectedAngleLine?: string | null;
   onToggleAngle?: (line: string) => void;
   selectedRefinementLabel?: string | null;
-  onRefinementToggle?: (label: string, prompt: string) => void;
+  onRefinementToggle?: (label: string, prompt: string, key: RefinementKey) => void;
   selectedSourceIds?: ReadonlySet<string>;
   onPickSource?: (source: AngleSource) => void;
   carriedSourceIds?: ReadonlySet<string>;
@@ -1753,27 +1761,35 @@ function DoneRefinements({
   onToggle,
 }: {
   selectedLabel: string | null;
-  onToggle: (label: string, prompt: string) => void;
+  onToggle: (label: string, prompt: string, key: RefinementKey) => void;
 }) {
-  const options: ReadonlyArray<{ label: string; prompt: string }> = [
+  const options: ReadonlyArray<{
+    label: string;
+    prompt: string;
+    key: RefinementKey;
+  }> = [
     {
       label: 'Sharpen the hook',
       prompt: 'Sharpen the hook. Tighten the opener so it lands harder.',
+      key: 'sharpen_hook',
     },
     {
       label: 'Add a key takeaway',
       prompt:
         'Add a key takeaway. What is the one line a reader should walk away repeating to themselves?',
+      key: 'add_takeaway',
     },
     {
       label: 'Refine why this matters',
       prompt:
         'Refine why this matters. Make the stakes specific to the reader, not generic.',
+      key: 'refine_stakes',
     },
     {
       label: 'Add depth and research',
       prompt:
         'Add depth. Pull in more from my space: relevant evidence, lines I have already written, examples.',
+      key: 'add_depth',
     },
   ];
   return (
@@ -1788,7 +1804,7 @@ function DoneRefinements({
             <button
               key={opt.label}
               type="button"
-              onClick={() => onToggle(opt.label, opt.prompt)}
+              onClick={() => onToggle(opt.label, opt.prompt, opt.key)}
               aria-pressed={selected}
               className={`font-sans text-[12.5px] rounded-full border px-3 py-1.5 transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-rule-strong ${
                 selected

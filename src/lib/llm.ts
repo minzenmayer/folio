@@ -1316,3 +1316,238 @@ Return exactly the JSON object the schema expects.`;
 
   return object.options;
 }
+
+// ─── Phase 23 v2 slice 6 · generateRefinement ────────────────────────
+//
+// Refinement-specific LLM call. Same return shape as generateProposal
+// so the existing client UI renders unchanged — we only change WHAT
+// the angles array contains based on which refinement is active.
+//
+// Refinements:
+//   sharpen_hook   — angles[].line = hook variants
+//   add_takeaway   — angles[].line = candidate kicker lines
+//   refine_stakes  — angles[].line = stakes paragraphs
+//   add_depth      — angles[].line = "depth you could pull in" notes;
+//                    sourceCitations point at the retrieval items
+//                    (your space + Tavily external) that fed each note
+
+export type RefinementKind =
+  | 'sharpen_hook'
+  | 'add_takeaway'
+  | 'refine_stakes'
+  | 'add_depth';
+
+const REFINEMENT_INSTRUCTIONS: Record<RefinementKind, string> = {
+  sharpen_hook: `You are SHARPENING THE HOOK. The user already has a working topic and a working angle. Your job: return THREE alternative opening lines (hooks) of the same piece — not three different angles of the topic.
+
+Each angle.line is a candidate hook. Make them tight. Lead with concrete moments or specific contradictions. Avoid jargon. 6-18 words each. They must each commit to the SAME angle the user has already chosen — only the opening sentence varies.
+
+The 'outline' field: pass the existing outline through unchanged (best-guess from conversationSoFar). Do NOT reshape the body.
+
+The 'followUpQuestion' should ask the user which hook lands closest to how they would say it.`,
+
+  add_takeaway: `You are DRAFTING THE KICKER LINE. Return TWO candidate kickers (single sentences a reader walks away repeating). Each angle.line is one kicker.
+
+Kickers are not summaries. They are the line that lingers. Specific, clean, declarative. 8-22 words. The reader should be able to imagine themselves saying it on the drive home.
+
+The 'outline' field: pass the existing outline through unchanged.
+
+The 'followUpQuestion' asks which kicker fits the piece best, or whether to try a different shape.`,
+
+  refine_stakes: `You are REFRAMING THE STAKES. Return TWO candidate stakes paragraphs (each angle.line is one). Each is 2-3 sentences. Each names a specific reader behavior — what the reader keeps doing if they miss this, and what they get back if they catch it. Generic stakes are forbidden.
+
+The 'outline' field: pass the existing outline through unchanged.
+
+The 'followUpQuestion' asks the user to pick the version closer to the truth, or to make the behavior more specific.`,
+
+  add_depth: `You are SURFACING DEPTH. Return THREE TO FIVE 'depth you could pull in' notes — each angle.line is one note explaining a specific source (from the user's space or external research) and how it could deepen the piece.
+
+Each angle.sourceCitations MUST cite the retrieval index it came from. Mix user-space sources (when present) with external research (when present, marked 'external'). Avoid sources already surfaced earlier in the conversation.
+
+Each note should be tight: 'X said Y, which sharpens the [aspect] of your piece' — 1-2 sentences. Not a book report.
+
+The 'outline' field: pass the existing outline through unchanged.
+
+The 'followUpQuestion' asks which depth would tighten the piece most.`,
+};
+
+export async function generateRefinement({
+  refinement,
+  topic,
+  conversationSoFar,
+  platformHint,
+  voiceProfile,
+  retrieval,
+}: {
+  refinement: RefinementKind;
+  topic: string;
+  conversationSoFar?: string;
+  platformHint?: 'newsletter' | 'linkedin';
+  voiceProfile?: {
+    longform?: ProposalVoiceProfile;
+    linkedin?: ProposalVoiceProfile;
+  };
+  retrieval: ProposalRetrievalItem[];
+}): Promise<ProposalResult> {
+  const trimmedTopic = topic.slice(0, 1000);
+  const trimmedConvo = conversationSoFar?.slice(0, 4000);
+
+  const longform = retrieval.filter((h) => h.bucket === 'voice_longform');
+  const shortform = retrieval.filter((h) => h.bucket === 'voice_shortform');
+  const knowledge = retrieval.filter((h) => h.bucket === 'knowledge');
+
+  function renderBlock(items: ProposalRetrievalItem[]): string {
+    if (items.length === 0) return '(empty)';
+    return items
+      .map((h) => {
+        const body = (h.body ?? '').slice(0, PROPOSAL_HIT_BODY_MAX).trim();
+        const head = h.title ? `${h.label}: "${h.title}"` : h.label;
+        return body.length > 0
+          ? `[${h.index}] (${head}) ${body}`
+          : `[${h.index}] (${head})`;
+      })
+      .join('\n\n');
+  }
+
+  const voiceProfileBlock = (() => {
+    if (!voiceProfile)
+      return '(no voice profile — read the voice bucket samples for how the user writes)';
+    const parts: string[] = [];
+    if (voiceProfile.longform) {
+      parts.push(
+        `LONGFORM voice:
+  summary: ${voiceProfile.longform.summary ?? '—'}
+  attributes: ${(voiceProfile.longform.attributes ?? []).join('; ') || '—'}
+  avoid: ${(voiceProfile.longform.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    if (voiceProfile.linkedin) {
+      parts.push(
+        `LINKEDIN voice:
+  summary: ${voiceProfile.linkedin.summary ?? '—'}
+  attributes: ${(voiceProfile.linkedin.attributes ?? []).join('; ') || '—'}
+  avoid: ${(voiceProfile.linkedin.thingsToAvoid ?? []).join('; ') || '—'}`
+      );
+    }
+    return parts.length > 0
+      ? parts.join('\n\n')
+      : '(profile present but empty)';
+  })();
+
+  const platformLine = platformHint
+    ? `Platform: ${platformHint}.`
+    : 'Platform: not yet locked.';
+
+  const conversationBlock = trimmedConvo
+    ? `
+
+<conversation_so_far>
+${trimmedConvo}
+</conversation_so_far>
+
+The user has already been sparring with you on this topic. Read the conversation. Your refinement should advance from where they are.`
+    : '';
+
+  const outputSchema = z.object({
+    retrievalSummary: z
+      .string()
+      .max(1200)
+      .describe(
+        "One sentence reflecting what's in the retrieval that's relevant to this refinement. Direct, observational. No 'I notice', no 'It seems'."
+      ),
+    platformGuess: z
+      .enum(['newsletter', 'linkedin', 'unknown'])
+      .describe(
+        'Pass through the platformHint if given; otherwise leave unknown.'
+      ),
+    angles: z
+      .array(
+        z.object({
+          line: z
+            .string()
+            .min(1)
+            .max(800)
+            .describe(
+              'A single refinement output. Shape depends on refinement type — see instructions.'
+            ),
+          sourceCitations: z
+            .array(z.number().int().min(1))
+            .max(12)
+            .default([])
+            .describe(
+              'Indices [n] from the retrieval blocks above that fed this output.'
+            ),
+        })
+      )
+      .min(1)
+      .max(6),
+    hook: z.string().max(140).nullable().default(null),
+    outline: z
+      .array(
+        z.object({
+          beat: z.string().min(1).max(600),
+        })
+      )
+      .min(0)
+      .max(8)
+      .describe(
+        'Pass the existing outline through unchanged. If none yet, return empty.'
+      ),
+    followUpQuestion: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe(
+        'One question that fits the refinement type. See instructions.'
+      ),
+  });
+
+  const refinementBlock = REFINEMENT_INSTRUCTIONS[refinement];
+
+  const prompt = `You are a sparring writing partner inside Thoughtbed. The user has been working through a piece and has now asked you to perform a specific refinement.
+
+<refinement_kind>${refinement}</refinement_kind>
+
+<refinement_instructions>
+${refinementBlock}
+</refinement_instructions>
+
+<topic>
+${trimmedTopic}
+</topic>${conversationBlock}
+
+<voice_profile>
+${voiceProfileBlock}
+</voice_profile>
+
+${platformLine}
+
+The retrieval blocks below are split by source. Use them per the refinement instructions.
+
+<voice_longform>
+${renderBlock(longform)}
+</voice_longform>
+
+<voice_shortform>
+${renderBlock(shortform)}
+</voice_shortform>
+
+<knowledge>
+${renderBlock(knowledge)}
+</knowledge>
+
+Return strictly the JSON schema. Match the angle count specified in the instructions.`;
+
+  const model =
+    process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
+
+  const { object } = await generateObject({
+    model: anthropic(model as any),
+    schema: outputSchema,
+    prompt,
+    maxRetries: 1,
+    temperature: 0.6,
+  });
+
+  return object as ProposalResult;
+}
