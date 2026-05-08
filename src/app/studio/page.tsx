@@ -142,7 +142,7 @@ export default async function StudioHome({
 
   return (
     <section>
-      <div className="max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
+      <div className="tb-studio-home-container max-w-[800px] mx-auto px-6 md:px-8 py-12 md:py-16">
         {/* Greeting — hides on chat-active stages (Phase 23 v2 slice 4.6) */}
         <div className="mb-8 tb-default-extras">
           <p className="font-sans text-[16px] text-ink-soft mb-1">

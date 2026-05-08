@@ -154,3 +154,14 @@ body.tb-coach-mode .tb-studio-sidebar {
 body.tb-chat-active .tb-default-extras {
   display: none !important;
 }
+
+/* Phase 24 slice 1 (2026-05-07): when the homepage morphs into the
+ * Writing × Beside surface, the centered max-w-[800px] container in
+ * studio/page.tsx would clip the three-zone layout (toolbar / editor /
+ * thought bed). HomeComposer toggles tb-beside-active on body when
+ * stage === 'beside'; this rule drops the container's max-width and
+ * padding so BesideShell can fill the viewport. */
+body.tb-beside-active .tb-studio-home-container {
+  max-width: none !important;
+  padding: 0 !important;
+}

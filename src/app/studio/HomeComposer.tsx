@@ -39,13 +39,18 @@ import {
 import { chatSessionTitleFromTopic } from './chatSessionTitle';
 import { useRouter } from 'next/navigation';
 import { type SimilarKind } from '@/lib/retrieval-kinds';
+import { BesideShell } from './beside/BesideShell';
+import { type Platform } from './page/usePlatform';
 
 type Mode = 'with-assistant' | 'beside' | 'self-driving';
 type Path = 'writing' | 'ideation';
 // Phase 23 v2 slice 4 (2026-05-06): the homepage transitions through
 // these stages on a Writing × With-assistant submit. Other path × mode
 // combinations stay in 'default' for now and surface a placeholder.
-type Stage = 'default' | 'thinking' | 'thread' | 'coaching' | 'error';
+// Phase 24 slice 1 (2026-05-07): 'beside' is the Writing × Beside
+// surface morph. Submit on that combination jumps the page state
+// straight to 'beside' and renders <BesideShell>.
+type Stage = 'default' | 'thinking' | 'thread' | 'coaching' | 'error' | 'beside';
 
 // Phase 23 v2 slice 4.5 (2026-05-06): each turn in the coaching
 // thread. user turns are plain text; assistant turns carry the
@@ -273,6 +278,12 @@ export function HomeComposer({
     initialSession?.id ?? null
   );
 
+  // Phase 24 slice 1 (2026-05-07): the platform Beside opens with,
+  // inferred from the topic at submit time. Stashed so re-renders
+  // don't keep re-running inferPlatformHint.
+  const [besidePlatform, setBesidePlatform] =
+    useState<Platform | null>(null);
+
   // Phase 23 v2 slice 5.2 (2026-05-06): the angles page (ThreadView)
   // also supports the expand-pill modal + 'bring this with me'
   // selection. State lives at this level so the Continue → handoff
@@ -303,9 +314,15 @@ export function HomeComposer({
     else body.classList.remove('tb-coach-mode');
     if (stage !== 'default') body.classList.add('tb-chat-active');
     else body.classList.remove('tb-chat-active');
+    // Phase 24 slice 1 (2026-05-07): tb-beside-active drops the
+    // homepage container's max-width so BesideShell's three-zone
+    // layout fills the viewport.
+    if (stage === 'beside') body.classList.add('tb-beside-active');
+    else body.classList.remove('tb-beside-active');
     return () => {
       body.classList.remove('tb-coach-mode');
       body.classList.remove('tb-chat-active');
+      body.classList.remove('tb-beside-active');
     };
   }, [stage]);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
@@ -396,6 +413,19 @@ export function HomeComposer({
       return;
     }
 
+    // Phase 24 slice 1 (2026-05-07): Writing × Beside dispatch.
+    // Stash topic + inferred platform, flip to the 'beside' stage,
+    // and let <BesideShell /> take over rendering.
+    if (path === 'writing' && mode === 'beside') {
+      setSubmittedTopic(trimmed);
+      setErrorMsg(null);
+      setText('');
+      const hint = inferPlatformHint(trimmed) ?? 'note';
+      setBesidePlatform(hint);
+      setStage('beside');
+      return;
+    }
+
     const pathLabel = path ?? 'default';
     setPlaceholderResult(
       `Slice 1 — would launch ${pathLabel} × ${mode}. Slices 5-7 wire the other combinations.`
@@ -414,6 +444,7 @@ export function HomeComposer({
     setThreadSelectedSourceIds(new Set());
     setThreadModalSource(null);
     setChatSessionId(null);
+    setBesidePlatform(null);
     // Drop ?chat=<id> from the URL so a fresh entry does not
     // accidentally look like a resume.
     if (typeof window !== 'undefined') {
@@ -635,6 +666,16 @@ export function HomeComposer({
   }
 
   const placeholder = PATH_PLACEHOLDER[path ?? 'default'];
+
+  if (stage === 'beside') {
+    return (
+      <BesideShell
+        topic={submittedTopic}
+        initialPlatform={besidePlatform ?? 'note'}
+        onExit={startOver}
+      />
+    );
+  }
 
   if (stage === 'thinking') {
     return (
